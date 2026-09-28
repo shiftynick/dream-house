@@ -40,7 +40,15 @@ export class ProjectPersistence {
   edit(action: ProjectAction) {
     const proposed = typeof action === 'function' ? action(this.project) : action;
     if (proposed === this.project) return false;
-    this.project = proposed ? { ...proposed, revision: this.revision } : null;
+    this.project = proposed
+      ? {
+          ...proposed,
+          revision: this.revision,
+          // Importing a document edits the active house; switching is acceptPersisted only.
+          projectId: this.project?.projectId ?? proposed.projectId,
+          projectName: this.project?.projectName ?? proposed.projectName,
+        }
+      : null;
     this.changed++;
     this.publish(this.state === 'conflict' ? 'conflict' : 'saving');
     return true;
@@ -66,6 +74,10 @@ export class ProjectPersistence {
           const snapshot = { ...this.project, revision: this.revision };
           this.publish('saving');
           const stored = documentSchema.parse(await this.write(snapshot));
+          if (snapshot.projectId && stored.projectId !== snapshot.projectId)
+            throw new Error(
+              'The saved response belongs to a different house. Reload before continuing.',
+            );
           this.revision = stored.revision;
           this.acknowledged = generation;
           // A response from an earlier edit must never replace a newer local edit.

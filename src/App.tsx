@@ -40,6 +40,18 @@ import {
 } from 'lucide-react';
 import { api, ApiError, type Status } from './api';
 import { useProject } from './useProject';
+import Modal from './Modal';
+import ProjectChooser from './ProjectChooser';
+import { useRenderBridge } from './useRenderBridge';
+import RenderCapture from './RenderCapture';
+import VisualAlternatives from './VisualAlternatives';
+import { useVisualAlternatives } from './useVisualAlternatives';
+import {
+  selectionLabel,
+  surfacePalette,
+  validSelection,
+  type DesignSelection,
+} from '../shared/selection';
 import { useVoice } from './useVoice';
 import SceneView, { type CameraContext, type Light, type Quality, type View } from './SceneView';
 import { DEFAULT_MODELS, DEFAULT_SPEECH_VOICE } from '../shared/connections';
@@ -49,7 +61,6 @@ import {
   area,
   documentSchema,
   editProject,
-  emptyScene,
   makeRoom,
   palettes,
   redo,
@@ -57,6 +68,7 @@ import {
   undo,
   validateScene,
   type DesignRequirement,
+  type Project,
   type Room,
   type Scene,
 } from '../shared/model';
@@ -68,19 +80,6 @@ type RunProgress = Pick<RunStatus, 'message' | 'status'> & {
   preview?: Scene | null;
 };
 
-function captureViewport(): string | undefined {
-  const canvas = document.querySelector<HTMLCanvasElement>('.viewport canvas');
-  if (!canvas?.width || !canvas.height) return;
-  const thumbnail = document.createElement('canvas');
-  const scale = Math.min(1, 640 / Math.max(canvas.width, canvas.height));
-  thumbnail.width = Math.round(canvas.width * scale);
-  thumbnail.height = Math.round(canvas.height * scale);
-  const context = thumbnail.getContext('2d');
-  if (!context) return;
-  context.drawImage(canvas, 0, 0, thumbnail.width, thumbnail.height);
-  const image = thumbnail.toDataURL('image/jpeg', 0.72);
-  return image.length <= 1_000_000 ? image : undefined;
-}
 const qualityNames: Record<Quality, string> = {
   live: 'Live',
   refined: 'Light study',
@@ -110,78 +109,6 @@ function IconButton({
     >
       {children}
     </button>
-  );
-}
-function Modal({
-  title,
-  subtitle,
-  onClose,
-  children,
-  wide = false,
-}: {
-  title: string;
-  subtitle: string;
-  onClose: () => void;
-  children: ReactNode;
-  wide?: boolean;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const previous = document.activeElement as HTMLElement | null;
-    ref.current?.focus();
-    const key = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-      if (e.key === 'Tab') {
-        const els = Array.from(
-          ref.current?.querySelectorAll<HTMLElement>(
-            'button:not(:disabled),input,select,textarea,[tabindex="0"]',
-          ) || [],
-        );
-        const first = els[0],
-          last = els.at(-1);
-        if (e.shiftKey && document.activeElement === first) {
-          e.preventDefault();
-          last?.focus();
-        } else if (!e.shiftKey && document.activeElement === last) {
-          e.preventDefault();
-          first?.focus();
-        }
-      }
-    };
-    document.addEventListener('keydown', key);
-    return () => {
-      document.removeEventListener('keydown', key);
-      previous?.focus();
-    };
-  }, [onClose]);
-  return (
-    <div
-      className="modal-backdrop"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div
-        className={`modal ${wide ? 'wide' : ''}`}
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        tabIndex={-1}
-        ref={ref}
-      >
-        <div className="modal-header">
-          <div>
-            <span className="eyebrow">TERRAIN STUDIO</span>
-            <h2>{title}</h2>
-            <p>{subtitle}</p>
-          </div>
-          <IconButton label="Close dialog" onClick={onClose}>
-            <X size={19} />
-          </IconButton>
-        </div>
-        {children}
-      </div>
-    </div>
   );
 }
 function Connections({
@@ -334,13 +261,18 @@ function Connections({
 
 export default function App() {
   const [status, setStatus] = useState<Status | null>(null);
-  const [selected, setSelected] = useState<string | null>(null),
-    [quality, setQuality] = useState<Quality>('live'),
+  const [selection, setSelection] = useState<DesignSelection | null>(null);
+  const selected = selection?.roomId ?? null;
+  const setSelected = useCallback(
+    (roomId: string | null) => setSelection(roomId ? { roomId, surface: 'room' } : null),
+    [],
+  );
+  const [quality, setQuality] = useState<Quality>('live'),
     [view, setView] = useState<View>('orbit'),
     [light, setLight] = useState<Light>('golden'),
     [cutaway, setCutaway] = useState(false),
     [resetKey, setResetKey] = useState(0);
-  const [modal, setModal] = useState<'connections' | 'versions' | 'help' | null>(null),
+  const [modal, setModal] = useState<'connections' | 'versions' | 'projects' | 'help' | null>(null),
     [panel, setPanel] = useState<'spaces' | 'materials'>('spaces'),
     [partner, setPartner] = useState(true);
   const [input, setInput] = useState(''),
@@ -358,11 +290,27 @@ export default function App() {
     audioUrl = useRef<string | null>(null),
     speechRun = useRef(0),
     busyRef = useRef(false),
+    lockedRef = useRef(true),
     runIdRef = useRef<string | null>(null),
     cancelledRef = useRef(false);
   const [runProgress, setRunProgress] = useState<RunProgress | null>(null);
   const [lastResult, setLastResult] = useState<DesignResult | null>(null);
-  const [includeView, setIncludeView] = useState(false);
+  const previousAlternativeError = useRef('');
+  const [allowVisualReview, setAllowVisualReview] = useState(() => {
+    try {
+      return localStorage.getItem('terrain.visualReview') !== 'off';
+    } catch {
+      return true;
+    }
+  });
+  const renderBridge = useRenderBridge();
+  useEffect(() => {
+    try {
+      localStorage.setItem('terrain.visualReview', allowVisualReview ? 'on' : 'off');
+    } catch {
+      /* Preference still applies for this session. */
+    }
+  }, [allowVisualReview]);
   const cameraRef = useRef<CameraContext | undefined>(undefined);
   const onCameraChange = useCallback((camera: CameraContext) => {
     cameraRef.current = camera;
@@ -392,6 +340,9 @@ export default function App() {
   useEffect(() => {
     chatEnd.current?.scrollIntoView({ behavior: 'smooth' });
   }, [project?.messages.length, busy]);
+  useEffect(() => {
+    if (project && selection && !validSelection(project.scene, selection)) setSelection(null);
+  }, [project, selection]);
   const stopSpeech = useCallback(() => {
     speechRun.current++;
     window.speechSynthesis?.cancel();
@@ -440,6 +391,44 @@ export default function App() {
     },
     [speech, notify, refreshStatus, stopSpeech],
   );
+  const alternativeModel = useVisualAlternatives({
+    flush,
+    acceptPersisted,
+    renderClientId: renderBridge.clientId,
+    context: {
+      selectedRoomId: selected,
+      selection: selection ?? undefined,
+      view,
+      allowVisualReview,
+      renderClientId: renderBridge.clientId ?? undefined,
+      ...(view !== 'plan' && cameraRef.current ? { camera: cameraRef.current } : {}),
+    },
+    onBusy: (value) => {
+      busyRef.current = value;
+      setBusy(value);
+      if (value) stopSpeech();
+    },
+    onConflict: markConflict,
+    onCommitted: () => {
+      setSelection(null);
+      setCompareId(null);
+      setPending(null);
+      setLastResult(null);
+      setRunProgress(null);
+      setResetKey((key) => key + 1);
+      setModal(null);
+    },
+  });
+  useEffect(() => {
+    const previous = previousAlternativeError.current;
+    previousAlternativeError.current = alternativeModel.error;
+    if (!alternativeModel.error) {
+      if (previous) setError((current) => (current === previous ? '' : current));
+      return;
+    }
+    if (modal !== 'versions') notify(alternativeModel.error);
+    else setError((current) => (current === alternativeModel.error ? '' : current));
+  }, [alternativeModel.error, modal, notify]);
   const commit = useCallback(
     (scene: Scene) => {
       try {
@@ -594,6 +583,12 @@ export default function App() {
         notify('Exit comparison before asking for a change to your current house.');
         return;
       }
+      if (alternativeModel.preview) {
+        notify(
+          'Choose a direction or return to your current house before asking for another change.',
+        );
+        return;
+      }
       if (saved === 'conflict') {
         notify('Reload the saved project before asking for another design change.');
         return;
@@ -654,14 +649,17 @@ export default function App() {
           method: 'POST',
           body: JSON.stringify({
             runId: runIdRef.current,
+            projectId: latest.projectId,
             scene: latest.scene,
             messages: latest.messages,
             baseRevision: latest.revision,
             context: {
               selectedRoomId: selected,
+              selection: selection ?? undefined,
+              allowVisualReview,
+              renderClientId: renderBridge.clientId ?? undefined,
               view,
               ...(view !== 'plan' && cameraRef.current ? { camera: cameraRef.current } : {}),
-              ...(includeView && view !== 'plan' ? { image: captureViewport() } : {}),
             },
           }),
         });
@@ -725,6 +723,7 @@ export default function App() {
       status,
       pending,
       compareId,
+      alternativeModel.preview,
       saved,
       notify,
       refreshStatus,
@@ -735,7 +734,9 @@ export default function App() {
       flush,
       selected,
       view,
-      includeView,
+      selection,
+      allowVisualReview,
+      renderBridge.clientId,
       applyDraft,
       markConflict,
     ],
@@ -744,7 +745,13 @@ export default function App() {
     onText: send,
     onError: notify,
     enabled: !!status?.voiceConnected,
-    busy: busy || !!modal || !!pending || saved === 'conflict',
+    busy:
+      busy ||
+      !!modal ||
+      !!pending ||
+      !!alternativeModel.preview ||
+      !!compareId ||
+      saved === 'conflict',
   });
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
@@ -753,7 +760,9 @@ export default function App() {
         e.key.toLowerCase() === 'z' &&
         !busyRef.current &&
         !pending &&
+        !modal &&
         !compareId &&
+        !alternativeModel.preview &&
         saved !== 'conflict' &&
         !(e.target as HTMLElement).closest('input,textarea')
       ) {
@@ -764,8 +773,59 @@ export default function App() {
     };
     window.addEventListener('keydown', key);
     return () => window.removeEventListener('keydown', key);
-  }, [pending, compareId, saved, setProject]);
-  const closeModal = useCallback(() => setModal(null), []);
+  }, [pending, modal, compareId, alternativeModel.preview, saved, setProject]);
+  const closeModal = useCallback(() => {
+    if (!alternativeModel.busy) setModal(null);
+  }, [alternativeModel.busy]);
+  const changeHouse = useCallback(
+    async (action: { name: string } | { id: string }) => {
+      if (busyRef.current || pending)
+        throw new Error('Finish or discard the current proposal before switching houses.');
+      busyRef.current = true;
+      setBusy(true);
+      stopSpeech();
+      try {
+        const current = await flush();
+        if (!current?.projectId)
+          throw new Error('Reload this project before opening another house.');
+        const result = await api<{ project: Project }>(
+          'id' in action ? `projects/${encodeURIComponent(action.id)}/open` : 'projects',
+          {
+            method: 'POST',
+            body: JSON.stringify({
+              expectedProjectId: current.projectId,
+              expectedRevision: current.revision,
+              ...('name' in action ? { name: action.name } : {}),
+            }),
+          },
+        );
+        acceptPersisted(result.project);
+        setSelection(null);
+        setPending(null);
+        setCompareId(null);
+        setCompareSide('current');
+        setLastResult(null);
+        setRunProgress(null);
+        setInput('');
+        setError('');
+        setVersionName('');
+        setRequirementText('');
+        alternativeModel.clear();
+        setPanel('spaces');
+        cameraRef.current = undefined;
+        setView('orbit');
+        setResetKey((key) => key + 1);
+        setModal(null);
+      } catch (error) {
+        if (error instanceof ApiError && error.code === 'revision_conflict') markConflict();
+        throw error;
+      } finally {
+        busyRef.current = false;
+        setBusy(false);
+      }
+    },
+    [pending, stopSpeech, flush, acceptPersisted, markConflict, alternativeModel.clear],
+  );
   const download = () => {
     if (!project) return;
     const url = URL.createObjectURL(
@@ -851,12 +911,22 @@ export default function App() {
   const selectedRoom = house.rooms.find((r) => r.id === selected);
   const comparison = project.variants.find((v) => v.id === compareId);
   const displayed =
+    alternativeModel.preview?.scene ||
     pending?.scene ||
     (busy ? runProgress?.preview : null) ||
     (comparison && compareSide === 'saved' ? comparison.scene : house);
-  const locked = busy || !!pending || !!comparison || saved === 'conflict';
+  const locked =
+    busy || !!pending || !!comparison || !!alternativeModel.preview || saved === 'conflict';
+  lockedRef.current = locked;
   return (
     <div className="app-shell">
+      {renderBridge.job && (
+        <RenderCapture
+          job={renderBridge.job}
+          onComplete={renderBridge.complete}
+          onError={renderBridge.fail}
+        />
+      )}
       <header className="topbar">
         <a className="brand" href="/" aria-label="Terrain home">
           <span className="brand-mark">
@@ -868,7 +938,7 @@ export default function App() {
         </a>
         <span className="header-divider" />
         <div className="project-title">
-          <span>{house.name}</span>
+          <span>{project.projectName || house.name}</span>
           <span
             className={`save-state ${saved === 'error' || saved === 'conflict' ? 'failed' : ''}`}
           >
@@ -889,7 +959,16 @@ export default function App() {
           </span>
         </div>
         <nav className="header-actions">
-          <button className="text-button" onClick={() => setModal('versions')}>
+          <button className="text-button" disabled={locked} onClick={() => setModal('projects')}>
+            <House size={15} /> My houses
+          </button>
+          <button
+            className="text-button"
+            onClick={() => {
+              alternativeModel.setPreview(null);
+              setModal('versions');
+            }}
+          >
             <GitBranch size={15} /> Alternatives{' '}
             <span className="count">{project.variants.length}</span>
           </button>
@@ -996,6 +1075,38 @@ export default function App() {
                       </button>
                     </div>
                     <label className="field-label">
+                      Selected part
+                      <select
+                        aria-label="Selected house part"
+                        disabled={busy}
+                        value={selection?.surface || 'room'}
+                        onChange={(event) =>
+                          setSelection({
+                            roomId: selectedRoom.id,
+                            surface: event.target.value as DesignSelection['surface'],
+                          })
+                        }
+                      >
+                        <option value="room">Whole room</option>
+                        {(['north', 'south', 'east', 'west', 'floor', 'roof'] as const).map(
+                          (surface) => (
+                            <option
+                              key={surface}
+                              value={surface}
+                              disabled={
+                                surface !== 'floor' &&
+                                ['courtyard', 'terrace'].includes(selectedRoom.kind)
+                              }
+                            >
+                              {['north', 'south', 'east', 'west'].includes(surface)
+                                ? `${surface} wall`
+                                : surface}
+                            </option>
+                          ),
+                        )}
+                      </select>
+                    </label>
+                    <label className="field-label">
                       Name
                       <input
                         disabled={locked}
@@ -1065,13 +1176,31 @@ export default function App() {
                       ))}
                     </div>
                     <label className="field-label">
-                      Room material
+                      {selection?.surface === 'room'
+                        ? 'Room material'
+                        : 'Selected surface material'}
                       <select
                         disabled={locked}
-                        value={selectedRoom.palette ?? house.palette}
-                        onChange={(event) =>
-                          mutateRoom({ palette: event.target.value as Room['palette'] })
-                        }
+                        value={surfacePalette(house, selectedRoom, selection?.surface || 'room')}
+                        onChange={(event) => {
+                          if (!selection || selection.surface === 'room')
+                            mutateRoom({ palette: event.target.value as Room['palette'] });
+                          else {
+                            const result = executeCommands(house, [
+                              {
+                                type: 'set_surface_material',
+                                roomId: selectedRoom.id,
+                                surface: selection.surface,
+                                palette: event.target.value,
+                              },
+                            ]);
+                            if (!result.applied) {
+                              notify(result.issues.map((issue) => issue.message).join(' '));
+                              return;
+                            }
+                            commit(result.scene);
+                          }
+                        }}
                       >
                         {Object.entries(palettes).map(([id, palette]) => (
                           <option key={id} value={id}>
@@ -1383,6 +1512,8 @@ export default function App() {
               light={light}
               cutaway={cutaway}
               selected={selected}
+              selection={selection}
+              onSelectSurface={setSelection}
               onSelect={setSelected}
               onRenderStatus={setRenderStatus}
               onCameraChange={onCameraChange}
@@ -1485,7 +1616,13 @@ export default function App() {
             {busy && (
               <div className="thinking-overlay">
                 <span className="thinking-orb" />
-                <span>{runProgress?.message || 'Finding the shape of your idea…'}</span>
+                <span>
+                  {alternativeModel.busy === 'generating'
+                    ? 'Exploring and rendering your alternatives…'
+                    : alternativeModel.busy === 'choosing'
+                      ? 'Keeping your chosen direction…'
+                      : runProgress?.message || 'Finding the shape of your idea…'}
+                </span>
                 {runIdRef.current && (
                   <button
                     className="text-button"
@@ -1510,6 +1647,41 @@ export default function App() {
                   onClick={() => void keepDraft()}
                 >
                   <Check size={14} /> Keep this
+                </button>
+              </div>
+            )}
+            {alternativeModel.preview && (
+              <div className="proposal-bar alternative-preview-bar">
+                <Eye size={16} />
+                <span>Exploring {alternativeModel.preview.name}</span>
+                <button
+                  className="text-button"
+                  disabled={busy}
+                  onClick={() => {
+                    alternativeModel.setPreview(null);
+                    setModal('versions');
+                  }}
+                >
+                  All choices
+                </button>
+                <button
+                  className="text-button"
+                  disabled={busy}
+                  onClick={() => alternativeModel.setPreview(null)}
+                >
+                  Current house
+                </button>
+                <button
+                  className="primary small"
+                  disabled={busy || saved === 'conflict'}
+                  onClick={() =>
+                    void alternativeModel.choose(
+                      alternativeModel.preview!.id,
+                      alternativeModel.preference,
+                    )
+                  }
+                >
+                  <Check size={13} /> Keep this
                 </button>
               </div>
             )}
@@ -1684,7 +1856,11 @@ export default function App() {
                     <Sparkles size={13} />
                   </span>
                   <div className="run-progress" aria-live="polite">
-                    <span>{runProgress?.message || 'Working on your design…'}</span>
+                    <span>
+                      {alternativeModel.busy
+                        ? 'Working on your visual alternatives…'
+                        : runProgress?.message || 'Working on your design…'}
+                    </span>
                     <div className="thinking-dots">
                       <i />
                       <i />
@@ -1716,7 +1892,7 @@ export default function App() {
                   ref={inputRef}
                   placeholder="Tell me what you’re imagining…"
                   value={input}
-                  disabled={busy || !!pending || saved === 'conflict'}
+                  disabled={locked}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
@@ -1731,9 +1907,7 @@ export default function App() {
                     type="button"
                     aria-label="Hold to talk"
                     className={`mic-button ${voice.state === 'recording' ? 'recording' : ''}`}
-                    disabled={
-                      busy || !!pending || saved === 'conflict' || voice.state === 'transcribing'
-                    }
+                    disabled={locked || voice.state === 'transcribing'}
                     onPointerDown={(e) => {
                       e.preventDefault();
                       e.currentTarget.setPointerCapture(e.pointerId);
@@ -1769,7 +1943,7 @@ export default function App() {
                   <button
                     className="send-button"
                     aria-label="Send description"
-                    disabled={!input.trim() || busy || !!pending || saved === 'conflict'}
+                    disabled={!input.trim() || locked}
                   >
                     {busy ? <LoaderCircle className="spin" size={15} /> : <ArrowRight size={17} />}
                   </button>
@@ -1806,15 +1980,28 @@ export default function App() {
               <label className="view-context-control">
                 <input
                   type="checkbox"
-                  checked={includeView}
+                  checked={allowVisualReview}
                   disabled={locked}
-                  onChange={(event) => setIncludeView(event.target.checked)}
+                  onChange={(event) => setAllowVisualReview(event.target.checked)}
                 />
-                Include current 3D view with my request
+                Let AI inspect rendered views
               </label>
+              <p className="visual-review-note">
+                {allowVisualReview
+                  ? 'Sends locally rendered images to the model when needed.'
+                  : 'The agent uses geometry without sending rendered images.'}
+              </p>
+              {allowVisualReview && renderBridge.state === 'unavailable' && (
+                <p className="visual-review-note warning">Local visual review is reconnecting…</p>
+              )}
               {selectedRoom && (
                 <p className="selected-context">
-                  <Square size={11} /> Referring to {selectedRoom.name}
+                  <Square size={11} /> Referring to {selectionLabel(house, selection)}
+                </p>
+              )}
+              {!selectedRoom && house.rooms.length > 0 && (
+                <p className="selected-context">
+                  Point to a room, wall, floor, or roof, then hold Space to speak.
                 </p>
               )}
             </div>
@@ -1862,6 +2049,14 @@ export default function App() {
           onError={notify}
         />
       )}
+      {modal === 'projects' && (
+        <ProjectChooser
+          busy={busy}
+          onClose={closeModal}
+          onCreate={(name) => changeHouse({ name })}
+          onOpen={(id) => changeHouse({ id })}
+        />
+      )}
       {modal === 'versions' && (
         <Modal
           title="Room for another possibility."
@@ -1869,6 +2064,21 @@ export default function App() {
           onClose={closeModal}
           wide
         >
+          <VisualAlternatives
+            model={alternativeModel}
+            disabled={
+              busy || !!pending || !!comparison || saved === 'conflict' || !status?.modelConnected
+            }
+            renderReady={!!renderBridge.clientId && renderBridge.state !== 'unavailable'}
+            onPreview={() => {
+              setCompareId(null);
+              setView('orbit');
+              setModal(null);
+            }}
+          />
+          <div className="section-title saved-alternatives-heading">
+            <span>SAVED ALTERNATIVES</span>
+          </div>
           <form
             className="version-form"
             onSubmit={(e) => {
@@ -1901,7 +2111,11 @@ export default function App() {
                     className="version-thumbnail"
                     style={{ background: palettes[v.scene.palette].wall }}
                   >
-                    <House size={28} strokeWidth={1} />
+                    {v.thumbnail ? (
+                      <img src={v.thumbnail} alt={v.name} />
+                    ) : (
+                      <House size={28} strokeWidth={1} />
+                    )}
                   </div>
                   <div className="version-info">
                     <h3>{v.name}</h3>
@@ -1952,9 +2166,7 @@ export default function App() {
               className="text-button"
               disabled={locked}
               onClick={() => {
-                commit(structuredClone(emptyScene));
-                setSelected(null);
-                closeModal();
+                setModal('projects');
               }}
             >
               <Plus size={15} /> Start a new house
@@ -1969,9 +2181,26 @@ export default function App() {
                 accept=".json"
                 onChange={async (e) => {
                   const file = e.target.files?.[0];
-                  if (!file || locked) return;
+                  e.currentTarget.value = '';
+                  const startingProject = projectRef.current;
+                  if (!file || locked || busyRef.current || !startingProject) return;
                   try {
-                    const incoming = documentSchema.parse(JSON.parse(await file.text()));
+                    const contents = await file.text();
+                    const current = projectRef.current;
+                    if (
+                      !current ||
+                      current.projectId !== startingProject.projectId ||
+                      current.revision !== startingProject.revision ||
+                      current.scene !== startingProject.scene ||
+                      busyRef.current ||
+                      lockedRef.current
+                    ) {
+                      notify(
+                        'Import cancelled because the house or editing state changed while the file was loading. Choose the file again to import it into the current house.',
+                      );
+                      return;
+                    }
+                    const incoming = documentSchema.parse(JSON.parse(contents));
                     validateScene(incoming.scene);
                     setProject((p) =>
                       p

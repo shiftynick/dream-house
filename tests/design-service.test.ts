@@ -28,14 +28,14 @@ const cedar = [{ type: 'set_material', palette: 'cedar' }];
 
 test('multiple draft operations do not touch storage and commit as one undoable edit', async (t) => {
   const { directory, store, service, project } = await fixture(t);
-  const originalFile = await readFile(path.join(directory, 'project.json'), 'utf8');
+  const originalFile = await readFile(path.join(directory, 'workspace.json'), 'utf8');
   const entry = await service.create(project.revision, project.scene);
   service.apply(entry.id, cedar);
   service.apply(entry.id, [
     { type: 'update_room', roomId: 'kitchen', patch: { name: 'Garden kitchen' } },
   ]);
   assert.deepEqual(await store.read(), project);
-  assert.equal(await readFile(path.join(directory, 'project.json'), 'utf8'), originalFile);
+  assert.equal(await readFile(path.join(directory, 'workspace.json'), 'utf8'), originalFile);
   assert.equal(service.describe(entry.id).ready, true);
   const result = await service.commit(entry.id, project.revision, false);
   assert.equal(result.project.scene.palette, 'cedar');

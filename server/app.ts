@@ -15,6 +15,8 @@ import {
 import { ProjectStore, RevisionConflict } from './storage.ts';
 import { runAgent, AgentRunError, type AgentModel } from './agent.ts';
 import { DesignService, DesignServiceError } from './design-service.ts';
+import { AlternativeService } from './alternative-service.ts';
+import { RenderBroker, RenderUnavailable } from './render-service.ts';
 import { ConnectionStore, resolveConnections } from './connections.ts';
 import {
   GatewayError,
@@ -27,6 +29,11 @@ type Usage = { day: string; requests: number; modelCost: number };
 type Run = { state: RunStatus; controller: AbortController; createdAt: number };
 const revisionSchema = z.number().int().nonnegative();
 const runIdSchema = z.string().uuid();
+const projectIdSchema = z
+  .string()
+  .min(1)
+  .max(80)
+  .regex(/^[A-Za-z0-9_-]+$/);
 
 export async function createApplication(options: {
   directory: string;
@@ -37,6 +44,9 @@ export async function createApplication(options: {
   const { directory } = options;
   const store = new ProjectStore(directory);
   const designs = new DesignService(store);
+  const alternatives = new AlternativeService(store);
+  const renders = new RenderBroker();
+  let agentBusy = false;
   const connections = new ConnectionStore(directory);
   await connections.load();
   const gateway = () => resolveConnections(connections.get(), options.env || process.env);
@@ -93,7 +103,7 @@ export async function createApplication(options: {
     res.setHeader('Cache-Control', 'no-store');
     next();
   });
-  app.use(express.json({ limit: '8mb' }));
+  app.use(express.json({ limit: '24mb' }));
   app.get('/api/status', (_req, res) => {
     resetDay();
     const config = gateway();
@@ -115,8 +125,48 @@ export async function createApplication(options: {
     res.json({ ok: true });
   });
   app.get('/api/project', async (_req, res) => res.json(await store.read()));
+  app.get('/api/projects', async (_req, res) => res.json(await store.list()));
+  app.post('/api/projects', async (req, res) => {
+    if (agentBusy)
+      throw new DesignServiceError(
+        'Finish or cancel the current design before opening another house.',
+        409,
+      );
+    const input = z
+      .object({
+        name: z.string().trim().min(1).max(100),
+        expectedProjectId: projectIdSchema,
+        expectedRevision: revisionSchema,
+      })
+      .parse(req.body);
+    res.json({
+      project: await store.createProject(
+        input.name,
+        input.expectedProjectId,
+        input.expectedRevision,
+      ),
+    });
+  });
+  app.post('/api/projects/:id/open', async (req, res) => {
+    if (agentBusy)
+      throw new DesignServiceError(
+        'Finish or cancel the current design before opening another house.',
+        409,
+      );
+    const input = z
+      .object({ expectedProjectId: projectIdSchema, expectedRevision: revisionSchema })
+      .parse(req.body);
+    res.json({
+      project: await store.openProject(
+        projectIdSchema.parse(req.params.id),
+        input.expectedProjectId,
+        input.expectedRevision,
+      ),
+    });
+  });
   app.put('/api/project', async (req, res) => {
     const expectedRevision = revisionSchema.parse(req.body?.revision);
+    projectIdSchema.parse(req.body?.projectId);
     const project = documentSchema.parse(req.body);
     const errors = validateDesign(project.scene).filter((i) => i.severity === 'error');
     if (errors.length)
@@ -126,10 +176,30 @@ export async function createApplication(options: {
     res.json({ ok: true, project: await store.save(project, expectedRevision) });
   });
 
+  app.post('/api/render/clients', (_req, res) => res.json(renders.register()));
+  app.delete('/api/render/clients/:id', (req, res) => {
+    renders.disconnect(req.params.id);
+    res.json({ ok: true });
+  });
+  app.get('/api/render/jobs', (req, res) =>
+    res.json(renders.poll(runIdSchema.parse(req.query.clientId))),
+  );
+  app.post('/api/render/jobs/:id/result', (req, res) => {
+    const input = z
+      .object({
+        clientId: runIdSchema,
+        result: z.unknown().optional(),
+        error: z.string().min(1).max(600).optional(),
+      })
+      .parse(req.body);
+    renders.submit(req.params.id, input.clientId, input.result, input.error);
+    res.json({ ok: true });
+  });
+
   // Public control surface: the same service is reusable by a future MCP adapter.
   app.get('/api/design/capabilities', (_req, res) =>
     res.json({
-      version: 1,
+      version: 2,
       operationSchema: z.toJSONSchema(commandsSchema, { target: 'draft-7' }),
       transactions: 'create → apply operations → inspect → commit with expectedRevision',
       confirmationRequiredFor: ['room deletion', 'changed requirements', 'major area changes'],
@@ -140,8 +210,10 @@ export async function createApplication(options: {
     res.json({ revision: project.revision, inspection: inspectDesign(project.scene) });
   });
   app.post('/api/design/drafts', async (req, res) => {
-    const { baseRevision } = z.object({ baseRevision: revisionSchema }).parse(req.body);
-    const draft = await designs.create(baseRevision);
+    const { baseRevision, projectId } = z
+      .object({ baseRevision: revisionSchema, projectId: projectIdSchema })
+      .parse(req.body);
+    const draft = await designs.create(baseRevision, undefined, projectId);
     res.json(designs.describe(draft.id));
   });
   app.get('/api/design/drafts/:id', (req, res) => res.json(designs.describe(req.params.id)));
@@ -161,7 +233,6 @@ export async function createApplication(options: {
   });
 
   const runs = new Map<string, Run>();
-  let agentBusy = false;
   app.get('/api/agent/runs/:id', (req, res) => {
     const run = runs.get(req.params.id);
     if (!run) return res.status(404).json({ error: 'This design run is not available.' });
@@ -191,6 +262,7 @@ export async function createApplication(options: {
         .object({
           runId: runIdSchema.optional(),
           baseRevision: revisionSchema.optional(),
+          projectId: projectIdSchema.optional(),
           scene: sceneSchema,
           messages: z.array(messageSchema).min(1).max(100),
           context: agentContextSchema.optional(),
@@ -204,9 +276,15 @@ export async function createApplication(options: {
           409,
         );
       agentBusy = true;
+      if (input.context?.allowVisualReview && !renders.available(input.context.renderClientId))
+        throw new RenderUnavailable();
       const entry = input.previewOnly
         ? undefined
-        : await designs.create(revisionSchema.parse(input.baseRevision), input.scene);
+        : await designs.create(
+            revisionSchema.parse(input.baseRevision),
+            input.scene,
+            projectIdSchema.parse(input.projectId),
+          );
       draftId = entry?.id;
       const draft = entry?.draft || new DesignDraft(input.scene);
       run = {
@@ -242,6 +320,9 @@ export async function createApplication(options: {
         context: input.context,
         draft,
         client: options.modelClient,
+        render: input.context?.allowVisualReview
+          ? renders.provider(input.context.renderClientId!)
+          : undefined,
         signal: AbortSignal.any([run.controller.signal, AbortSignal.timeout(300_000)]),
         beforeModelCall: async () => {
           await chargeRequest();
@@ -334,6 +415,104 @@ export async function createApplication(options: {
       }
     }
   });
+  app.post('/api/alternatives/generate', async (req, res, next) => {
+    if (agentBusy)
+      return res
+        .status(409)
+        .json({ error: 'Another design request is in progress. Finish or cancel it first.' });
+    const config = gateway();
+    if (!config.key)
+      return res
+        .status(428)
+        .json({ error: 'Add a Vercel AI Gateway key to explore alternatives.' });
+    const controller = new AbortController();
+    const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(600_000)]);
+    res.on('close', () => {
+      if (!res.writableEnded) controller.abort();
+    });
+    try {
+      const input = z
+        .object({
+          projectId: projectIdSchema,
+          baseRevision: revisionSchema,
+          prompt: z.string().trim().min(1).max(2000),
+          count: z.union([z.literal(2), z.literal(3)]).default(2),
+          renderClientId: runIdSchema,
+          context: agentContextSchema.optional(),
+        })
+        .parse(req.body);
+      if (!renders.available(input.renderClientId)) throw new RenderUnavailable();
+      agentBusy = true;
+      const project = await store.read();
+      if (project.projectId !== input.projectId || project.revision !== input.baseRevision)
+        throw new RevisionConflict();
+      const result = await alternatives.generate({
+        project,
+        prompt: input.prompt,
+        count: input.count,
+        render: renders.provider(input.renderClientId),
+        signal,
+        build: async (index, previous) =>
+          runAgent({
+            key: config.key,
+            model: config.model,
+            client: options.modelClient,
+            scene: project.scene,
+            messages: [
+              ...project.messages.slice(-8),
+              {
+                id: randomUUID(),
+                role: 'user',
+                text: `Create visual alternative ${index + 1} of ${input.count} for this request: ${input.prompt}\nMake a concrete, visibly distinct design using the editing tools; preserve confirmed requirements and unrelated geometry. Make reasonable design assumptions. This is an unsaved option the user will review. ${previous.length ? `Other options already generated (make this one meaningfully different): ${JSON.stringify(previous.map((p) => ({ description: p.description, scene: p.scene })))}` : ''}`,
+              },
+            ],
+            context: input.context,
+            render: input.context?.allowVisualReview
+              ? renders.provider(input.renderClientId)
+              : undefined,
+            signal,
+            beforeModelCall: chargeRequest,
+            onUsage: async (cost) => {
+              if (cost.cost !== null) {
+                resetDay();
+                usage.modelCost += cost.cost;
+                await persistUsage();
+              }
+            },
+          }),
+      });
+      signal.throwIfAborted();
+      res.json(result);
+    } catch (error) {
+      next(
+        controller.signal.aborted
+          ? new AgentRunError('Alternative generation cancelled. Your saved house is unchanged.')
+          : error,
+      );
+    } finally {
+      agentBusy = false;
+    }
+  });
+  app.post('/api/alternatives/choose', async (req, res) => {
+    const input = z
+      .object({
+        projectId: projectIdSchema,
+        expectedRevision: revisionSchema,
+        choiceSetId: runIdSchema,
+        optionId: runIdSchema,
+        preferenceText: z.string().max(1000).default(''),
+      })
+      .parse(req.body);
+    res.json({
+      project: await alternatives.choose(
+        input.choiceSetId,
+        input.optionId,
+        input.projectId,
+        input.expectedRevision,
+        input.preferenceText,
+      ),
+    });
+  });
   app.post(
     '/api/transcribe',
     express.raw({
@@ -396,9 +575,15 @@ export async function createApplication(options: {
               ? 422
               : error instanceof GatewayError
                 ? 502
-                : 500;
+                : error instanceof RenderUnavailable
+                  ? 409
+                  : 500;
       res.status(status).json({
-        ...(error instanceof RevisionConflict ? { code: 'revision_conflict' } : {}),
+        ...(error instanceof RevisionConflict
+          ? { code: 'revision_conflict' }
+          : error instanceof DesignServiceError && error.code
+            ? { code: error.code }
+            : {}),
         error: validation
           ? 'The request or settings were invalid. Reload the app if it was updated, or check the supplied values. Your saved house was not changed.'
           : error instanceof Error
@@ -408,5 +593,5 @@ export async function createApplication(options: {
       });
     },
   );
-  return { app, store, designs };
+  return { app, store, designs, renders, alternatives };
 }

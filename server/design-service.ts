@@ -8,6 +8,7 @@ export class DesignServiceError extends Error {
   constructor(
     message: string,
     public status = 422,
+    public code?: string,
   ) {
     super(message);
     this.name = 'DesignServiceError';
@@ -15,6 +16,7 @@ export class DesignServiceError extends Error {
 }
 export type StoredDraft = {
   id: string;
+  projectId?: string;
   baseRevision: number;
   draft: DesignDraft;
   createdAt: number;
@@ -28,11 +30,16 @@ export class DesignService {
   private drafts = new Map<string, StoredDraft>();
   private commits = new Map<string, Promise<DraftCommitResult>>();
   constructor(private store: ProjectStore) {}
-  async create(expectedRevision: number, expectedScene?: Scene): Promise<StoredDraft> {
+  async create(
+    expectedRevision: number,
+    expectedScene?: Scene,
+    expectedProjectId?: string,
+  ): Promise<StoredDraft> {
     this.prune();
     const project = await this.store.read();
     if (
       project.revision !== expectedRevision ||
+      (expectedProjectId !== undefined && project.projectId !== expectedProjectId) ||
       (expectedScene && canonicalScene(expectedScene) !== canonicalScene(project.scene))
     )
       throw new RevisionConflict();
@@ -43,6 +50,7 @@ export class DesignService {
       );
     const draft: StoredDraft = {
       id: randomUUID(),
+      projectId: project.projectId,
       baseRevision: project.revision,
       draft: new DesignDraft(project.scene),
       createdAt: Date.now(),
@@ -68,6 +76,7 @@ export class DesignService {
     return {
       id: entry.id,
       baseRevision: entry.baseRevision,
+      projectId: entry.projectId,
       scene: entry.draft.scene,
       issues: entry.draft.issues,
       changes: entry.draft.changes,
@@ -96,7 +105,9 @@ export class DesignService {
     const previous = this.commits.get(id);
     if (previous) {
       const result = await previous;
-      return { ...result, project: await this.store.read() };
+      const project = await this.store.read();
+      if (project.projectId !== result.project.projectId) throw new RevisionConflict();
+      return { ...result, project };
     }
     const entry = this.get(id);
     if (!entry.ready || entry.draft.issues.some((i) => i.severity === 'error'))
@@ -113,18 +124,22 @@ export class DesignService {
     const issues = entry.draft.issues;
     const reply = entry.reply || changes.slice(0, 6).join(' ') || 'No changes were needed.';
     const operation = this.store
-      .update(expectedRevision, (current) => {
-        if (canonicalScene(current.scene) !== canonicalScene(entry.draft.original))
-          throw new RevisionConflict();
-        const next = entry.draft.changed ? editProject(current, scene) : current;
-        return {
-          ...next,
-          messages: [
-            ...next.messages,
-            { id: `design-${id}`, role: 'assistant' as const, text: reply },
-          ].slice(-100),
-        };
-      })
+      .update(
+        expectedRevision,
+        (current) => {
+          if (canonicalScene(current.scene) !== canonicalScene(entry.draft.original))
+            throw new RevisionConflict();
+          const next = entry.draft.changed ? editProject(current, scene) : current;
+          return {
+            ...next,
+            messages: [
+              ...next.messages,
+              { id: `design-${id}`, role: 'assistant' as const, text: reply },
+            ].slice(-100),
+          };
+        },
+        entry.projectId,
+      )
       .then((project) => {
         this.drafts.delete(id);
         return { project, reply, changes, issues };

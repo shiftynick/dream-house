@@ -3,6 +3,16 @@ import { z } from 'zod';
 export const wallSchema = z.enum(['solid', 'glass', 'door', 'open']);
 export const sideSchema = z.enum(['north', 'south', 'east', 'west']);
 export const paletteSchema = z.enum(['limestone', 'cedar', 'charcoal', 'chalk']);
+export const surfaceSchema = z.enum(['north', 'south', 'east', 'west', 'floor', 'roof']);
+export const surfacePalettesSchema = z.object({
+  north: paletteSchema.optional(),
+  south: paletteSchema.optional(),
+  east: paletteSchema.optional(),
+  west: paletteSchema.optional(),
+  floor: paletteSchema.optional(),
+  roof: paletteSchema.optional(),
+});
+export type Surface = z.infer<typeof surfaceSchema>;
 export type Side = z.infer<typeof sideSchema>;
 export const roomSchema = z.object({
   id: z.string().min(1).max(60),
@@ -28,6 +38,7 @@ export const roomSchema = z.object({
   east: wallSchema,
   west: wallSchema,
   palette: paletteSchema.optional(),
+  surfacePalettes: surfacePalettesSchema.optional(),
 });
 export const stairSchema = z.object({
   id: z.string().min(1).max(60),
@@ -74,6 +85,7 @@ export const lockSnapshotSchema = z.object({
   depth: z.number(),
   height: z.number(),
   palette: paletteSchema,
+  surfacePalettes: surfacePalettesSchema.optional(),
 });
 export const requirementSchema = z.discriminatedUnion('kind', [
   z.object({
@@ -152,6 +164,11 @@ export const messageSchema = z.object({
 export type Message = z.infer<typeof messageSchema>;
 export const documentSchema = z.object({
   version: z.literal(1),
+  projectId: z
+    .string()
+    .regex(/^[a-zA-Z0-9_-]{1,80}$/)
+    .optional(),
+  projectName: z.string().min(1).max(100).optional(),
   revision: z.number().int().nonnegative().default(0),
   scene: sceneSchema,
   past: z.array(sceneSchema).max(60),
@@ -163,6 +180,14 @@ export const documentSchema = z.object({
         name: z.string().min(1).max(80),
         createdAt: z.string(),
         scene: sceneSchema,
+        thumbnail: z
+          .string()
+          .max(500_000)
+          .regex(/^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/)
+          .optional(),
+        description: z.string().max(1000).optional(),
+        source: z.enum(['saved', 'generated']).optional(),
+        intent: z.string().max(2000).optional(),
       }),
     )
     .max(30),

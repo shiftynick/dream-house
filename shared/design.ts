@@ -8,6 +8,7 @@ import {
   sceneSchema,
   sideSchema,
   stairSchema,
+  surfaceSchema,
   wallSchema,
   type Connection,
   type DesignMetadata,
@@ -15,6 +16,7 @@ import {
   type Room,
   type Scene,
   type Side,
+  type Surface,
 } from './model.ts';
 import {
   bounds,
@@ -30,6 +32,7 @@ import {
   stairEndpoints,
   volumeOverlap,
 } from './geometry.ts';
+import { inspectSpatial } from './spatial.ts';
 
 export { oppositeSide } from './geometry.ts';
 export type DesignIssue = {
@@ -131,6 +134,22 @@ export const commandSchema = z.discriminatedUnion('type', [
     .strict(),
   z
     .object({
+      type: z.literal('set_surface_material'),
+      roomId: id,
+      surface: surfaceSchema,
+      palette: paletteSchema,
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('move_wall'),
+      roomId: id,
+      side: sideSchema,
+      delta: z.number().min(-28.5).max(28.5),
+    })
+    .strict(),
+  z
+    .object({
       type: z.literal('update_site'),
       name: sceneSchema.shape.name.optional(),
       slope: sceneSchema.shape.slope.optional(),
@@ -160,6 +179,19 @@ export const commandsSchema = z.array(commandSchema).min(1).max(64);
 
 export function getDesign(scene: Scene): DesignMetadata {
   return scene.design ?? { groups: [], connections: [], stairLinks: [], requirements: [] };
+}
+
+export const surfaces: Surface[] = ['north', 'south', 'east', 'west', 'floor', 'roof'];
+export function effectiveSurfacePalettes(
+  scene: Scene,
+  room: Room,
+): Record<Surface, Scene['palette']> {
+  return Object.fromEntries(
+    surfaces.map((surface) => [
+      surface,
+      room.surfacePalettes?.[surface] ?? room.palette ?? scene.palette,
+    ]),
+  ) as Record<Surface, Scene['palette']>;
 }
 
 export function roomOpenings(scene: Scene, roomId: string, side: Side) {
@@ -734,16 +766,51 @@ function execute(scene: Scene, command: DesignCommand): DesignChange {
     }
     case 'set_material': {
       if (command.roomIds?.length) {
-        command.roomIds.forEach((id) => (roomById(scene, id).palette = command.palette));
+        command.roomIds.forEach((id) => {
+          const room = roomById(scene, id);
+          room.palette = command.palette;
+          delete room.surfacePalettes;
+        });
         changed = command.roomIds;
       } else {
         scene.palette = command.palette;
         scene.rooms.forEach((r) => {
           delete r.palette;
+          delete r.surfacePalettes;
         });
         changed = scene.rooms.map((r) => r.id);
       }
       description = `Applied the ${command.palette} material palette.`;
+      break;
+    }
+    case 'set_surface_material': {
+      const room = roomById(scene, command.roomId);
+      room.surfacePalettes = { ...room.surfacePalettes, [command.surface]: command.palette };
+      changed = [room.id];
+      description = `Changed the ${command.surface} ${['floor', 'roof'].includes(command.surface) ? 'material' : 'wall material'} of “${room.name}” to ${command.palette}.`;
+      break;
+    }
+    case 'move_wall': {
+      const room = roomById(scene, command.roomId);
+      const dimension = horizontalSide(command.side) ? 'depth' : 'width';
+      const next = room[dimension] + command.delta;
+      if (next < 1.5 || next > 30)
+        throw new CommandError(
+          'wall_move_dimensions',
+          'Moving this wall would put the room dimension outside 1.5–30 m. Use a smaller wall movement.',
+          [room.id],
+          { dimension, requested: round(next), current: room[dimension] },
+        );
+      const before = new Map(scene.rooms.map((r) => [r.id, JSON.stringify(r)]));
+      resize(scene, {
+        type: 'resize_room',
+        roomId: room.id,
+        [dimension]: next,
+        anchor: oppositeSide(command.side),
+        moveConnected: true,
+      });
+      changed = scene.rooms.filter((r) => before.get(r.id) !== JSON.stringify(r)).map((r) => r.id);
+      description = `Moved the ${command.side} wall of “${room.name}” ${Math.abs(command.delta)} m ${command.delta >= 0 ? 'outward' : 'inward'}.`;
       break;
     }
     case 'update_site':
@@ -851,6 +918,7 @@ function execute(scene: Scene, command: DesignCommand): DesignChange {
           depth: room.depth,
           height: room.height,
           palette: room.palette ?? scene.palette,
+          surfacePalettes: effectiveSurfacePalettes(scene, room),
         };
         const previous = design.requirements.find((r) => r.id === requirement.id);
         // Rewording or expanding a lock must not silently rebase already locked geometry.
@@ -867,8 +935,12 @@ function execute(scene: Scene, command: DesignCommand): DesignChange {
           }
           if (previous.properties.includes('height'))
             requirement.snapshot.height = previous.snapshot.height;
-          if (previous.properties.includes('material'))
+          if (previous.properties.includes('material')) {
             requirement.snapshot.palette = previous.snapshot.palette;
+            requirement.snapshot.surfacePalettes = structuredClone(
+              previous.snapshot.surfacePalettes,
+            );
+          }
         }
       }
       const index = design.requirements.findIndex((r) => r.id === requirement.id);
@@ -1026,7 +1098,11 @@ function requirementIssues(
           ? !close(r.width, s.width) || !close(r.depth, s.depth)
           : property === 'height'
             ? !close(r.height, s.height)
-            : (r.palette ?? scene.palette) !== s.palette,
+            : surfaces.some(
+                (surface) =>
+                  effectiveSurfacePalettes(scene, r)[surface] !==
+                  (s.surfacePalettes?.[surface] ?? s.palette),
+              ),
     );
     return changed.length
       ? [
@@ -1247,7 +1323,7 @@ export function validateDesign(scene: Scene): DesignIssue[] {
           );
       }
     }
-  return issues;
+  return [...issues, ...inspectSpatial(scene).issues];
 }
 
 export function inspectDesign(scene: Scene) {
@@ -1259,6 +1335,7 @@ export function inspectDesign(scene: Scene) {
       ...room,
       bounds: bounds(room),
       effectivePalette: room.palette ?? scene.palette,
+      effectiveSurfacePalettes: effectiveSurfacePalettes(scene, room),
       groups: getDesign(scene)
         .groups.filter((g) => g.roomIds.includes(room.id))
         .map((g) => g.id),
@@ -1272,6 +1349,7 @@ export function inspectDesign(scene: Scene) {
       fireplace: scene.fireplace,
     },
     design: getDesign(scene),
+    spatial: inspectSpatial(scene),
     connections: edges.map(([roomAId, roomBId]) => ({ roomAId, roomBId })),
     components: connectedComponents(
       scene.rooms.filter((r) => !outdoor(r)).map((r) => r.id),

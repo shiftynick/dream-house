@@ -52,6 +52,12 @@ export function describeChanges(before: Scene, after: Scene): string[] {
     )
       changes.push(`Updated the walls and openings of ${room.name}.`);
     if (old.palette !== room.palette) changes.push(`Changed the materials of ${room.name}.`);
+    for (const surface of ['north', 'south', 'east', 'west', 'floor', 'roof'] as const) {
+      if (old.surfacePalettes?.[surface] !== room.surfacePalettes?.[surface])
+        changes.push(
+          `Changed the ${surface}${['floor', 'roof'].includes(surface) ? '' : ' wall'} materials of ${room.name}.`,
+        );
+    }
   }
   for (const room of before.rooms)
     if (!after.rooms.some((r) => r.id === room.id)) changes.push(`Removed ${room.name}.`);

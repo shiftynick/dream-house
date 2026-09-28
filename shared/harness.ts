@@ -1,10 +1,14 @@
 import { z } from 'zod';
 import type { Scene, Project } from './model.ts';
 import type { DesignIssue } from './design.ts';
+import { designSelectionSchema } from './selection.ts';
 
 const vector = z.tuple([z.number().finite(), z.number().finite(), z.number().finite()]);
 export const agentContextSchema = z.object({
   selectedRoomId: z.string().max(60).nullable().optional(),
+  selection: designSelectionSchema.nullable().optional(),
+  renderClientId: z.string().uuid().optional(),
+  allowVisualReview: z.boolean().optional(),
   view: z.enum(['orbit', 'walk', 'plan']).optional(),
   camera: z.object({ position: vector, target: vector }).optional(),
   // Captured only from the local house viewport, never from the desktop.
@@ -22,6 +26,7 @@ export type RunStage =
   | 'editing'
   | 'checking'
   | 'repairing'
+  | 'rendering'
   | 'ready'
   | 'complete'
   | 'failed'
@@ -33,6 +38,7 @@ export type RunEvent = {
   tool?: string;
   issues?: DesignIssue[];
   changes?: string[];
+  render?: { view: string; sceneHash: string; roomId?: string };
 };
 export type AgentUsage = {
   inputTokens: number;

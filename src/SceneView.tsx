@@ -3,8 +3,16 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, Html } from '@react-three/drei';
 import * as THREE from 'three';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
-import { palettes, type Palette, type Room, type Scene } from '../shared/model';
-import { roomSlabs, stairFootprint, wallAxis, wallPanels, type Rect } from './renderGeometry';
+import { palettes, type Palette, type Room, type Scene, type Side } from '../shared/model';
+import {
+  roomSlabs,
+  stairFootprint,
+  wallAxis,
+  wallPanels,
+  planWallHitTarget,
+  type Rect,
+} from './renderGeometry';
+import { surfacePalette, type DesignSelection, type DesignSurface } from '../shared/selection';
 
 export type Quality = 'live' | 'refined' | 'clay' | 'wireframe';
 export type View = 'orbit' | 'walk' | 'plan';
@@ -19,7 +27,10 @@ type Props = {
   view: View;
   light: Light;
   cutaway: boolean;
+  cutawaySides?: Side[];
   selected: string | null;
+  selection?: DesignSelection | null;
+  onSelectSurface?: (selection: DesignSelection) => void;
   onSelect: (id: string | null) => void;
   onRenderStatus: (text: string) => void;
   resetKey: number;
@@ -70,12 +81,16 @@ function Box({
   material,
   rotation = 0,
   cast = true,
+  onSelect,
+  highlight = false,
 }: {
   position: [number, number, number];
   size: [number, number, number];
   material: THREE.Material;
   rotation?: number;
   cast?: boolean;
+  onSelect?: () => void;
+  highlight?: boolean;
 }) {
   return (
     <mesh
@@ -84,8 +99,28 @@ function Box({
       material={material}
       castShadow={cast}
       receiveShadow
+      onClick={
+        onSelect
+          ? (event) => {
+              event.stopPropagation();
+              onSelect();
+            }
+          : undefined
+      }
     >
       <boxGeometry args={size} />
+      {highlight && (
+        <mesh>
+          <boxGeometry args={[size[0] + 0.012, size[1] + 0.012, size[2] + 0.012]} />
+          <meshBasicMaterial
+            color="#e3a44f"
+            wireframe
+            transparent
+            opacity={0.95}
+            toneMapped={false}
+          />
+        </mesh>
+      )}
     </mesh>
   );
 }
@@ -93,8 +128,12 @@ function RoomMesh({
   house,
   room: r,
   materials: m,
+  materialSets,
+  selection,
+  onSelectSurface,
   roof,
   cutaway,
+  cutawaySides = ['south', 'east'],
   selected,
   onSelect,
   quality,
@@ -102,38 +141,69 @@ function RoomMesh({
   house: Scene;
   room: Room;
   materials: Record<string, THREE.Material>;
+  materialSets: Record<string, Record<string, THREE.Material>>;
+  selection?: DesignSelection | null;
+  onSelectSurface?: (selection: DesignSelection) => void;
   roof: Scene['roof'];
   cutaway: boolean;
+  cutawaySides?: Side[];
   selected: boolean;
   onSelect: () => void;
   quality: Quality;
 }) {
   const outdoor = ['terrace', 'courtyard'].includes(r.kind);
+  const surfaceMaterial = (surface: DesignSurface) =>
+    materialSets[surfacePalette(house, r, surface)];
+  const pick = (surface: DesignSurface) =>
+    onSelectSurface ? onSelectSurface({ roomId: r.id, surface }) : onSelect();
+  const isSelected = (surface: DesignSurface) =>
+    selection?.roomId === r.id && selection.surface === surface;
   const slabs = useMemo(() => roomSlabs(house, r), [house, r]);
-  const slab = (rect: Rect, y: number, height: number, material: THREE.Material, index: number) => (
+  const slab = (
+    rect: Rect,
+    y: number,
+    height: number,
+    material: THREE.Material,
+    index: number,
+    surface?: DesignSurface,
+  ) => (
     <Box
       key={index}
       position={[(rect.minX + rect.maxX) / 2 - r.x, y, (rect.minZ + rect.maxZ) / 2 - r.z]}
       size={[rect.maxX - rect.minX, height, rect.maxZ - rect.minZ]}
       material={material}
+      onSelect={surface ? () => pick(surface) : undefined}
+      highlight={surface ? isSelected(surface) : false}
     />
   );
   const wall = (side: 'north' | 'south' | 'east' | 'west') => {
-    if (cutaway && (side === 'south' || side === 'east')) return null;
+    if (cutaway && cutawaySides.includes(side)) return null;
     const { horizontal } = wallAxis(r, side);
+    const sm = surfaceMaterial(side);
     const position: [number, number, number] = horizontal
-      ? [0, 0, ((side === 'north' ? -1 : 1) * r.depth) / 2]
-      : [((side === 'west' ? -1 : 1) * r.width) / 2, 0, 0];
-    const panels = wallPanels(house, r, side);
+      ? [0, 0, (side === 'north' ? -1 : 1) * (r.depth / 2 - 0.05)]
+      : [(side === 'west' ? -1 : 1) * (r.width / 2 - 0.05), 0, 0];
+    // Each room owns its inward half of a shared wall, so opposite faces may
+    // have different finishes and can be selected independently.
+    const panels = wallPanels(house, r, side, false);
     return (
-      <group key={side} position={position} rotation={[0, horizontal ? 0 : -Math.PI / 2, 0]}>
+      <group
+        key={side}
+        position={position}
+        rotation={[0, horizontal ? 0 : -Math.PI / 2, 0]}
+        onClick={(event) => {
+          event.stopPropagation();
+          pick(side);
+        }}
+      >
         {panels.map((panel, index) =>
           r[side] === 'glass' ? (
             <group key={index} position={[panel.offset, panel.bottom, 0]}>
               <Box
                 position={[0, panel.height / 2, 0]}
                 size={[panel.width, panel.height, 0.04]}
-                material={m.glass}
+                material={sm.glass}
+                highlight={isSelected(side)}
                 cast={false}
               />
               {[0, panel.height].map((y) => (
@@ -141,7 +211,7 @@ function RoomMesh({
                   key={y}
                   position={[0, y, 0]}
                   size={[panel.width, 0.09, 0.12]}
-                  material={m.frame}
+                  material={sm.frame}
                 />
               ))}
               {Array.from(
@@ -152,7 +222,7 @@ function RoomMesh({
                   key={x}
                   position={[x, panel.height / 2, 0]}
                   size={[0.06, panel.height, 0.12]}
-                  material={m.frame}
+                  material={sm.frame}
                 />
               ))}
             </group>
@@ -160,8 +230,9 @@ function RoomMesh({
             <Box
               key={index}
               position={[panel.offset, panel.bottom + panel.height / 2, 0]}
-              size={[panel.width, panel.height, 0.2]}
-              material={m.wall}
+              size={[panel.width, panel.height, 0.1]}
+              material={sm.wall}
+              highlight={isSelected(side)}
             />
           ),
         )}
@@ -185,7 +256,18 @@ function RoomMesh({
         onSelect();
       }}
     >
-      {slabs.floor.map((rect, index) => slab(rect, -0.15, 0.3, outdoor ? m.deck : m.floor, index))}
+      {slabs.floor.map((rect, index) =>
+        slab(
+          rect,
+          -0.15,
+          0.3,
+          outdoor && !r.palette && !r.surfacePalettes?.floor
+            ? m.deck
+            : surfaceMaterial('floor').floor,
+          index,
+          'floor',
+        ),
+      )}
       {slabs.foundation.map((rect, index) => slab(rect, -0.5, 0.4, m.foundation, index))}
       {!outdoor && (
         <>
@@ -193,17 +275,31 @@ function RoomMesh({
           {!cutaway &&
             (roof === 'flat' || slabs.roofClipped ? (
               <>
-                {slabs.roof.map((rect, index) => slab(rect, r.height + 0.1, 0.22, m.roof, index))}
-                {slabs.roof.map((rect, index) => slab(rect, r.height - 0.06, 0.1, m.wood, index))}
+                {slabs.roof.map((rect, index) =>
+                  slab(rect, r.height + 0.1, 0.22, surfaceMaterial('roof').roof, index, 'roof'),
+                )}
+                {slabs.roof.map((rect, index) =>
+                  slab(rect, r.height - 0.06, 0.1, surfaceMaterial('roof').wood, index, 'roof'),
+                )}
               </>
             ) : (
               <mesh
                 position={[0, r.height, -r.depth / 2 - 0.3]}
                 geometry={roofGeometry}
-                material={m.roof}
+                material={surfaceMaterial('roof').roof}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  pick('roof');
+                }}
                 castShadow
                 receiveShadow
-              />
+              >
+                {isSelected('roof') && (
+                  <mesh geometry={roofGeometry} scale={[1.002, 1.002, 1.002]}>
+                    <meshBasicMaterial color="#e3a44f" wireframe toneMapped={false} />
+                  </mesh>
+                )}
+              </mesh>
             ))}
           {r.kind === 'living' && (
             <>
@@ -285,13 +381,18 @@ function RoomMesh({
       )}
       {selected && quality !== 'refined' && (
         <>
-          <mesh position={[0, 0.03, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-            <planeGeometry args={[r.width, r.depth]} />
-            <meshBasicMaterial color="#b87f45" transparent opacity={0.19} depthWrite={false} />
-          </mesh>
+          {(!selection || selection.surface === 'room') && (
+            <mesh position={[0, 0.03, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+              <planeGeometry args={[r.width, r.depth]} />
+              <meshBasicMaterial color="#b87f45" transparent opacity={0.19} depthWrite={false} />
+            </mesh>
+          )}
           <Html position={[0, r.height + 0.8, 0]} center>
             <div className="room-label">
               {r.name}
+              {selection?.roomId === r.id && selection.surface !== 'room'
+                ? ` · ${selection.surface}`
+                : ''}
               <span>
                 {r.width} × {r.depth} m
               </span>
@@ -329,7 +430,7 @@ function Tree({ x, z, y = 0, scale = 1 }: { x: number; z: number; y?: number; sc
     </group>
   );
 }
-function Environment({ light }: { light: Light }) {
+export function Environment({ light }: { light: Light }) {
   const { scene } = useThree();
   useEffect(() => {
     const canvas = document.createElement('canvas');
@@ -395,7 +496,7 @@ function Environment({ light }: { light: Light }) {
     </>
   );
 }
-function Site({ house, quality }: { house: Scene; quality: Quality }) {
+export function Site({ house, quality }: { house: Scene; quality: Quality }) {
   const texture = useMemo(() => makeTexture('ground'), []);
   const geometry = useMemo(() => {
     const geo = new THREE.PlaneGeometry(230, 230, 100, 100);
@@ -448,13 +549,26 @@ function Site({ house, quality }: { house: Scene; quality: Quality }) {
     </group>
   );
 }
-function Architecture({
+export function Architecture({
   house,
   quality,
   cutaway,
+  cutawaySides,
   selected,
   onSelect,
-}: Pick<Props, 'house' | 'quality' | 'cutaway' | 'selected' | 'onSelect'>) {
+  selection,
+  onSelectSurface,
+}: Pick<
+  Props,
+  | 'house'
+  | 'quality'
+  | 'cutaway'
+  | 'selected'
+  | 'onSelect'
+  | 'selection'
+  | 'onSelectSurface'
+  | 'cutawaySides'
+>) {
   const textures = useMemo(() => ({ stone: makeTexture('stone'), wood: makeTexture('wood') }), []);
   useEffect(() => () => Object.values(textures).forEach((t) => t.dispose()), [textures]);
   const materialSets = useMemo(
@@ -523,8 +637,12 @@ function Architecture({
           house={house}
           room={r}
           materials={materialSets[r.palette ?? house.palette]}
+          materialSets={materialSets}
+          selection={selection}
+          onSelectSurface={onSelectSurface}
           roof={house.roof}
           cutaway={cutaway}
+          cutawaySides={cutawaySides}
           selected={selected === r.id}
           onSelect={() => onSelect(r.id)}
           quality={quality}
@@ -766,22 +884,254 @@ function ProgressiveRenderer({
   }, 1);
   return null;
 }
-function FloorPlan({ house, selected, onSelect }: Pick<Props, 'house' | 'selected' | 'onSelect'>) {
-  const extents = house.rooms.length
-    ? house.rooms.reduce(
-        (b, r) => [
-          Math.min(b[0], r.x - r.width / 2),
-          Math.min(b[1], r.z - r.depth / 2),
-          Math.max(b[2], r.x + r.width / 2),
-          Math.max(b[3], r.z + r.depth / 2),
+export function FloorPlanSvg({
+  house,
+  selected,
+  onSelect,
+  selection,
+  onSelectSurface,
+  level,
+  quality = 'live',
+}: Pick<Props, 'house' | 'selected' | 'onSelect' | 'selection' | 'onSelectSurface'> & {
+  level: number;
+  quality?: Quality;
+}) {
+  const rooms = house.rooms.filter((room) => Math.abs(room.elevation - level) < 0.01);
+  const extents = rooms.length
+    ? rooms.reduce(
+        (b, room) => [
+          Math.min(b[0], room.x - room.width / 2),
+          Math.min(b[1], room.z - room.depth / 2),
+          Math.max(b[2], room.x + room.width / 2),
+          Math.max(b[3], room.z + room.depth / 2),
         ],
         [Infinity, Infinity, -Infinity, -Infinity],
       )
     : [-12, -10, 12, 10];
-  const levels = [...new Set(house.rooms.map((r) => r.elevation))].sort((a, b) => a - b);
   const [minX, minZ, maxX, maxZ] = extents;
   const width = maxX - minX + 6,
     depth = maxZ - minZ + 6;
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      fontFamily="sans-serif"
+      viewBox={`${minX - 3} ${minZ - 3} ${width} ${depth}`}
+      role={onSelectSurface ? 'group' : 'img'}
+      aria-label={`Floor plan at ${level} meters`}
+    >
+      {house.rooms
+        .filter((r) => Math.abs(r.elevation - level) < 0.01)
+        .map((r) => (
+          <g
+            key={r.id}
+            onClick={() => onSelect(r.id)}
+            tabIndex={0}
+            role="button"
+            aria-label={`Select ${r.name}`}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onSelect(r.id);
+              }
+            }}
+            style={{ cursor: 'pointer' }}
+          >
+            <rect
+              onClick={
+                onSelectSurface
+                  ? (event) => {
+                      event.stopPropagation();
+                      onSelectSurface({ roomId: r.id, surface: 'floor' });
+                    }
+                  : undefined
+              }
+              role={onSelectSurface ? 'button' : undefined}
+              tabIndex={onSelectSurface ? 0 : undefined}
+              aria-label={onSelectSurface ? `Select ${r.name} floor` : undefined}
+              onKeyDown={
+                onSelectSurface
+                  ? (event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        onSelectSurface({ roomId: r.id, surface: 'floor' });
+                      }
+                    }
+                  : undefined
+              }
+              x={r.x - r.width / 2}
+              y={r.z - r.depth / 2}
+              width={r.width}
+              height={r.depth}
+              fill={
+                selected === r.id && (!selection || ['room', 'floor'].includes(selection.surface))
+                  ? '#dac5a6'
+                  : ['courtyard', 'terrace'].includes(r.kind)
+                    ? '#dce3d0'
+                    : quality === 'clay'
+                      ? '#ddd9ce'
+                      : palettes[surfacePalette(house, r, 'floor')].floor
+              }
+              fillOpacity={
+                quality === 'wireframe'
+                  ? 0
+                  : selected === r.id &&
+                      (!selection || ['room', 'floor'].includes(selection.surface))
+                    ? 1
+                    : 0.48
+              }
+              stroke={['courtyard', 'terrace'].includes(r.kind) ? '#899b7c' : 'none'}
+              strokeWidth={0.08}
+              strokeDasharray=".25 .15"
+            />
+            <text
+              x={r.x}
+              y={r.z - 0.2}
+              textAnchor="middle"
+              fontSize={Math.min(0.52, r.width / 15)}
+              fill="#384d43"
+            >
+              {r.name}
+            </text>
+            <text x={r.x} y={r.z + 0.55} textAnchor="middle" fontSize=".4" fill="#8b8f81">
+              {r.width} × {r.depth} m
+            </text>
+          </g>
+        ))}
+      <g>
+        {house.rooms
+          .filter(
+            (room) => room.elevation === level && !['courtyard', 'terrace'].includes(room.kind),
+          )
+          .flatMap((room) =>
+            (['north', 'south', 'east', 'west'] as const).flatMap((side) => {
+              const axis = wallAxis(room, side);
+              // Each floor owns its plan outline even when a neighboring
+              // double-height room supplies that surface in the 3D model.
+              const panels = wallPanels(house, room, side, false).filter(
+                (panel) => panel.bottom < 1 && panel.bottom + panel.height > 1,
+              );
+              if (!panels.length) return [];
+              const hit = planWallHitTarget(room, side);
+              return [
+                <g
+                  key={`${room.id}-${side}`}
+                  role={onSelectSurface ? 'button' : undefined}
+                  tabIndex={onSelectSurface ? 0 : undefined}
+                  aria-label={`Select ${room.name} ${side} wall`}
+                  onClick={
+                    onSelectSurface
+                      ? () => onSelectSurface({ roomId: room.id, surface: side })
+                      : undefined
+                  }
+                  onKeyDown={
+                    onSelectSurface
+                      ? (event) => {
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault();
+                            onSelectSurface({ roomId: room.id, surface: side });
+                          }
+                        }
+                      : undefined
+                  }
+                  style={onSelectSurface ? { cursor: 'pointer' } : undefined}
+                >
+                  {onSelectSurface && (
+                    <rect
+                      data-wall-hit-target={side}
+                      x={hit.minX}
+                      y={hit.minZ}
+                      width={hit.maxX - hit.minX}
+                      height={hit.maxZ - hit.minZ}
+                      fill="transparent"
+                      pointerEvents="all"
+                    />
+                  )}
+                  {panels.map((panel, index) => {
+                    const start = axis.center + panel.offset - panel.width / 2;
+                    const end = axis.center + panel.offset + panel.width / 2;
+                    return (
+                      <line
+                        key={`${room.id}-${side}-${index}`}
+                        x1={axis.horizontal ? start : axis.boundary}
+                        y1={axis.horizontal ? axis.boundary : start}
+                        x2={axis.horizontal ? end : axis.boundary}
+                        y2={axis.horizontal ? axis.boundary : end}
+                        stroke={
+                          selection?.roomId === room.id && selection.surface === side
+                            ? '#c98a36'
+                            : room[side] === 'glass'
+                              ? '#779faa'
+                              : palettes[surfacePalette(house, room, side)].accent
+                        }
+                        strokeWidth={
+                          selection?.roomId === room.id && selection.surface === side
+                            ? 0.3
+                            : room[side] === 'glass'
+                              ? 0.12
+                              : 0.2
+                        }
+                        strokeLinecap="butt"
+                      />
+                    );
+                  })}
+                </g>,
+              ];
+            }),
+          )}
+        {house.stairs
+          .filter(
+            (stair) =>
+              level >= stair.elevation - 0.01 && level <= stair.elevation + stair.rise + 0.01,
+          )
+          .map((stair) => {
+            const footprint = stairFootprint(stair, 0);
+            return (
+              <g key={stair.id} pointerEvents="none">
+                <rect
+                  x={footprint.minX}
+                  y={footprint.minZ}
+                  width={footprint.maxX - footprint.minX}
+                  height={footprint.maxZ - footprint.minZ}
+                  fill="#e9e4d7"
+                  stroke="#899483"
+                  strokeWidth={0.05}
+                />
+                <g transform={`translate(${stair.x} ${stair.z}) rotate(${-stair.rotation})`}>
+                  {Array.from({ length: Math.ceil(stair.rise / 0.18) }, (_, index) => (
+                    <line
+                      key={index}
+                      x1={-stair.width / 2}
+                      x2={stair.width / 2}
+                      y1={-stair.run / 2 + (index * stair.run) / Math.ceil(stair.rise / 0.18)}
+                      y2={-stair.run / 2 + (index * stair.run) / Math.ceil(stair.rise / 0.18)}
+                      stroke="#899483"
+                      strokeWidth={0.04}
+                    />
+                  ))}
+                  <path
+                    d={`M 0 ${-stair.run * 0.35} V ${stair.run * 0.35} m -.18 -.3 l .18 .3 .18 -.3`}
+                    fill="none"
+                    stroke="#526a59"
+                    strokeWidth={0.06}
+                  />
+                </g>
+              </g>
+            );
+          })}
+      </g>
+    </svg>
+  );
+}
+function FloorPlan({
+  house,
+  selected,
+  onSelect,
+  selection,
+  onSelectSurface,
+  quality,
+}: Pick<Props, 'house' | 'selected' | 'onSelect' | 'selection' | 'onSelectSurface' | 'quality'>) {
+  const levels = [...new Set(house.rooms.map((r) => r.elevation))].sort((a, b) => a - b);
   return (
     <div className="floor-plan">
       <div className="plan-heading">
@@ -793,139 +1143,15 @@ function FloorPlan({ house, selected, onSelect }: Pick<Props, 'house' | 'selecte
         {(levels.length ? levels : [0]).map((level) => (
           <div className="plan-level" key={level}>
             <span className="eyebrow">LEVEL {level.toFixed(1)} M</span>
-            <svg
-              viewBox={`${minX - 3} ${minZ - 3} ${width} ${depth}`}
-              role="img"
-              aria-label={`Floor plan at ${level} meters`}
-            >
-              {house.rooms
-                .filter((r) => r.elevation === level)
-                .map((r) => (
-                  <g
-                    key={r.id}
-                    onClick={() => onSelect(r.id)}
-                    tabIndex={0}
-                    role="button"
-                    aria-label={`Select ${r.name}`}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        onSelect(r.id);
-                      }
-                    }}
-                    style={{ cursor: 'pointer' }}
-                  >
-                    <rect
-                      x={r.x - r.width / 2}
-                      y={r.z - r.depth / 2}
-                      width={r.width}
-                      height={r.depth}
-                      fill={
-                        selected === r.id
-                          ? '#dac5a6'
-                          : ['courtyard', 'terrace'].includes(r.kind)
-                            ? '#dce3d0'
-                            : palettes[r.palette ?? house.palette].floor
-                      }
-                      fillOpacity={selected === r.id ? 1 : 0.48}
-                      stroke={['courtyard', 'terrace'].includes(r.kind) ? '#899b7c' : 'none'}
-                      strokeWidth={0.08}
-                      strokeDasharray=".25 .15"
-                    />
-                    <text
-                      x={r.x}
-                      y={r.z - 0.2}
-                      textAnchor="middle"
-                      fontSize={Math.min(0.52, r.width / 15)}
-                      fill="#384d43"
-                    >
-                      {r.name}
-                    </text>
-                    <text x={r.x} y={r.z + 0.55} textAnchor="middle" fontSize=".4" fill="#8b8f81">
-                      {r.width} × {r.depth} m
-                    </text>
-                  </g>
-                ))}
-              <g pointerEvents="none">
-                {house.rooms
-                  .filter(
-                    (room) =>
-                      room.elevation === level && !['courtyard', 'terrace'].includes(room.kind),
-                  )
-                  .flatMap((room) =>
-                    (['north', 'south', 'east', 'west'] as const).flatMap((side) => {
-                      const axis = wallAxis(room, side);
-                      // Each floor owns its plan outline even when a neighboring
-                      // double-height room supplies that surface in the 3D model.
-                      return wallPanels(house, room, side, false)
-                        .filter((panel) => panel.bottom < 1 && panel.bottom + panel.height > 1)
-                        .map((panel, index) => {
-                          const start = axis.center + panel.offset - panel.width / 2;
-                          const end = axis.center + panel.offset + panel.width / 2;
-                          return (
-                            <line
-                              key={`${room.id}-${side}-${index}`}
-                              x1={axis.horizontal ? start : axis.boundary}
-                              y1={axis.horizontal ? axis.boundary : start}
-                              x2={axis.horizontal ? end : axis.boundary}
-                              y2={axis.horizontal ? axis.boundary : end}
-                              stroke={room[side] === 'glass' ? '#779faa' : '#536353'}
-                              strokeWidth={room[side] === 'glass' ? 0.09 : 0.18}
-                              strokeLinecap="butt"
-                            />
-                          );
-                        });
-                    }),
-                  )}
-                {house.stairs
-                  .filter(
-                    (stair) =>
-                      level >= stair.elevation - 0.01 &&
-                      level <= stair.elevation + stair.rise + 0.01,
-                  )
-                  .map((stair) => {
-                    const footprint = stairFootprint(stair, 0);
-                    return (
-                      <g key={stair.id}>
-                        <rect
-                          x={footprint.minX}
-                          y={footprint.minZ}
-                          width={footprint.maxX - footprint.minX}
-                          height={footprint.maxZ - footprint.minZ}
-                          fill="#e9e4d7"
-                          stroke="#899483"
-                          strokeWidth={0.05}
-                        />
-                        <g
-                          transform={`translate(${stair.x} ${stair.z}) rotate(${-stair.rotation})`}
-                        >
-                          {Array.from({ length: Math.ceil(stair.rise / 0.18) }, (_, index) => (
-                            <line
-                              key={index}
-                              x1={-stair.width / 2}
-                              x2={stair.width / 2}
-                              y1={
-                                -stair.run / 2 + (index * stair.run) / Math.ceil(stair.rise / 0.18)
-                              }
-                              y2={
-                                -stair.run / 2 + (index * stair.run) / Math.ceil(stair.rise / 0.18)
-                              }
-                              stroke="#899483"
-                              strokeWidth={0.04}
-                            />
-                          ))}
-                          <path
-                            d={`M 0 ${-stair.run * 0.35} V ${stair.run * 0.35} m -.18 -.3 l .18 .3 .18 -.3`}
-                            fill="none"
-                            stroke="#526a59"
-                            strokeWidth={0.06}
-                          />
-                        </g>
-                      </g>
-                    );
-                  })}
-              </g>
-            </svg>
+            <FloorPlanSvg
+              house={house}
+              selected={selected}
+              onSelect={onSelect}
+              selection={selection}
+              onSelectSurface={onSelectSurface}
+              level={level}
+              quality={quality}
+            />
           </div>
         ))}
       </div>

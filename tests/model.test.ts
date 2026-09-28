@@ -71,10 +71,10 @@ test('local storage serializes writes and preserves the last valid project if a 
     );
     assert.equal((await store.read()).scene.palette, 'charcoal');
     assert.equal(
-      JSON.parse(await readFile(path.join(directory, 'project.json'), 'utf8')).version,
+      JSON.parse(await readFile(path.join(directory, 'workspace.json'), 'utf8')).version,
       1,
     );
-    await writeFile(path.join(directory, 'project.json'), 'corrupt');
+    await writeFile(path.join(directory, 'workspace.json'), 'corrupt');
     await assert.rejects(store.read());
   } finally {
     await rm(directory, { recursive: true, force: true });
@@ -100,7 +100,7 @@ test('agent gateway adapter sends documented tool contracts and preserves usage'
     assert.ok(body.max_tokens > 0 && body.max_tokens <= 6000);
     assert.deepEqual(
       body.tools.map((tool: { function: { name: string } }) => tool.function.name).sort(),
-      ['apply_operations', 'finish_design', 'inspect_design', 'reset_draft'],
+      ['apply_operations', 'finish_design', 'inspect_design', 'render_view', 'reset_draft'],
     );
     assert.ok(
       body.tools.every(

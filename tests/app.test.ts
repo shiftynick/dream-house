@@ -64,156 +64,180 @@ async function fixture(t: TestContext, modelClient?: AgentModel) {
   return { ...application, project, request };
 }
 
-test('HTTP control surface uses the same transactional and revision rules', async (t) => {
-  const { request, project } = await fixture(t);
-  const capabilities = await request('/api/design/capabilities');
-  assert.equal(capabilities.status, 200);
-  assert.equal(capabilities.body.version, 1);
-  assert.equal(capabilities.body.operationSchema.type, 'array');
-  const draft = await request('/api/design/drafts', 'POST', { baseRevision: project.revision });
-  assert.equal(draft.status, 200);
-  const operation = await request(`/api/design/drafts/${draft.body.id}/operations`, 'POST', {
-    operations: [{ type: 'set_material', palette: 'cedar' }],
-  });
-  assert.equal(operation.status, 200);
-  assert.equal(operation.body.ready, true);
-  assert.equal((await request('/api/project')).body.scene.palette, 'limestone');
-  const rejected = await request(`/api/design/drafts/${draft.body.id}/commit`, 'POST', {
-    expectedRevision: project.revision - 1,
-  });
-  assert.equal(rejected.status, 409);
-  const committed = await request(`/api/design/drafts/${draft.body.id}/commit`, 'POST', {
-    expectedRevision: project.revision,
-  });
-  assert.equal(committed.status, 200);
-  assert.equal(committed.body.project.scene.palette, 'cedar');
-  assert.equal(committed.body.project.past.length, 1);
-  assert.equal(committed.body.project.revision, project.revision + 1);
-  const duplicate = await request(`/api/design/drafts/${draft.body.id}/commit`, 'POST', {
-    expectedRevision: project.revision,
-  });
-  assert.equal(duplicate.status, 200);
-  assert.equal(duplicate.body.project.revision, committed.body.project.revision);
-  const status = await request('/api/status');
-  assert.equal(status.body.usage.requests, 0, 'local control operations incur no cloud calls');
-  assert.equal(
-    JSON.stringify(status.body).includes('test-only'),
-    false,
-    'credentials are not returned',
-  );
-});
+test(
+  'HTTP control surface uses the same transactional and revision rules',
+  { timeout: 10000 },
+  async (t) => {
+    const { request, project } = await fixture(t);
+    const capabilities = await request('/api/design/capabilities');
+    assert.equal(capabilities.status, 200);
+    assert.equal(capabilities.body.version, 2);
+    assert.equal(capabilities.body.operationSchema.type, 'array');
+    const draft = await request('/api/design/drafts', 'POST', {
+      baseRevision: project.revision,
+      projectId: project.projectId,
+    });
+    assert.equal(draft.status, 200);
+    const operation = await request(`/api/design/drafts/${draft.body.id}/operations`, 'POST', {
+      operations: [{ type: 'set_material', palette: 'cedar' }],
+    });
+    assert.equal(operation.status, 200);
+    assert.equal(operation.body.ready, true);
+    assert.equal((await request('/api/project')).body.scene.palette, 'limestone');
+    const rejected = await request(`/api/design/drafts/${draft.body.id}/commit`, 'POST', {
+      expectedRevision: project.revision - 1,
+    });
+    assert.equal(rejected.status, 409);
+    const committed = await request(`/api/design/drafts/${draft.body.id}/commit`, 'POST', {
+      expectedRevision: project.revision,
+    });
+    assert.equal(committed.status, 200);
+    assert.equal(committed.body.project.scene.palette, 'cedar');
+    assert.equal(committed.body.project.past.length, 1);
+    assert.equal(committed.body.project.revision, project.revision + 1);
+    const duplicate = await request(`/api/design/drafts/${draft.body.id}/commit`, 'POST', {
+      expectedRevision: project.revision,
+    });
+    assert.equal(duplicate.status, 200);
+    assert.equal(duplicate.body.project.revision, committed.body.project.revision);
+    const status = await request('/api/status');
+    assert.equal(status.body.usage.requests, 0, 'local control operations incur no cloud calls');
+    assert.equal(
+      JSON.stringify(status.body).includes('test-only'),
+      false,
+      'credentials are not returned',
+    );
+  },
+);
 
-test('HTTP agent run exposes a validated preview, then waits for a separate commit', async (t) => {
-  const awaitingFinish = deferred<void>();
-  const finishTurn = deferred<ModelTurn>();
-  let calls = 0;
-  const modelClient: AgentModel = {
-    async complete() {
-      calls++;
-      if (calls === 1) return edit();
-      awaitingFinish.resolve();
-      return finishTurn.promise;
-    },
-  };
-  const { request, project, store } = await fixture(t, modelClient);
-  const runId = randomUUID();
-  const pending = request('/api/agent', 'POST', {
-    runId,
-    baseRevision: project.revision,
-    scene: project.scene,
-    messages,
-    context: { selectedRoomId: 'kitchen', view: 'plan' },
-  });
-  await awaitingFinish.promise;
-  const progress = await request(`/api/agent/runs/${runId}`);
-  assert.equal(progress.status, 200);
-  assert.equal(progress.body.status, 'running');
-  assert.equal(progress.body.preview.rooms[0].palette, 'cedar');
-  assert.deepEqual(await store.read(), project);
-  const concurrent = await request('/api/agent', 'POST', {
-    baseRevision: project.revision,
-    scene: project.scene,
-    messages,
-  });
-  assert.equal(concurrent.status, 409);
-  finishTurn.resolve(finish());
-  const result = await pending;
-  assert.equal(result.status, 200);
-  assert.ok(result.body.draftId);
-  assert.equal(result.body.runId, runId);
-  assert.equal(result.body.scene.rooms[0].palette, 'cedar');
-  assert.equal(result.body.usage.calls, 2);
-  assert.deepEqual(await store.read(), project, 'finished agent drafts are still unsaved');
-  assert.equal((await request(`/api/agent/runs/${runId}`)).body.status, 'succeeded');
-  const duplicateRun = await request('/api/agent', 'POST', {
-    runId,
-    baseRevision: project.revision,
-    scene: project.scene,
-    messages,
-  });
-  assert.equal(duplicateRun.status, 409);
-  const commit = await request(`/api/design/drafts/${result.body.draftId}/commit`, 'POST', {
-    expectedRevision: project.revision,
-  });
-  assert.equal(commit.status, 200);
-  assert.equal(commit.body.project.scene.rooms[0].palette, 'cedar');
-  assert.equal(commit.body.project.past.length, 1);
-  assert.equal((await request('/api/status')).body.usage.requests, 2);
-});
+test(
+  'HTTP agent run exposes a validated preview, then waits for a separate commit',
+  { timeout: 10000 },
+  async (t) => {
+    const awaitingFinish = deferred<void>();
+    const finishTurn = deferred<ModelTurn>();
+    let calls = 0;
+    const modelClient: AgentModel = {
+      async complete() {
+        calls++;
+        if (calls === 1) return edit();
+        awaitingFinish.resolve();
+        return finishTurn.promise;
+      },
+    };
+    const { request, project, store } = await fixture(t, modelClient);
+    const runId = randomUUID();
+    const pending = request('/api/agent', 'POST', {
+      runId,
+      baseRevision: project.revision,
+      projectId: project.projectId,
+      scene: project.scene,
+      messages,
+      context: { selectedRoomId: 'kitchen', view: 'plan' },
+    });
+    await awaitingFinish.promise;
+    const progress = await request(`/api/agent/runs/${runId}`);
+    assert.equal(progress.status, 200);
+    assert.equal(progress.body.status, 'running');
+    assert.equal(progress.body.preview.rooms[0].palette, 'cedar');
+    assert.deepEqual(await store.read(), project);
+    const concurrent = await request('/api/agent', 'POST', {
+      baseRevision: project.revision,
+      projectId: project.projectId,
+      scene: project.scene,
+      messages,
+    });
+    assert.equal(concurrent.status, 409);
+    finishTurn.resolve(finish());
+    const result = await pending;
+    assert.equal(result.status, 200);
+    assert.ok(result.body.draftId);
+    assert.equal(result.body.runId, runId);
+    assert.equal(result.body.scene.rooms[0].palette, 'cedar');
+    assert.equal(result.body.usage.calls, 2);
+    assert.deepEqual(await store.read(), project, 'finished agent drafts are still unsaved');
+    assert.equal((await request(`/api/agent/runs/${runId}`)).body.status, 'succeeded');
+    const duplicateRun = await request('/api/agent', 'POST', {
+      runId,
+      baseRevision: project.revision,
+      projectId: project.projectId,
+      scene: project.scene,
+      messages,
+    });
+    assert.equal(duplicateRun.status, 409);
+    const commit = await request(`/api/design/drafts/${result.body.draftId}/commit`, 'POST', {
+      expectedRevision: project.revision,
+    });
+    assert.equal(commit.status, 200);
+    assert.equal(commit.body.project.scene.rooms[0].palette, 'cedar');
+    assert.equal(commit.body.project.past.length, 1);
+    assert.equal((await request('/api/status')).body.usage.requests, 2);
+  },
+);
 
-test('HTTP cancellation aborts the active model and discards the uncommitted draft', async (t) => {
-  const entered = deferred<void>();
-  const modelClient: AgentModel = {
-    async complete(_history, signal) {
-      assert.ok(signal);
-      entered.resolve();
-      return new Promise<ModelTurn>((_resolve, reject) =>
-        signal.addEventListener('abort', () => reject(signal.reason), { once: true }),
-      );
-    },
-  };
-  const { request, project, store } = await fixture(t, modelClient);
-  const runId = randomUUID();
-  const pending = request('/api/agent', 'POST', {
-    runId,
-    baseRevision: project.revision,
-    scene: project.scene,
-    messages,
-  });
-  await entered.promise;
-  assert.equal((await request(`/api/agent/runs/${runId}/cancel`, 'POST', {})).status, 200);
-  const cancelled = await pending;
-  assert.equal(cancelled.status, 422);
-  assert.match(cancelled.body.error, /cancelled/);
-  const progress = await request(`/api/agent/runs/${runId}`);
-  assert.equal(progress.body.status, 'cancelled');
-  assert.equal(progress.body.preview, null);
-  assert.deepEqual(await store.read(), project);
-});
+test(
+  'HTTP cancellation aborts the active model and discards the uncommitted draft',
+  { timeout: 10000 },
+  async (t) => {
+    const entered = deferred<void>();
+    const modelClient: AgentModel = {
+      async complete(_history, signal) {
+        assert.ok(signal);
+        entered.resolve();
+        return new Promise<ModelTurn>((_resolve, reject) =>
+          signal.addEventListener('abort', () => reject(signal.reason), { once: true }),
+        );
+      },
+    };
+    const { request, project, store } = await fixture(t, modelClient);
+    const runId = randomUUID();
+    const pending = request('/api/agent', 'POST', {
+      runId,
+      baseRevision: project.revision,
+      projectId: project.projectId,
+      scene: project.scene,
+      messages,
+    });
+    await entered.promise;
+    assert.equal((await request(`/api/agent/runs/${runId}/cancel`, 'POST', {})).status, 200);
+    const cancelled = await pending;
+    assert.equal(cancelled.status, 422);
+    assert.match(cancelled.body.error, /cancelled/);
+    const progress = await request(`/api/agent/runs/${runId}`);
+    assert.equal(progress.body.status, 'cancelled');
+    assert.equal(progress.body.preview, null);
+    assert.deepEqual(await store.read(), project);
+  },
+);
 
-test('daily cloud limits apply to each harness round and leave no partially saved edit', async (t) => {
-  let calls = 0;
-  const modelClient: AgentModel = {
-    async complete() {
-      calls++;
-      return edit();
-    },
-  };
-  const { request, project, store } = await fixture(t, modelClient);
-  assert.equal((await request('/api/connections', 'PUT', { dailyLimit: 1 })).status, 200);
-  const runId = randomUUID();
-  const result = await request('/api/agent', 'POST', {
-    runId,
-    baseRevision: project.revision,
-    scene: project.scene,
-    messages,
-  });
-  assert.equal(result.status, 429);
-  assert.match(result.body.error, /Daily cloud request limit/);
-  assert.equal(calls, 1);
-  assert.equal((await request('/api/status')).body.usage.requests, 1);
-  const progress = await request(`/api/agent/runs/${runId}`);
-  assert.equal(progress.body.status, 'failed');
-  assert.equal(progress.body.preview, null);
-  assert.deepEqual(await store.read(), project);
-});
+test(
+  'daily cloud limits apply to each harness round and leave no partially saved edit',
+  { timeout: 10000 },
+  async (t) => {
+    let calls = 0;
+    const modelClient: AgentModel = {
+      async complete() {
+        calls++;
+        return edit();
+      },
+    };
+    const { request, project, store } = await fixture(t, modelClient);
+    assert.equal((await request('/api/connections', 'PUT', { dailyLimit: 1 })).status, 200);
+    const runId = randomUUID();
+    const result = await request('/api/agent', 'POST', {
+      runId,
+      baseRevision: project.revision,
+      projectId: project.projectId,
+      scene: project.scene,
+      messages,
+    });
+    assert.equal(result.status, 429);
+    assert.match(result.body.error, /Daily cloud request limit/);
+    assert.equal(calls, 1);
+    assert.equal((await request('/api/status')).body.usage.requests, 1);
+    const progress = await request(`/api/agent/runs/${runId}`);
+    assert.equal(progress.body.status, 'failed');
+    assert.equal(progress.body.preview, null);
+    assert.deepEqual(await store.read(), project);
+  },
+);

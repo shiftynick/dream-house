@@ -156,3 +156,85 @@ test('an explicit stale-draft conflict protects the current local project before
   assert.equal(conflict.code, 'revision_conflict');
   assert.equal(new ApiError('Another run is busy.', 409).code, undefined);
 });
+
+test('switching houses starts an independent revision sequence and does not carry the prior conversation', async () => {
+  const writes: Project[] = [];
+  const controller = new ProjectPersistence(
+    async (project) => {
+      writes.push(structuredClone(project));
+      return { ...project, revision: project.revision + 1 };
+    },
+    () => {},
+    () => {},
+  );
+  controller.acceptPersisted({
+    ...newProject(),
+    projectId: 'house-a',
+    projectName: 'Hillside',
+    revision: 7,
+    messages: [{ id: 'old', role: 'user', text: 'Keep my hillside kitchen upstairs.' }],
+  });
+  controller.edit(rename('Last hillside edit'));
+  await controller.flush();
+  const archived = structuredClone(controller.project);
+  controller.acceptPersisted({ ...newProject(), projectId: 'house-b', projectName: 'Courtyard' });
+  assert.equal(controller.project?.messages.length, 0);
+  assert.equal(controller.project?.revision, 0);
+  assert.equal(controller.project?.past.length, 0);
+  assert.equal(controller.project?.variants.length, 0);
+  controller.edit(rename('A new direction'));
+  await controller.flush();
+  assert.deepEqual(
+    writes.map((project) => [project.projectId, project.revision]),
+    [
+      ['house-a', 7],
+      ['house-b', 0],
+    ],
+  );
+  assert.equal(archived?.messages[0].text, 'Keep my hillside kitchen upstairs.');
+  assert.equal(archived?.scene.name, 'Last hillside edit');
+});
+
+test('imported project identity cannot redirect the next autosave into another house', async () => {
+  let written: Project | undefined;
+  const controller = new ProjectPersistence(
+    async (project) => {
+      written = project;
+      return { ...project, revision: project.revision + 1 };
+    },
+    () => {},
+    () => {},
+  );
+  controller.acceptPersisted({
+    ...newProject(),
+    projectId: 'active-house',
+    projectName: 'My house',
+    revision: 4,
+  });
+  controller.edit({
+    ...newProject(),
+    projectId: 'foreign-house',
+    projectName: 'Imported house',
+    revision: 91,
+    scene: { ...newProject().scene, name: 'Imported design' },
+  });
+  await controller.flush();
+  assert.equal(written?.projectId, 'active-house');
+  assert.equal(written?.projectName, 'My house');
+  assert.equal(written?.revision, 4);
+  assert.equal(written?.scene.name, 'Imported design');
+});
+
+test('a response from a different house cannot overwrite local work', async () => {
+  const controller = new ProjectPersistence(
+    async (project) => ({ ...project, projectId: 'wrong-house', revision: 9 }),
+    () => {},
+    () => {},
+  );
+  controller.acceptPersisted({ ...newProject(), projectId: 'my-house', revision: 2 });
+  controller.edit(rename('My local idea'));
+  await assert.rejects(controller.flush(), /different house/);
+  assert.equal(controller.project?.projectId, 'my-house');
+  assert.equal(controller.project?.scene.name, 'My local idea');
+  assert.equal(controller.unsaved, true);
+});

@@ -1,5 +1,6 @@
 import type { Room, Scene, Side, Stair } from '../shared/model';
 import { getDesign, oppositeSide, roomOpenings } from '../shared/design';
+import { stairPlanFootprint } from '../shared/spatial';
 
 export type Rect = { minX: number; minZ: number; maxX: number; maxZ: number };
 export type WallPanel = { offset: number; width: number; bottom: number; height: number };
@@ -37,15 +38,7 @@ export function roomFootprint(room: Room, margin = 0): Rect {
 }
 
 export function stairFootprint(stair: Stair, margin = 0.08): Rect {
-  const radians = (stair.rotation * Math.PI) / 180;
-  const width = Math.abs(Math.cos(radians)) * stair.width + Math.abs(Math.sin(radians)) * stair.run;
-  const depth = Math.abs(Math.sin(radians)) * stair.width + Math.abs(Math.cos(radians)) * stair.run;
-  return {
-    minX: stair.x - width / 2 - margin,
-    maxX: stair.x + width / 2 + margin,
-    minZ: stair.z - depth / 2 - margin,
-    maxZ: stair.z + depth / 2 + margin,
-  };
+  return stairPlanFootprint(stair, margin);
 }
 
 export function wallAxis(room: Room, side: Side) {
@@ -58,6 +51,20 @@ export function wallAxis(room: Room, side: Side) {
       ? room.z + ((side === 'north' ? -1 : 1) * room.depth) / 2
       : room.x + ((side === 'west' ? -1 : 1) * room.width) / 2,
   };
+}
+
+/** A usable plan pointer target on the room's own side of a wall. SVG line
+ * bounds have zero width/height; a door gap may also contain their box center. */
+export function planWallHitTarget(room: Room, side: Side): Rect {
+  const bounds = roomFootprint(room);
+  const thickness = Math.min(
+    0.45,
+    (side === 'north' || side === 'south' ? room.depth : room.width) / 4,
+  );
+  if (side === 'north') return { ...bounds, maxZ: bounds.minZ + thickness };
+  if (side === 'south') return { ...bounds, minZ: bounds.maxZ - thickness };
+  if (side === 'east') return { ...bounds, minX: bounds.maxX - thickness };
+  return { ...bounds, maxX: bounds.minX + thickness };
 }
 
 function rawWallRects(scene: Scene, room: Room, side: Side): Rect[] {

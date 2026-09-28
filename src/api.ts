@@ -41,3 +41,6 @@ export type Status = {
   dailyLimit: number;
   usage: { day: string; requests: number; modelCost: number };
 };
+
+export type ProjectSummary = { id: string; name: string; revision: number; rooms: number };
+export type ProjectDirectory = { activeProjectId: string; projects: ProjectSummary[] };
