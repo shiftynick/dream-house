@@ -28,7 +28,7 @@ export function useVoice({
     if (busy || active.current) return;
     if (!enabled) {
       callbacks.current.onError(
-        'Add an OpenAI key in Connections to enable the microphone. You can type in the meantime.',
+        'Add a Vercel AI Gateway key in Connections to enable the microphone. You can type in the meantime.',
       );
       return;
     }

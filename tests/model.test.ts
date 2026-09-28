@@ -82,7 +82,9 @@ test('local storage serializes writes and preserves the last valid project if a 
 test('agent sends a bounded scene context and validates returned edits', async () => {
   let body: any;
   const scene = sampleScene();
-  const fetcher = (async (_url: unknown, init: RequestInit) => {
+  const fetcher = (async (url: unknown, init: RequestInit) => {
+    assert.equal(url, 'https://ai-gateway.vercel.sh/v1/chat/completions');
+    assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer test-only');
     body = JSON.parse(String(init.body));
     return Response.json({
       choices: [
@@ -113,7 +115,7 @@ test('agent sends a bounded scene context and validates returned edits', async (
   });
   assert.equal(result.scene?.palette, 'cedar');
   assert.equal(body.messages.length, 12);
-  assert.equal(body.provider.require_parameters, true);
+  assert.equal(body.provider, undefined);
   assert.equal(body.response_format.json_schema.strict, true);
   assert.equal(result.usage.cost, 0.0005);
   assert.equal(scene.palette, 'limestone');

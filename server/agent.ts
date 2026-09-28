@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { agentResponseSchema, validateScene, type Message, type Scene } from '../shared/model.ts';
+import { GATEWAY_ORIGIN, GatewayError, reportedCost } from './gateway.ts';
 
 export const SYSTEM_PROMPT = `You are Terrain, a thoughtful architectural design partner. The user has ideas but no architecture vocabulary. Interpret everyday language, make a coherent best guess, and make small related changes automatically. Ask a short specific question for truly major or ambiguous choices. You can only edit this parametric 3D scene; never promise unsupported geometry or engineering correctness.
 Return a short spoken-friendly reply, needsConfirmation, and the complete resulting scene (or null for conversation). Preserve stable IDs and unchanged rooms. For destructive redesigns, return a proposed scene with needsConfirmation=true. For a first description of an empty site, build immediately with sensible assumed dimensions. Never claim to have edited if scene is null. Your reply should state any important assumption.
@@ -21,19 +22,17 @@ export async function runAgent({
   signal?: AbortSignal;
   fetcher?: typeof fetch;
 }) {
-  const response = await fetcher('https://openrouter.ai/api/v1/chat/completions', {
+  const response = await fetcher(`${GATEWAY_ORIGIN}/v1/chat/completions`, {
     method: 'POST',
     signal,
     headers: {
       Authorization: `Bearer ${key}`,
       'Content-Type': 'application/json',
-      'X-Title': 'Terrain local studio',
     },
     body: JSON.stringify({
       model,
       temperature: 0.35,
       max_tokens: 6000,
-      provider: { require_parameters: true },
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'system', content: `Current validated scene:\n${JSON.stringify(scene)}` },
@@ -49,12 +48,7 @@ export async function runAgent({
       },
     }),
   });
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({}));
-    throw new Error(
-      `Model request failed (${response.status}): ${String(body.error?.message || 'Check your key, credits, and model in Connections.').slice(0, 400)}`,
-    );
-  }
+  if (!response.ok) throw new GatewayError('Design request', response.status);
   const body = await response.json();
   if (body.choices?.[0]?.finish_reason === 'length')
     throw new Error(
@@ -78,7 +72,7 @@ export async function runAgent({
     usage: {
       inputTokens: body.usage?.prompt_tokens ?? 0,
       outputTokens: body.usage?.completion_tokens ?? 0,
-      cost: typeof body.usage?.cost === 'number' ? body.usage.cost : null,
+      cost: reportedCost(body),
     },
   };
 }

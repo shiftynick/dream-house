@@ -22,24 +22,33 @@ npm start
 
 ## Connect the AI
 
-Open **Connections and settings** in the top bar:
+Open **Connections and settings** in the top bar and enter one **Vercel AI Gateway key** for design, transcription, and spoken replies. Click **Save connections**. The panel identifies whether a saved or environment key is configured; this does not verify provider access.
 
-- **OpenRouter key:** enables the design agent. The configurable initial model is `openai/gpt-4.1-mini`; choose a model supporting structured outputs.
-- **OpenAI key:** enables push-to-talk transcription (`gpt-4o-mini-transcribe`) and optional cloud spoken replies (`gpt-4o-mini-tts`).
-- **System voice:** uses browser speech synthesis with no API charge if your browser provides a voice. Select **AI voice** for cloud speech or turn replies off.
+The editable defaults live in `shared/connections.ts`:
 
-Keys are stored in `.data/connections.json` with owner-only permissions. They are never returned to the browser or included in exports. Alternatively copy `.env.example` to `.env` and add your keys there. `OPENROUTER_MODEL` in the environment overrides the model in the settings panel. Both `.env` and `.data/` are ignored by Git.
+| Purpose                 | Model / voice                      |
+| ----------------------- | ---------------------------------- |
+| Design and conversation | `openai/gpt-4.1-mini`              |
+| Speech output           | `google/gemini-3.8-flash-lite-tts` |
+| Speech voice            | `Kore`                             |
+| Transcription           | `spacexai/grok-stt`                |
 
-No credentials ship with the project. The editor, sample house, materials, camera, history, and alternatives work without any keys; natural-language generation and transcription require configured providers. No provider calls were made during development testing.
+Use Gateway model IDs. The design model must support structured outputs; choose a voice supported by your speech model. Spoken replies default to **AI voice · Vercel Gateway**. **System voice** uses browser speech synthesis with no API charge if your browser provides a voice, and replies can also be turned off.
+
+The key and settings persist across browser and server restarts in `.data/connections.json`. Writes use an atomic rename and owner-only `0600` file permissions. The file contains plaintext credentials; the server never returns keys to the browser or includes them in project exports. Leave the key field blank when saving other settings to preserve the existing key.
+
+Alternatively, copy `.env.example` to `.env`, set `AI_GATEWAY_API_KEY`, and restart the server. A key saved in Connections takes precedence over the environment key. Optional `AI_GATEWAY_MODEL`, `AI_GATEWAY_SPEECH_MODEL`, `AI_GATEWAY_TRANSCRIPTION_MODEL`, and `AI_GATEWAY_SPEECH_VOICE` environment settings override the corresponding UI settings; unset them and restart to use the UI choices. Both `.env` and `.data/` are ignored by Git.
+
+Legacy OpenRouter and OpenAI keys are not reused as Gateway credentials. No credentials ship with the project. The editor, sample house, materials, camera, history, and alternatives work without a key; natural-language generation, transcription, and AI speech require Gateway access.
 
 ## Cost and privacy
 
-- No background model calls or automatic paid retries.
+- No background model calls or app-level automatic paid retries.
 - Up to 10 recent conversation messages plus the current scene are sent per design request. Output is capped at 6,000 tokens.
 - Default daily cap: 60 cloud requests, shared across design, transcription, and cloud speech, persisted across server restarts and reset at UTC midnight. A spoken exchange can use three requests. This is **not a dollar budget**; configure spending limits with providers.
-- The help panel shows provider-reported model cost. Voice charges are additional; see your provider account for complete billing.
+- The help panel shows only provider-reported design cost. Audio charges and unreported design charges are not included; a zero displayed total does not mean calls were free. See Vercel AI Gateway for complete spending.
 - Recordings are capped at 60 seconds and sent only after releasing the key. Audio is processed in memory, not saved as a project asset.
-- Prompts and the current scene go to OpenRouter/its selected model provider. Recorded speech goes to OpenAI. All geometry, rendering, project files, versions, and exports stay local.
+- Design prompts, the current scene, recorded speech, and text for AI spoken replies are sent through Vercel AI Gateway to the selected model providers. All geometry, rendering, project files, versions, and exports stay local.
 - No remote fonts, rendering service, telemetry, or cloud project storage.
 
 ## Editor
@@ -74,16 +83,30 @@ npm test
 npm run build
 ```
 
-Tests cover transactional history, geometry rejection, atomic persistence, bounded agent context, validation of model output, proposals, and failures without retries. Provider behavior is tested with injected mock responses; live voice/model latency and quality still require credentials and a microphone session.
+Tests cover transactional history, geometry rejection, atomic persistence, connection settings and key precedence, bounded agent context, validation of model output, proposals, Gateway request formats, audio validation, and failures without retries. These tests use injected mock provider responses and do not spend API credits.
+
+With the local server running and a Gateway key configured, run the optional live integration check:
+
+```sh
+npm run verify:gateway -- --live
+```
+
+This makes **three small paid requests**: generate a spoken sentence, transcribe that audio, and generate and validate a simple one-room design. It uses three requests from the daily cap and verifies that the saved project remains unchanged. With `ffmpeg` on PATH, generated speech is converted to WebM/Opus to exercise the browser recording format; otherwise the check transcribes the generated WAV directly. `TERRAIN_BASE_URL` can point the check at a different local port. A real microphone session is still needed to assess recording permissions and conversational voice quality.
+
+The default models passed this basic live speech-to-WebM transcription roundtrip and single-room design check with exactly three requests and no saved-project changes. Noisy microphone recordings and complex-scene latency remain unbenchmarked.
 
 ## Architecture
 
 - `shared/model.ts`: validated model, history, palettes, explicit sample.
+- `shared/connections.ts`: public model and voice defaults, shared by the server and settings UI.
 - `server/agent.ts`: bounded structured-output agent request and response validation.
+- `server/gateway.ts`: Vercel Gateway audio requests, audio validation, cost parsing, and safe provider errors.
+- `server/connections.ts`: private key persistence, validated settings, and environment precedence.
 - `server/storage.ts`: serialized atomic project persistence.
 - `server/index.ts`: loopback-only server, private connections, usage cap, voice, Vite/static hosting.
 - `src/SceneView.tsx`: coherent 3D geometry, camera controls, floor plans, and progressive path tracing.
 - `src/App.tsx`: editor, conversation, local saving, undo, alternatives, settings.
 - `src/useVoice.ts`: push-to-talk lifecycle, permissions, release handling, and transcription.
+- `scripts/verify-gateway.ts`: opt-in paid speech, transcription, and design integration check.
 
-Integration references: [OpenRouter structured outputs](https://openrouter.ai/docs/guides/features/structured-outputs), [OpenAI transcription](https://developers.openai.com/api/docs/guides/speech-to-text), [OpenAI speech](https://developers.openai.com/api/docs/guides/text-to-speech), [Three GPU PathTracer](https://github.com/gkjohnson/three-gpu-pathtracer).
+Integration references: [Vercel Gateway structured outputs](https://vercel.com/docs/ai-gateway/sdks-and-apis/openai-chat-completions/structured-outputs), [Vercel Gateway transcription](https://vercel.com/docs/ai-gateway/modalities/speech-to-text), [Vercel Gateway speech](https://vercel.com/docs/ai-gateway/modalities/text-to-speech), [Three GPU PathTracer](https://github.com/gkjohnson/three-gpu-pathtracer).

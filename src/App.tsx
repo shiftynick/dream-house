@@ -41,6 +41,7 @@ import {
 import { api, type Status } from './api';
 import { useVoice } from './useVoice';
 import SceneView, { type Light, type Quality, type View } from './SceneView';
+import { DEFAULT_MODELS, DEFAULT_SPEECH_VOICE } from '../shared/connections';
 import {
   area,
   documentSchema,
@@ -173,11 +174,21 @@ function Connections({
   onClose: () => void;
   onError: (text: string) => void;
 }) {
-  const [router, setRouter] = useState(''),
-    [voice, setVoice] = useState(''),
-    [model, setModel] = useState(status?.model || 'openai/gpt-4.1-mini'),
+  const [gatewayKey, setGatewayKey] = useState(''),
+    [model, setModel] = useState(status?.model || DEFAULT_MODELS.design),
+    [speechModel, setSpeechModel] = useState(status?.speechModel || DEFAULT_MODELS.speech),
+    [transcriptionModel, setTranscriptionModel] = useState(
+      status?.transcriptionModel || DEFAULT_MODELS.transcription,
+    ),
+    [speechVoice, setSpeechVoice] = useState(status?.speechVoice || DEFAULT_SPEECH_VOICE),
     [limit, setLimit] = useState(status?.dailyLimit || 60),
     [saving, setSaving] = useState(false);
+  const keyLabel =
+    status?.keySource === 'saved'
+      ? 'Saved key configured'
+      : status?.keySource === 'environment'
+        ? 'Environment key configured'
+        : 'Key needed';
   return (
     <Modal
       title="A little intelligence, connected."
@@ -193,9 +204,11 @@ function Connections({
               method: 'PUT',
               body: JSON.stringify({
                 model,
+                speechModel,
+                transcriptionModel,
+                speechVoice,
                 dailyLimit: limit,
-                ...(router ? { openrouterKey: router } : {}),
-                ...(voice ? { openaiKey: voice } : {}),
+                ...(gatewayKey.trim() ? { gatewayKey: gatewayKey.trim() } : {}),
               }),
             });
             onSaved();
@@ -213,29 +226,32 @@ function Connections({
           </span>
           <div>
             <h3>
-              The design partner{' '}
-              <span className={`pill ${status?.modelConnected ? 'green' : ''}`}>
-                {status?.modelConnected ? 'Connected' : 'Not connected'}
-              </span>
+              One connection{' '}
+              <span className={`pill ${status?.gatewayConnected ? 'green' : ''}`}>{keyLabel}</span>
             </h3>
-            <p>OpenRouter · layout, materials, and conversation</p>
+            <p>Vercel AI Gateway · design, transcription, and speech</p>
           </div>
         </div>
         <label className="field-label">
-          OpenRouter API key
+          Vercel AI Gateway key
           <input
             type="password"
             autoComplete="off"
-            placeholder={status?.modelConnected ? 'Key saved · leave blank to keep' : 'sk-or-…'}
-            value={router}
-            onChange={(e) => setRouter(e.target.value)}
+            placeholder={
+              status?.gatewayConnected
+                ? 'Key configured · leave blank to keep'
+                : 'Paste your Gateway key'
+            }
+            value={gatewayKey}
+            onChange={(e) => setGatewayKey(e.target.value)}
           />
+          <small>Leave blank to keep your current key. Saving does not test the connection.</small>
         </label>
         <label className="field-label">
-          Model
+          Design model
           <input value={model} onChange={(e) => setModel(e.target.value)} required />
           <small>
-            Choose a model that supports structured outputs. You can change it any time.
+            Use a Gateway model ID that supports structured outputs. You can change it any time.
           </small>
         </label>
         <div className="connection-section">
@@ -243,23 +259,25 @@ function Connections({
             <AudioLines size={19} />
           </span>
           <div>
-            <h3>
-              A voice for your ideas{' '}
-              <span className={`pill ${status?.voiceConnected ? 'green' : ''}`}>
-                {status?.voiceConnected ? 'Connected' : 'Optional'}
-              </span>
-            </h3>
-            <p>OpenAI · push-to-talk transcription and optional AI speech</p>
+            <h3>A voice for your ideas</h3>
+            <p>Push-to-talk transcription and optional AI speech, using the same key</p>
           </div>
         </div>
         <label className="field-label">
-          OpenAI API key
+          Speech model
+          <input value={speechModel} onChange={(e) => setSpeechModel(e.target.value)} required />
+        </label>
+        <label className="field-label">
+          Voice name
+          <input value={speechVoice} onChange={(e) => setSpeechVoice(e.target.value)} required />
+          <small>Choose a voice supported by your speech model. Gemini voices include Kore.</small>
+        </label>
+        <label className="field-label">
+          Transcription model
           <input
-            type="password"
-            autoComplete="off"
-            placeholder={status?.voiceConnected ? 'Key saved · leave blank to keep' : 'sk-…'}
-            value={voice}
-            onChange={(e) => setVoice(e.target.value)}
+            value={transcriptionModel}
+            onChange={(e) => setTranscriptionModel(e.target.value)}
+            required
           />
         </label>
         <label className="field-label">
@@ -280,8 +298,8 @@ function Connections({
         <div className="local-note">
           <House size={17} />
           <span>
-            Keys are saved only on this computer, outside the browser. Your descriptions and current
-            house data are sent to your chosen AI when you ask for a change.
+            Your key is saved on this computer, outside the browser. Design requests, recorded
+            speech, and AI spoken replies use Vercel AI Gateway and your selected providers.
           </span>
         </div>
         <button className="primary full" disabled={saving}>
@@ -315,7 +333,7 @@ export default function App() {
     [versionName, setVersionName] = useState(''),
     [compareId, setCompareId] = useState<string | null>(null),
     [compareSide, setCompareSide] = useState<'current' | 'saved'>('current');
-  const [speech, setSpeech] = useState<'browser' | 'cloud' | 'off'>('browser');
+  const [speech, setSpeech] = useState<'browser' | 'cloud' | 'off'>('cloud');
   const inputRef = useRef<HTMLTextAreaElement>(null),
     chatEnd = useRef<HTMLDivElement>(null),
     audio = useRef<HTMLAudioElement | null>(null),
@@ -388,7 +406,7 @@ export default function App() {
       if (speech === 'browser') {
         if (!window.speechSynthesis || !window.speechSynthesis.getVoices().length) {
           notify(
-            'No system voice is available in this browser. Choose Cloud voice or read the reply on screen.',
+            'No system voice is available in this browser. Choose AI voice or read the reply on screen.',
           );
           return;
         }
@@ -1161,7 +1179,7 @@ export default function App() {
                 <h2>Your design partner</h2>
                 <p>
                   <span className={status?.modelConnected ? 'online-dot' : 'offline-dot'} />
-                  {status?.modelConnected ? 'Ready when you are' : 'Let’s get connected'}
+                  {status?.modelConnected ? 'Gateway key configured' : 'Let’s get connected'}
                 </p>
               </div>
               <IconButton label="Hide design partner" onClick={() => setPartner(false)}>
@@ -1344,7 +1362,7 @@ export default function App() {
                   }}
                 >
                   <option value="browser">System voice · no API cost</option>
-                  <option value="cloud">AI voice · OpenAI</option>
+                  <option value="cloud">AI voice · Vercel Gateway</option>
                   <option value="off">Spoken replies off</option>
                 </select>
               </label>
@@ -1549,8 +1567,8 @@ export default function App() {
             </p>
             <p>
               {status?.usage.requests || 0} / {status?.dailyLimit || 60} cloud requests today.
-              Reported model cost: ${(status?.usage.modelCost || 0).toFixed(4)}. Voice costs are
-              additional and appear in your provider account.
+              Reported design cost: ${(status?.usage.modelCost || 0).toFixed(4)}. This may omit
+              unreported charges and voice usage. Check Vercel AI Gateway for total spending.
             </p>
           </div>
         </Modal>
