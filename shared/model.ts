@@ -1,6 +1,9 @@
 import { z } from 'zod';
 
 export const wallSchema = z.enum(['solid', 'glass', 'door', 'open']);
+export const sideSchema = z.enum(['north', 'south', 'east', 'west']);
+export const paletteSchema = z.enum(['limestone', 'cedar', 'charcoal', 'chalk']);
+export type Side = z.infer<typeof sideSchema>;
 export const roomSchema = z.object({
   id: z.string().min(1).max(60),
   name: z.string().min(1).max(80),
@@ -24,6 +27,7 @@ export const roomSchema = z.object({
   south: wallSchema,
   east: wallSchema,
   west: wallSchema,
+  palette: paletteSchema.optional(),
 });
 export const stairSchema = z.object({
   id: z.string().min(1).max(60),
@@ -35,9 +39,91 @@ export const stairSchema = z.object({
   run: z.number().min(1).max(12),
   rotation: z.number().min(-360).max(360),
 });
+const idSchema = z.string().min(1).max(60);
+export const groupSchema = z.object({
+  id: idSchema,
+  name: z.string().min(1).max(80),
+  roomIds: z.array(idSchema).min(1).max(32),
+});
+export const connectionSchema = z.object({
+  id: idSchema,
+  roomAId: idSchema,
+  roomBId: idSchema,
+  sideA: sideSchema,
+  // World x for a north/south wall; world z for an east/west wall.
+  center: z.number().min(-90).max(90),
+  width: z.number().min(0.8).max(30),
+  height: z.number().min(2).max(10),
+  kind: z.enum(['door', 'open']),
+});
+export const stairLinkSchema = z.object({
+  stairId: idSchema,
+  lowerRoomId: idSchema,
+  upperRoomId: idSchema,
+});
+const requirementBase = {
+  id: idSchema,
+  description: z.string().min(1).max(500),
+  source: z.enum(['confirmed', 'assumption', 'preference']),
+};
+export const lockSnapshotSchema = z.object({
+  x: z.number(),
+  z: z.number(),
+  elevation: z.number(),
+  width: z.number(),
+  depth: z.number(),
+  height: z.number(),
+  palette: paletteSchema,
+});
+export const requirementSchema = z.discriminatedUnion('kind', [
+  z.object({
+    ...requirementBase,
+    kind: z.literal('connectivity'),
+    roomIds: z.array(idSchema).min(1).max(32),
+    targetRoomId: idSchema,
+    indoorOnly: z.boolean(),
+  }),
+  z.object({
+    ...requirementBase,
+    kind: z.literal('symmetry'),
+    pairs: z
+      .array(z.object({ roomAId: idSchema, roomBId: idSchema }))
+      .min(1)
+      .max(16),
+    axis: z.enum(['x', 'z']),
+    center: z.number().min(-60).max(60),
+  }),
+  z.object({
+    ...requirementBase,
+    kind: z.literal('locked'),
+    roomId: idSchema,
+    properties: z
+      .array(z.enum(['position', 'size', 'height', 'material']))
+      .min(1)
+      .max(4),
+    snapshot: lockSnapshotSchema.optional(),
+  }),
+  z.object({
+    ...requirementBase,
+    kind: z.literal('overlook'),
+    upperRoomId: idSchema,
+    lowerRoomId: idSchema,
+  }),
+  z.object({ ...requirementBase, kind: z.literal('intent') }),
+]);
+export const designSchema = z.object({
+  groups: z.array(groupSchema).max(32),
+  connections: z.array(connectionSchema).max(96),
+  stairLinks: z.array(stairLinkSchema).max(12),
+  requirements: z.array(requirementSchema).max(60),
+});
+export type RoomGroup = z.infer<typeof groupSchema>;
+export type Connection = z.infer<typeof connectionSchema>;
+export type DesignRequirement = z.infer<typeof requirementSchema>;
+export type DesignMetadata = z.infer<typeof designSchema>;
 export const sceneSchema = z.object({
   name: z.string().min(1).max(100),
-  palette: z.enum(['limestone', 'cedar', 'charcoal', 'chalk']),
+  palette: paletteSchema,
   roof: z.enum(['flat', 'pitched']),
   slope: z.number().min(0).max(0.35),
   rooms: z.array(roomSchema).max(32),
@@ -50,6 +136,7 @@ export const sceneSchema = z.object({
       height: z.number().min(2).max(16),
     })
     .nullable(),
+  design: designSchema.optional(),
 });
 export type Scene = z.infer<typeof sceneSchema>;
 export type Room = z.infer<typeof roomSchema>;
@@ -59,10 +146,13 @@ export const messageSchema = z.object({
   id: z.string(),
   role: z.enum(['user', 'assistant']),
   text: z.string().max(10000),
+  kind: z.enum(['error', 'status']).optional(),
+  retryText: z.string().max(10000).optional(),
 });
 export type Message = z.infer<typeof messageSchema>;
 export const documentSchema = z.object({
   version: z.literal(1),
+  revision: z.number().int().nonnegative().default(0),
   scene: sceneSchema,
   past: z.array(sceneSchema).max(60),
   future: z.array(sceneSchema).max(60),
@@ -97,6 +187,7 @@ export const emptyScene: Scene = {
 export function newProject(): Project {
   return {
     version: 1,
+    revision: 0,
     scene: structuredClone(emptyScene),
     past: [],
     future: [],

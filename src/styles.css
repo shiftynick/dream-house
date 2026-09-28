@@ -1767,3 +1767,117 @@ kbd {
   padding: 4px 6px;
   color: #526544;
 }
+.design-brief {
+  border-top: 1px solid var(--line);
+  margin-top: 25px;
+  padding-top: 18px;
+}
+.design-brief .panel-note {
+  font-size: 11px;
+  line-height: 1.65;
+  margin-bottom: 14px;
+}
+.requirement-card {
+  padding: 10px;
+  margin-bottom: 9px;
+  border: 1px solid var(--line);
+  background: #fffef9;
+  border-radius: 7px;
+}
+.requirement-heading,
+.requirement-form > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 7px;
+}
+.requirement-heading select,
+.requirement-form select {
+  max-width: 130px;
+  border: 1px solid #dde3d4;
+  border-radius: 4px;
+  padding: 4px;
+  background: #eff3e8;
+  font-size: 10px;
+}
+.requirement-card textarea,
+.requirement-form textarea {
+  display: block;
+  width: 100%;
+  resize: vertical;
+  background: transparent;
+  border: 0;
+  padding: 9px 0 5px;
+  font-size: 11px;
+  line-height: 1.6;
+}
+.requirement-card small {
+  font-size: 9px;
+  color: #89917f;
+  text-transform: capitalize;
+}
+.requirement-form textarea {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 9px;
+  background: #fffef9;
+  margin: 13px 0 5px;
+}
+.message-error strong,
+.proposal-message strong {
+  display: block;
+  font-size: 11px;
+  margin-bottom: 5px;
+}
+.message-error {
+  color: #925c40;
+}
+.retry-request {
+  display: flex;
+  margin-top: 5px;
+  white-space: normal;
+  text-align: left;
+}
+.design-summary {
+  margin: 5px 0 20px 32px;
+  font-size: 11px;
+  color: #717d6c;
+  line-height: 1.6;
+}
+.design-summary summary {
+  cursor: pointer;
+  color: #53694b;
+}
+.design-summary p {
+  margin-top: 7px;
+}
+.design-warning {
+  color: #997647;
+}
+.run-progress {
+  font-size: 11px;
+  line-height: 1.7;
+}
+.run-progress .thinking-dots {
+  margin-top: 7px;
+}
+.view-context-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  color: #8a9483;
+  margin: 9px 0 0;
+}
+.view-context-control input {
+  accent-color: var(--green);
+  margin: 0;
+}
+.selected-context {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  font-size: 10px;
+  color: #6c7c61;
+  margin-top: 7px;
+}

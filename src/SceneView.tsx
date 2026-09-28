@@ -3,11 +3,16 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, Html } from '@react-three/drei';
 import * as THREE from 'three';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
-import { palettes, type Room, type Scene } from '../shared/model';
+import { palettes, type Palette, type Room, type Scene } from '../shared/model';
+import { roomSlabs, stairFootprint, wallAxis, wallPanels, type Rect } from './renderGeometry';
 
 export type Quality = 'live' | 'refined' | 'clay' | 'wireframe';
 export type View = 'orbit' | 'walk' | 'plan';
 export type Light = 'day' | 'golden' | 'evening';
+export type CameraContext = {
+  position: [number, number, number];
+  target: [number, number, number];
+};
 type Props = {
   house: Scene;
   quality: Quality;
@@ -18,6 +23,7 @@ type Props = {
   onSelect: (id: string | null) => void;
   onRenderStatus: (text: string) => void;
   resetKey: number;
+  onCameraChange?: (camera: CameraContext) => void;
 };
 
 function makeTexture(kind: 'stone' | 'wood' | 'ground') {
@@ -84,6 +90,7 @@ function Box({
   );
 }
 function RoomMesh({
+  house,
   room: r,
   materials: m,
   roof,
@@ -92,6 +99,7 @@ function RoomMesh({
   onSelect,
   quality,
 }: {
+  house: Scene;
   room: Room;
   materials: Record<string, THREE.Material>;
   roof: Scene['roof'];
@@ -101,63 +109,61 @@ function RoomMesh({
   quality: Quality;
 }) {
   const outdoor = ['terrace', 'courtyard'].includes(r.kind);
+  const slabs = useMemo(() => roomSlabs(house, r), [house, r]);
+  const slab = (rect: Rect, y: number, height: number, material: THREE.Material, index: number) => (
+    <Box
+      key={index}
+      position={[(rect.minX + rect.maxX) / 2 - r.x, y, (rect.minZ + rect.maxZ) / 2 - r.z]}
+      size={[rect.maxX - rect.minX, height, rect.maxZ - rect.minZ]}
+      material={material}
+    />
+  );
   const wall = (side: 'north' | 'south' | 'east' | 'west') => {
-    const type = r[side];
-    if (type === 'open') return null;
-    const horizontal = side === 'north' || side === 'south';
-    const length = horizontal ? r.width : r.depth;
+    if (cutaway && (side === 'south' || side === 'east')) return null;
+    const { horizontal } = wallAxis(r, side);
     const position: [number, number, number] = horizontal
       ? [0, 0, ((side === 'north' ? -1 : 1) * r.depth) / 2]
       : [((side === 'west' ? -1 : 1) * r.width) / 2, 0, 0];
-    const rotation = horizontal ? 0 : Math.PI / 2;
-    if (cutaway && (side === 'south' || side === 'east')) return null;
+    const panels = wallPanels(house, r, side);
     return (
-      <group key={side} position={position} rotation={[0, rotation, 0]}>
-        {type === 'solid' ? (
-          <Box position={[0, r.height / 2, 0]} size={[length, r.height, 0.2]} material={m.wall} />
-        ) : type === 'glass' ? (
-          <>
-            <Box
-              position={[0, r.height / 2, 0]}
-              size={[length - 0.1, r.height - 0.12, 0.04]}
-              material={m.glass}
-              cast={false}
-            />
-            {[0, r.height].map((y) => (
-              <Box key={y} position={[0, y, 0]} size={[length, 0.09, 0.12]} material={m.frame} />
-            ))}
-            {Array.from(
-              { length: Math.ceil(length / 2.2) + 1 },
-              (_, i) => -length / 2 + (i * length) / Math.ceil(length / 2.2),
-            ).map((x) => (
+      <group key={side} position={position} rotation={[0, horizontal ? 0 : -Math.PI / 2, 0]}>
+        {panels.map((panel, index) =>
+          r[side] === 'glass' ? (
+            <group key={index} position={[panel.offset, panel.bottom, 0]}>
               <Box
-                key={x}
-                position={[x, r.height / 2, 0]}
-                size={[0.06, r.height, 0.12]}
-                material={m.frame}
+                position={[0, panel.height / 2, 0]}
+                size={[panel.width, panel.height, 0.04]}
+                material={m.glass}
+                cast={false}
               />
-            ))}
-          </>
-        ) : (
-          <>
+              {[0, panel.height].map((y) => (
+                <Box
+                  key={y}
+                  position={[0, y, 0]}
+                  size={[panel.width, 0.09, 0.12]}
+                  material={m.frame}
+                />
+              ))}
+              {Array.from(
+                { length: Math.ceil(panel.width / 2.2) + 1 },
+                (_, i) => -panel.width / 2 + (i * panel.width) / Math.ceil(panel.width / 2.2),
+              ).map((x) => (
+                <Box
+                  key={x}
+                  position={[x, panel.height / 2, 0]}
+                  size={[0.06, panel.height, 0.12]}
+                  material={m.frame}
+                />
+              ))}
+            </group>
+          ) : (
             <Box
-              position={[-(length + 1.3) / 4, r.height / 2, 0]}
-              size={[(length - 1.3) / 2, r.height, 0.2]}
+              key={index}
+              position={[panel.offset, panel.bottom + panel.height / 2, 0]}
+              size={[panel.width, panel.height, 0.2]}
               material={m.wall}
             />
-            <Box
-              position={[(length + 1.3) / 4, r.height / 2, 0]}
-              size={[(length - 1.3) / 2, r.height, 0.2]}
-              material={m.wall}
-            />
-            {r.height > 2.4 && (
-              <Box
-                position={[0, 2.4 + (r.height - 2.4) / 2, 0]}
-                size={[1.3, r.height - 2.4, 0.2]}
-                material={m.wall}
-              />
-            )}
-          </>
+          ),
         )}
       </group>
     );
@@ -179,29 +185,16 @@ function RoomMesh({
         onSelect();
       }}
     >
-      <Box
-        position={[0, -0.15, 0]}
-        size={[r.width + 0.16, 0.3, r.depth + 0.16]}
-        material={outdoor ? m.deck : m.floor}
-      />
-      {/* A shallow perimeter foundation keeps floors legible above the hillside. */}
-      <Box position={[0, -0.5, 0]} size={[r.width, 0.4, r.depth]} material={m.foundation} />
+      {slabs.floor.map((rect, index) => slab(rect, -0.15, 0.3, outdoor ? m.deck : m.floor, index))}
+      {slabs.foundation.map((rect, index) => slab(rect, -0.5, 0.4, m.foundation, index))}
       {!outdoor && (
         <>
           {(['north', 'south', 'east', 'west'] as const).map(wall)}
           {!cutaway &&
-            (roof === 'flat' ? (
+            (roof === 'flat' || slabs.roofClipped ? (
               <>
-                <Box
-                  position={[0, r.height + 0.1, 0]}
-                  size={[r.width + 0.65, 0.22, r.depth + 0.65]}
-                  material={m.roof}
-                />
-                <Box
-                  position={[0, r.height - 0.06, 0]}
-                  size={[r.width + 0.75, 0.1, r.depth + 0.75]}
-                  material={m.wood}
-                />
+                {slabs.roof.map((rect, index) => slab(rect, r.height + 0.1, 0.22, m.roof, index))}
+                {slabs.roof.map((rect, index) => slab(rect, r.height - 0.06, 0.1, m.wood, index))}
               </>
             ) : (
               <mesh
@@ -462,57 +455,74 @@ function Architecture({
   selected,
   onSelect,
 }: Pick<Props, 'house' | 'quality' | 'cutaway' | 'selected' | 'onSelect'>) {
-  const p = palettes[house.palette];
   const textures = useMemo(() => ({ stone: makeTexture('stone'), wood: makeTexture('wood') }), []);
   useEffect(() => () => Object.values(textures).forEach((t) => t.dispose()), [textures]);
-  const m = useMemo(() => {
-    const wireframe = quality === 'wireframe',
-      clay = quality === 'clay';
-    const mat = (color: string, roughness = 0.8, map: THREE.Texture | null = null) =>
-      new THREE.MeshStandardMaterial({
-        color: clay ? '#e0dcd1' : color,
-        roughness,
-        wireframe,
-        map: clay ? null : map,
-      });
-    return {
-      wall: mat(
-        p.wall,
-        0.85,
-        house.palette === 'cedar' || house.palette === 'charcoal' ? textures.wood : textures.stone,
+  const materialSets = useMemo(
+    () =>
+      Object.fromEntries(
+        (Object.keys(palettes) as Palette[]).map((palette) => {
+          const p = palettes[palette];
+          const wireframe = quality === 'wireframe',
+            clay = quality === 'clay';
+          const mat = (color: string, roughness = 0.8, map: THREE.Texture | null = null) =>
+            new THREE.MeshStandardMaterial({
+              color: clay ? '#e0dcd1' : color,
+              roughness,
+              wireframe,
+              map: clay ? null : map,
+            });
+          return [
+            palette,
+            {
+              wall: mat(
+                p.wall,
+                0.85,
+                palette === 'cedar' || palette === 'charcoal' ? textures.wood : textures.stone,
+              ),
+              wood: mat(p.wood, 0.65, textures.wood),
+              floor: mat(p.floor, 0.7, textures.wood),
+              roof: mat(p.roof),
+              frame: mat(p.accent, 0.3),
+              foundation: mat('#a19d8f', 1, textures.stone),
+              deck: mat('#bcbaa7', 0.9, textures.stone),
+              fabric: mat('#e2decd', 1),
+              rug: mat('#bcb8a4', 1),
+              glass:
+                clay || wireframe
+                  ? mat('#cad8d3', 0.2)
+                  : new THREE.MeshPhysicalMaterial({
+                      color: '#d2e5df',
+                      roughness: 0.08,
+                      metalness: 0.05,
+                      transparent: true,
+                      opacity: quality === 'refined' ? 1 : 0.26,
+                      transmission: quality === 'refined' ? 0.94 : 0,
+                      thickness: 0.04,
+                      ior: 1.45,
+                      side: THREE.DoubleSide,
+                    }),
+            },
+          ];
+        }),
       ),
-      wood: mat(p.wood, 0.65, textures.wood),
-      floor: mat(p.floor, 0.7, textures.wood),
-      roof: mat(p.roof),
-      frame: mat(p.accent, 0.3),
-      foundation: mat('#a19d8f', 1, textures.stone),
-      deck: mat('#bcbaa7', 0.9, textures.stone),
-      fabric: mat('#e2decd', 1),
-      rug: mat('#bcb8a4', 1),
-      glass:
-        clay || wireframe
-          ? mat('#cad8d3', 0.2)
-          : new THREE.MeshPhysicalMaterial({
-              color: '#d2e5df',
-              roughness: 0.08,
-              metalness: 0.05,
-              transparent: true,
-              opacity: quality === 'refined' ? 1 : 0.26,
-              transmission: quality === 'refined' ? 0.94 : 0,
-              thickness: 0.04,
-              ior: 1.45,
-              side: THREE.DoubleSide,
-            }),
-    };
-  }, [p, house.palette, quality, textures]);
-  useEffect(() => () => Object.values(m).forEach((material) => material.dispose()), [m]);
+    [quality, textures],
+  );
+  useEffect(
+    () => () =>
+      Object.values(materialSets).forEach((set) =>
+        Object.values(set).forEach((material) => material.dispose()),
+      ),
+    [materialSets],
+  );
+  const m = materialSets[house.palette];
   return (
     <group>
       {house.rooms.map((r) => (
         <RoomMesh
           key={r.id}
+          house={house}
           room={r}
-          materials={m}
+          materials={materialSets[r.palette ?? house.palette]}
           roof={house.roof}
           cutaway={cutaway}
           selected={selected === r.id}
@@ -561,10 +571,18 @@ function Architecture({
     </group>
   );
 }
-function CameraRig({ view, resetKey, house }: { view: View; resetKey: number; house: Scene }) {
+function CameraRig({
+  view,
+  resetKey,
+  house,
+  onCameraChange,
+}: Pick<Props, 'view' | 'resetKey' | 'house' | 'onCameraChange'>) {
   const controls = useRef<OrbitControlsImpl>(null);
   const { camera, gl } = useThree();
   const pressed = useRef(new Set<string>());
+  const report = useRef(onCameraChange);
+  report.current = onCameraChange;
+  const lastReport = useRef({ time: -1, coordinates: [] as number[] });
   useEffect(() => {
     if (view === 'walk') {
       const room = house.rooms.find((r) => r.kind === 'living') || house.rooms[0];
@@ -624,6 +642,25 @@ function CameraRig({ view, resetKey, house }: { view: View; resetKey: number; ho
     if (pressed.current.has('KeyD')) camera.position.addScaledVector(right, speed);
     if (pressed.current.has('KeyE')) camera.position.y += speed;
     if (pressed.current.has('KeyQ')) camera.position.y -= speed;
+  });
+  useFrame(({ clock }) => {
+    if (!report.current || clock.elapsedTime - lastReport.current.time < 0.25) return;
+    const target =
+      view === 'orbit' && controls.current
+        ? controls.current.target
+        : camera.getWorldDirection(new THREE.Vector3()).multiplyScalar(5).add(camera.position);
+    const position = camera.position.toArray() as [number, number, number];
+    const focus = target.toArray() as [number, number, number];
+    const coordinates = [...position, ...focus];
+    if (
+      !coordinates.some(
+        (value, index) =>
+          Math.abs(value - (lastReport.current.coordinates[index] ?? Infinity)) > 0.001,
+      )
+    )
+      return;
+    lastReport.current = { time: clock.elapsedTime, coordinates };
+    report.current({ position, target: focus });
   });
   return view === 'orbit' ? (
     <OrbitControls
@@ -750,7 +787,7 @@ function FloorPlan({ house, selected, onSelect }: Pick<Props, 'house' | 'selecte
       <div className="plan-heading">
         <span className="eyebrow">THE SAME HOUSE, ANOTHER PERSPECTIVE</span>
         <h2>Room by room.</h2>
-        <p>Dimensions in meters · select a space to inspect it</p>
+        <p>Dimensions in meters · gaps show openings · select a space to inspect it</p>
       </div>
       <div className="plan-levels">
         {(levels.length ? levels : [0]).map((level) => (
@@ -771,7 +808,10 @@ function FloorPlan({ house, selected, onSelect }: Pick<Props, 'house' | 'selecte
                     role="button"
                     aria-label={`Select ${r.name}`}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter') onSelect(r.id);
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        onSelect(r.id);
+                      }
                     }}
                     style={{ cursor: 'pointer' }}
                   >
@@ -785,10 +825,12 @@ function FloorPlan({ house, selected, onSelect }: Pick<Props, 'house' | 'selecte
                           ? '#dac5a6'
                           : ['courtyard', 'terrace'].includes(r.kind)
                             ? '#dce3d0'
-                            : '#efeee7'
+                            : palettes[r.palette ?? house.palette].floor
                       }
-                      stroke="#657263"
-                      strokeWidth={0.13}
+                      fillOpacity={selected === r.id ? 1 : 0.48}
+                      stroke={['courtyard', 'terrace'].includes(r.kind) ? '#899b7c' : 'none'}
+                      strokeWidth={0.08}
+                      strokeDasharray=".25 .15"
                     />
                     <text
                       x={r.x}
@@ -804,6 +846,85 @@ function FloorPlan({ house, selected, onSelect }: Pick<Props, 'house' | 'selecte
                     </text>
                   </g>
                 ))}
+              <g pointerEvents="none">
+                {house.rooms
+                  .filter(
+                    (room) =>
+                      room.elevation === level && !['courtyard', 'terrace'].includes(room.kind),
+                  )
+                  .flatMap((room) =>
+                    (['north', 'south', 'east', 'west'] as const).flatMap((side) => {
+                      const axis = wallAxis(room, side);
+                      // Each floor owns its plan outline even when a neighboring
+                      // double-height room supplies that surface in the 3D model.
+                      return wallPanels(house, room, side, false)
+                        .filter((panel) => panel.bottom < 1 && panel.bottom + panel.height > 1)
+                        .map((panel, index) => {
+                          const start = axis.center + panel.offset - panel.width / 2;
+                          const end = axis.center + panel.offset + panel.width / 2;
+                          return (
+                            <line
+                              key={`${room.id}-${side}-${index}`}
+                              x1={axis.horizontal ? start : axis.boundary}
+                              y1={axis.horizontal ? axis.boundary : start}
+                              x2={axis.horizontal ? end : axis.boundary}
+                              y2={axis.horizontal ? axis.boundary : end}
+                              stroke={room[side] === 'glass' ? '#779faa' : '#536353'}
+                              strokeWidth={room[side] === 'glass' ? 0.09 : 0.18}
+                              strokeLinecap="butt"
+                            />
+                          );
+                        });
+                    }),
+                  )}
+                {house.stairs
+                  .filter(
+                    (stair) =>
+                      level >= stair.elevation - 0.01 &&
+                      level <= stair.elevation + stair.rise + 0.01,
+                  )
+                  .map((stair) => {
+                    const footprint = stairFootprint(stair, 0);
+                    return (
+                      <g key={stair.id}>
+                        <rect
+                          x={footprint.minX}
+                          y={footprint.minZ}
+                          width={footprint.maxX - footprint.minX}
+                          height={footprint.maxZ - footprint.minZ}
+                          fill="#e9e4d7"
+                          stroke="#899483"
+                          strokeWidth={0.05}
+                        />
+                        <g
+                          transform={`translate(${stair.x} ${stair.z}) rotate(${-stair.rotation})`}
+                        >
+                          {Array.from({ length: Math.ceil(stair.rise / 0.18) }, (_, index) => (
+                            <line
+                              key={index}
+                              x1={-stair.width / 2}
+                              x2={stair.width / 2}
+                              y1={
+                                -stair.run / 2 + (index * stair.run) / Math.ceil(stair.rise / 0.18)
+                              }
+                              y2={
+                                -stair.run / 2 + (index * stair.run) / Math.ceil(stair.rise / 0.18)
+                              }
+                              stroke="#899483"
+                              strokeWidth={0.04}
+                            />
+                          ))}
+                          <path
+                            d={`M 0 ${-stair.run * 0.35} V ${stair.run * 0.35} m -.18 -.3 l .18 .3 .18 -.3`}
+                            fill="none"
+                            stroke="#526a59"
+                            strokeWidth={0.06}
+                          />
+                        </g>
+                      </g>
+                    );
+                  })}
+              </g>
             </svg>
           </div>
         ))}

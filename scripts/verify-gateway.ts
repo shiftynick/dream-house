@@ -1,8 +1,10 @@
-// Opt-in integration check. Three paid requests; never modifies the saved project.
+// Opt-in integration check. Two audio calls plus bounded agent rounds; never commits a design.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { performance } from 'node:perf_hooks';
 import { emptyScene, agentResponseSchema, validateScene } from '../shared/model.ts';
+import { validateDesignChange } from '../shared/design.ts';
+import type { HarnessResult } from '../shared/harness.ts';
 
 if (!process.argv.includes('--live')) {
   console.error(
@@ -23,7 +25,7 @@ async function request(route: string, body?: unknown, contentType = 'application
         : Buffer.isBuffer(body)
           ? new Uint8Array(body)
           : JSON.stringify(body),
-    signal: AbortSignal.timeout(100000),
+    signal: AbortSignal.timeout(310000),
   });
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
@@ -31,6 +33,7 @@ async function request(route: string, body?: unknown, contentType = 'application
   }
   return response;
 }
+let savedProjectBefore: string | undefined;
 try {
   const status = await (await request('status')).json();
   assert.ok(
@@ -38,10 +41,10 @@ try {
     'Configure AI_GATEWAY_API_KEY in .env or a saved Vercel key, then restart the server if using .env.',
   );
   assert.ok(
-    status.dailyLimit - status.usage.requests >= 3,
-    'At least three cloud requests must remain today.',
+    status.dailyLimit - status.usage.requests >= 8,
+    'Reserve eight cloud request slots: two audio calls and at most six agent model rounds.',
   );
-  const before = await (await request('project')).text();
+  savedProjectBefore = await (await request('project')).text();
   const text = 'Make the kitchen face the courtyard, with a fireplace in the living room.';
   let start = performance.now();
   const speechResponse = await request('speak', { text });
@@ -98,36 +101,48 @@ try {
     }),
   );
   start = performance.now();
-  const design = agentResponseSchema.parse(
-    await (
-      await request('agent', {
-        scene: emptyScene,
-        messages: [
-          {
-            id: 'verification',
-            role: 'user',
-            text: 'Create exactly one simple rectangular living room, 6 meters wide and 5 meters deep, on a flat site. One story, limestone walls, flat roof, a glass south wall. No other rooms or stairs. Use sensible defaults and do not ask a question.',
-          },
-        ],
-      })
-    ).json(),
-  );
+  const result: HarnessResult = await (
+    await request('agent', {
+      runId: crypto.randomUUID(),
+      previewOnly: true,
+      scene: emptyScene,
+      messages: [
+        {
+          id: 'verification',
+          role: 'user',
+          text: 'Create exactly one simple rectangular living room, 6 meters wide and 5 meters deep, on a flat site. One story, limestone walls, flat roof, a glass south wall. No other rooms or stairs. Use sensible defaults and do not ask a question.',
+        },
+      ],
+    })
+  ).json();
+  const design = agentResponseSchema.parse(result);
   assert.ok(design.scene);
   validateScene(design.scene);
   assert.equal(design.scene.rooms.length, 1);
   assert.equal(design.scene.rooms[0].width, 6);
   assert.equal(design.scene.rooms[0].depth, 5);
+  assert.deepEqual(
+    validateDesignChange(emptyScene, design.scene).filter((issue) => issue.severity === 'error'),
+    [],
+  );
+  assert.equal(
+    result.draftId,
+    undefined,
+    'A preview-only check must never produce a committable draft.',
+  );
   console.log(
     JSON.stringify({
       check: 'design',
       model: status.model,
       rooms: design.scene.rooms.length,
+      modelCalls: result.usage.calls,
+      reportedModelCost: result.usage.cost,
       seconds: +((performance.now() - start) / 1000).toFixed(2),
     }),
   );
   assert.equal(
     await (await request('project')).text(),
-    before,
+    savedProjectBefore,
     'The saved house must not change during verification.',
   );
   const after = await (await request('status')).json();
@@ -135,10 +150,24 @@ try {
     JSON.stringify({
       result: 'passed',
       requests: after.usage.requests - status.usage.requests,
+      expectedRequests: 2 + result.usage.calls,
       savedProjectUnchanged: true,
     }),
   );
 } catch (error) {
   console.error(error instanceof Error ? error.message : 'Verification failed.');
   process.exitCode = 1;
+} finally {
+  if (savedProjectBefore !== undefined) {
+    try {
+      assert.equal(
+        await (await request('project')).text(),
+        savedProjectBefore,
+        'The saved house changed during verification.',
+      );
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : 'Could not verify the saved project.');
+      process.exitCode = 1;
+    }
+  }
 }

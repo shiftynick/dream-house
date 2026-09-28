@@ -1,6 +1,6 @@
 # Terrain
 
-A local, voice-first architectural concept studio. Start on an empty hillside, describe a home, and refine one persistent 3D model.
+A local, voice-first architectural concept studio. Start on an empty hillside, describe a home, and refine one persistent 3D model. The design agent uses architectural operations, checks its work, and can repair a draft before applying it.
 
 ## Run
 
@@ -11,7 +11,7 @@ npm install
 npm run dev
 ```
 
-Open **http://localhost:5173**. The server binds to `127.0.0.1` only. The same server handles the interface, local storage, and provider requests.
+Open **http://localhost:5173**. The server binds to `127.0.0.1` and handles the interface, local storage, and provider requests.
 
 For a production build:
 
@@ -20,11 +20,13 @@ npm run build
 npm start
 ```
 
+`PORT` changes the local port. `TERRAIN_DATA_DIR` selects a separate project/settings directory for isolated testing; it defaults to `.data/` in the repository.
+
 ## Connect the AI
 
-Open **Connections and settings** in the top bar and enter one **Vercel AI Gateway key** for design, transcription, and spoken replies. Click **Save connections**. The panel identifies whether a saved or environment key is configured; this does not verify provider access.
+Open **Connections and settings**, enter one **Vercel AI Gateway key**, and click **Save connections**. The panel identifies whether a saved or environment key is configured; this does not verify provider access.
 
-The editable defaults live in `shared/connections.ts`:
+The editable defaults live in [`shared/connections.ts`](shared/connections.ts):
 
 | Purpose                 | Model / voice                      |
 | ----------------------- | ---------------------------------- |
@@ -33,50 +35,57 @@ The editable defaults live in `shared/connections.ts`:
 | Speech voice            | `Kore`                             |
 | Transcription           | `spacexai/grok-stt`                |
 
-Use Gateway model IDs. The design model must support structured outputs; choose a voice supported by your speech model. Spoken replies default to **AI voice · Vercel Gateway**. **System voice** uses browser speech synthesis with no API charge if your browser provides a voice, and replies can also be turned off.
+Use Gateway model IDs. The design model must support function/tool calling; sending a viewport image also requires image input support. Choose a voice supported by the speech model. Replies default to **AI voice · Vercel Gateway**. **System voice** uses browser speech synthesis when available; replies can also be turned off.
 
-The key and settings persist across browser and server restarts in `.data/connections.json`. Writes use an atomic rename and owner-only `0600` file permissions. The file contains plaintext credentials; the server never returns keys to the browser or includes them in project exports. Leave the key field blank when saving other settings to preserve the existing key.
+Keys and settings persist across restarts in `.data/connections.json`, written with an atomic rename and owner-only `0600` permissions. Credentials are plaintext in that local file; the server never returns them to the browser or includes them in project exports. Leave the key field blank when saving other settings to preserve the existing key.
 
-Alternatively, copy `.env.example` to `.env`, set `AI_GATEWAY_API_KEY`, and restart the server. A key saved in Connections takes precedence over the environment key. Optional `AI_GATEWAY_MODEL`, `AI_GATEWAY_SPEECH_MODEL`, `AI_GATEWAY_TRANSCRIPTION_MODEL`, and `AI_GATEWAY_SPEECH_VOICE` environment settings override the corresponding UI settings; unset them and restart to use the UI choices. Both `.env` and `.data/` are ignored by Git.
+Alternatively, copy `.env.example` to `.env`, set `AI_GATEWAY_API_KEY`, and restart. A key saved in Connections takes precedence. Optional `AI_GATEWAY_MODEL`, `AI_GATEWAY_SPEECH_MODEL`, `AI_GATEWAY_TRANSCRIPTION_MODEL`, and `AI_GATEWAY_SPEECH_VOICE` environment settings override UI model choices; unset them and restart to use UI settings. `.env` and `.data/` are ignored by Git. Keep any custom data directory out of source control too.
 
-Legacy OpenRouter and OpenAI keys are not reused as Gateway credentials. No credentials ship with the project. The editor, sample house, materials, camera, history, and alternatives work without a key; natural-language generation, transcription, and AI speech require Gateway access.
+Legacy OpenRouter and direct OpenAI keys are not reused as Gateway credentials. Existing saved model choices are preserved; select Sonnet in Connections if an older installation uses a different model. No credentials ship with the project. Local editing, rendering, history, and alternatives work without a key.
+
+## Designing with the agent
+
+1. Type an instruction, or hold **Space** outside text fields/the microphone button and release to transcribe. Enter sends typed text; Shift+Enter adds a line.
+2. The agent receives the house and persistent brief, the last ten messages, your selected room, and the active view/camera. Select a room before saying “make this bigger.”
+3. It uses local commands to attach wings, resize rooms from an edge, move groups, connect doorways or floors, change materials, and preserve requirements. Coordinates and related movements are calculated by the geometry engine.
+4. Edits happen in an unsaved draft. The interface shows progress, changes, issues, and valid previews. Structured validation errors can trigger a bounded repair pass. **Cancel** stops the run and discards its draft.
+5. A valid modest edit is committed automatically as one undo step. Deletions, substantial area changes, changes to protected requirements, and explicit agent proposals require review. A failed attempt leaves the saved geometry unchanged and offers a retry.
+
+The **Design brief** keeps confirmed requirements, assumptions, and preferences with the house. The agent can create machine-checked connectivity, symmetry, locked-room, and overlook requirements. You can edit descriptions/sources or add freeform notes. Freeform notes inform the agent but are not geometric assertions.
+
+**Include current 3D view with my request** is off by default. Enabling it sends a small image of the house viewport with subsequent 3D-view requests. It does not capture the desktop, and no image is sent from plan view. Visual context supplements numerical geometry checks; the agent does not run an automatic rendered-image review after every operation.
+
+## Editor and rendering
+
+- Orbit and pan, inspect a floor plan with wall openings and stairs, or enter the walkthrough. Walkthrough: click the view, WASD to move, Q/E down/up, Shift to move faster, Escape to release the mouse. Movement has no collision or gravity simulation.
+- Choose Live, Clay, Wireframe, or Light study. Light study progressively path-traces the same geometry, resets on camera changes, and accumulates up to 128 samples. Shader compilation can be slow on integrated GPUs; the browser/OS chooses the GPU.
+- Select a space to edit its name, dimensions, position, use, walls, and room palette. Whole-house material choices reset individual room overrides. Roof style and terrain slope are editable.
+- Undo/redo use buttons or Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z. Save named alternatives and compare them using the same camera. Restoring an alternative is undoable.
+- Export/import project JSON, export a PNG of the 3D view, or start a new house from Alternatives. Starting over preserves history and saved alternatives. The optional sample never loads by default.
 
 ## Cost and privacy
 
-- No background model calls or app-level automatic paid retries.
-- Up to 10 recent conversation messages plus the current scene are sent per design request. Output is capped at 6,000 tokens.
-- Default daily cap: 60 cloud requests, shared across design, transcription, and cloud speech, persisted across server restarts and reset at UTC midnight. A spoken exchange can use three requests. This is **not a dollar budget**; configure spending limits with providers.
-- The help panel shows only provider-reported design cost. Audio charges and unreported design charges are not included; a zero displayed total does not mean calls were free. See Vercel AI Gateway for complete spending.
-- Recordings are capped at 60 seconds and sent only after releasing the key. Audio is processed in memory, not saved as a project asset.
-- Design prompts, the current scene, recorded speech, and text for AI spoken replies are sent through Vercel AI Gateway to the selected model providers. All geometry, rendering, project files, versions, and exports stay local.
-- No remote fonts, rendering service, telemetry, or cloud project storage.
+- No background model calls. A design run can make **up to six model calls**, with up to two repair opportunities and twenty tool calls. Local geometry operations do not make provider calls. Provider failures and truncated responses are not automatically retried; geometry repair does involve additional paid model calls.
+- Each model response is capped at 6,000 output tokens. The initial request contains the current house/brief and ten recent messages; subsequent rounds include tool results from that run.
+- The default daily cap is **60 cloud requests**, shared across every design round, transcription, and speech. It persists across restarts and resets at UTC midnight. A spoken exchange uses a variable number of requests. This is a request cap, not a dollar budget.
+- Displayed costs include only reported design charges. Audio charges and unreported design charges are excluded; check Vercel AI Gateway for complete spending. A run with any unknown model charge reports its total as unknown.
+- Recordings are capped at 60 seconds and sent after release. Audio is processed in memory, not stored as a project asset.
+- Prompts, geometry, brief/context, optional viewport images, recorded speech, and spoken-reply text go through Vercel AI Gateway to the selected providers. Rendering, saved projects, history, alternatives, and exports stay local.
+- Local run summaries retain stages, issues, changes, model name, and available usage for diagnosis. They omit keys, viewport images, raw audio, and private model reasoning. There are no remote fonts, telemetry, rendering services, or cloud project storage.
 
-## Editor
+## Local files and existing projects
 
-- Hold **Space** outside text fields, or hold the microphone button, to speak. Release to transcribe and submit.
-- Type as an alternative. Enter sends; Shift+Enter adds a line.
-- Orbit and pan around the house, inspect a floor plan, or enter the free-movement walkthrough.
-- Walkthrough: click the view, use WASD to move, Q/E down/up, Shift for faster movement, Escape to release the mouse. Collision and gravity are not implemented.
-- Choose Live, Clay, Wireframe, or Light study. Light study progressively path-traces the same geometry, pauses/reset on camera changes, and accumulates up to 128 samples. Initial shader compilation can be slow, especially on integrated GPUs. GPU selection is controlled by the browser/OS; the app requests a high-performance context but cannot force NVIDIA.
-- Select a space to edit its name, dimensions, position, use, and wall types. Changes are undoable.
-- Materials offers four immediate visual alternatives. Roof styles and terrain slope are editable.
-- Undo/redo work with buttons or Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z.
-- Save named alternatives and compare them with the current house using the same camera. Restoring a version is undoable.
-- Export/import project JSON, export a PNG of the 3D view, or start a new house from Alternatives. Starting over preserves undo and saved alternatives.
+`.data/project.json` stores the house, up to 60 undo/redo steps, 30 alternatives, and 100 messages. Queued saves use atomic renames. Invalid saves do not replace a valid file; corrupt files produce an error instead of silently resetting the project. Exports provide portable backups. Other local files are `connections.json`, `usage.json`, and `runs/<run-id>.json`.
 
-The agent can apply a small change directly, ask a question, or present a proposed scene for confirmation. Responses are validated before mutation. Out-of-range dimensions, duplicate IDs, and overlapping enclosed room volumes are rejected.
+Project saves carry a revision number. A stale tab receives a conflict instead of overwriting a newer house. Use one editing tab at a time; this is conflict protection, not collaborative editing. Draft proposals live in server memory for 30 minutes and disappear on server restart. Committed edits remain in project history.
 
-The current harness makes one structured-output model request for each design instruction. Typed text goes directly to the agent; held-key audio is transcribed first. The request includes the complete current scene and the last ten conversation messages. The model returns a short reply and either a complete replacement scene or no scene when it needs to ask a question. The server checks the schema and room geometry and requires review for substantial deletions. Valid edits update the shared 3D model, enter undo history, and save locally; the reply is then spoken when enabled. There is no tool loop or automatic geometry-repair pass: an invalid proposed scene is rejected and leaves the current house unchanged.
-
-## Local files
-
-`.data/project.json` stores the house, up to 60 undo steps, saved alternatives, and up to 100 messages. Saves are queued and atomically renamed. Invalid saves do not replace a valid file. A corrupt existing file produces an error rather than silently resetting the project. Keep a backup by exporting periodically. Use one editing tab at a time; concurrent collaborative editing is not implemented.
+Older version-1 projects load without conversion: missing revisions default to zero, missing relationship metadata means an empty brief/graph, and rooms inherit the house palette unless overridden. Existing centered door flags remain usable. Old disconnected rooms or unlinked stairs can appear as warnings; the agent does not silently invent missing relationships or redesign unrelated spaces. New draft edits must preserve existing routes and connect new interior rooms, unless an explicit confirmed requirement permits a real courtyard route.
 
 ## Scope
 
-This is an initial working concept editor, not a CAD/BIM application or construction-ready design tool. Current architecture uses rectangular rooms, solid/glazed/open/door walls, flat/pitched roofs, stairs, and a central fireplace. Furniture and planting are schematic. The floor plan shows room footprints and dimensions, not detailed construction drawings. Wall joins, circulation, stair safety, accessibility, structure, arbitrary forms, and production-level photoreal assets still need refinement. Do not treat a generated design as an engineered building.
+Terrain is an architectural concept editor. It supports rectangular room volumes, aligned openings, groups, linked straight stairs, flat/pitched roofs, terrain, and a fireplace. Validation checks overlaps, connections, stair landing references, circulation changes, and supported requirements. Furniture and planting remain schematic.
 
-The optional sample reflects the discovery conversation. It never loads by default; new projects start with an empty site. The sample and manual controls are not a substitute for or simulation of AI generation.
+This is not a CAD/BIM or construction-document system. It does not solve general floor-plan constraints, arbitrary wall shapes, structural engineering, accessibility, building codes, or comprehensive stair safety. Shared walls use one rendered surface. Linked stairs cut upper slabs; legacy unlinked stairs have no inferred openings. Partially covered pitched roofs use flat exposed patches to avoid intruding into upper rooms. Floor plans are concept views, and realistic assets/joins need further refinement.
 
 ## Checks
 
@@ -85,32 +94,33 @@ npm test
 npm run build
 ```
 
-Tests cover transactional history, geometry rejection, atomic persistence, connection settings and key precedence, bounded agent context, validation of model output, proposals, Gateway request formats, audio validation, and failures without retries. These tests use injected mock provider responses and do not spend API credits.
+Tests exercise semantic geometry, persistent requirements, legacy compatibility, valid previews, bounded repair, cancellation, confirmation, atomic persistence, revision conflicts, idempotent commits, rendering geometry, and the actual HTTP adapter. Provider responses are injected mocks; these tests spend no API credits.
 
-With the local server running and a Gateway key configured, run the optional live integration check:
+With the server running and a Gateway key configured, opt into paid verification:
 
 ```sh
 npm run verify:gateway -- --live
+npm run verify:design -- --live --case selected
 ```
 
-This makes **three small paid requests**: generate a spoken sentence, transcribe that audio, and generate and validate a simple one-room design. It uses three requests from the daily cap and verifies that the saved project remains unchanged. With `ffmpeg` on PATH, generated speech is converted to WebM/Opus to exercise the browser recording format; otherwise the check transcribes the generated WAV directly. `TERRAIN_BASE_URL` can point the check at a different local port. A real microphone session is still needed to assess recording permissions and conversational voice quality.
+The Gateway check synthesizes a sentence, transcribes the generated audio, and runs a bounded design task. The two audio calls plus design rounds use up to eight paid requests. With `ffmpeg` available, transcription exercises WebM/Opus; otherwise it uses WAV. The design check defaults to a small selected-room material edit; `--case attach`, `empty`, `resize`, or `all` exercise other synthetic scenarios, with up to six model calls per case.
 
-The initial Gateway integration passed this basic live speech-to-WebM transcription roundtrip and single-room design check with exactly three requests and no saved-project changes. That run used `openai/gpt-4.1-mini` for design, with the current speech and transcription defaults.
-
-The current `anthropic/claude-sonnet-5.5` design default also passed a bedroom-layout edit to an existing 12-room house through the actual interface, using an isolated project copy. The result passed geometry validation, saved locally, survived reload, and supported undo and redo; the spoken reply played successfully. The design request took about 26.9 seconds and reported $0.040768 in Gateway cost, excluding speech. This is one successful sample, not a general latency, cost, or design-quality benchmark. The original saved project was preserved. Noisy microphone recordings remain unbenchmarked.
+Both scripts use preview-only fixtures, report actual usage, and verify that the saved project stays byte-identical. They do not commit generated designs. `TERRAIN_BASE_URL` selects another loopback port. Microphone permissions and real-world recording quality still need a microphone session.
 
 ## Architecture
 
-- `shared/model.ts`: validated model, history, palettes, explicit sample.
-- `shared/connections.ts`: public model and voice defaults, shared by the server and settings UI.
-- `server/agent.ts`: bounded structured-output agent request and response validation.
-- `server/gateway.ts`: Vercel Gateway audio requests, audio validation, cost parsing, and safe provider errors.
-- `server/connections.ts`: private key persistence, validated settings, and environment precedence.
-- `server/storage.ts`: serialized atomic project persistence.
-- `server/index.ts`: loopback-only server, private connections, usage cap, voice, Vite/static hosting.
-- `src/SceneView.tsx`: coherent 3D geometry, camera controls, floor plans, and progressive path tracing.
-- `src/App.tsx`: editor, conversation, local saving, undo, alternatives, settings.
-- `src/useVoice.ts`: push-to-talk lifecycle, permissions, release handling, and transcription.
-- `scripts/verify-gateway.ts`: opt-in paid speech, transcription, and design integration check.
+The geometry engine, draft lifecycle, model adapter, and HTTP server are separate. [`docs/architecture.md`](docs/architecture.md) describes the contracts, validation policy, control API, and extension points. The same commands and application service can support a future MCP adapter. **No MCP server is implemented or exposed.**
 
-Integration references: [Vercel Gateway structured outputs](https://vercel.com/docs/ai-gateway/sdks-and-apis/openai-chat-completions/structured-outputs), [Vercel Gateway transcription](https://vercel.com/docs/ai-gateway/modalities/speech-to-text), [Vercel Gateway speech](https://vercel.com/docs/ai-gateway/modalities/text-to-speech), [Three GPU PathTracer](https://github.com/gkjohnson/three-gpu-pathtracer).
+| Component                                       | Responsibility                                                                        |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `shared/model.ts`, `shared/geometry.ts`         | Validated document, history, dimensions, adjacency, circulation helpers               |
+| `shared/design.ts`                              | Semantic command schemas, deterministic execution, inspection, requirement validation |
+| `shared/draft.ts`, `shared/harness.ts`          | Unsaved drafts, change/confirmation rules, context, progress contracts                |
+| `server/agent.ts`                               | Tool-using model loop, prompt, repair limits, Gateway model adapter                   |
+| `server/design-service.ts`, `server/storage.ts` | Shared draft/commit service and revisioned atomic persistence                         |
+| `server/app.ts`, `server/index.ts`              | HTTP controls, agent runs, usage, voice, Vite/static hosting                          |
+| `server/gateway.ts`, `server/connections.ts`    | Audio transports, credentials, settings, provider errors                              |
+| `src/SceneView.tsx`, `src/renderGeometry.ts`    | 3D/plan geometry, openings, slab cutouts, camera context, path tracing                |
+| `src/App.tsx`, `src/useVoice.ts`                | Editor, proposals, brief, saving, alternatives, push-to-talk                          |
+
+Integration references: [Vercel Gateway Chat Completions](https://vercel.com/docs/ai-gateway/sdks-and-apis/openai-chat-completions), [Gateway transcription](https://vercel.com/docs/ai-gateway/modalities/speech-to-text), [Gateway speech](https://vercel.com/docs/ai-gateway/modalities/text-to-speech), [Three GPU PathTracer](https://github.com/gkjohnson/three-gpu-pathtracer).

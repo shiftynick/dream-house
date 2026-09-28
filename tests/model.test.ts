@@ -12,7 +12,8 @@ import {
   validateScene,
 } from '../shared/model.ts';
 import { ProjectStore } from '../server/storage.ts';
-import { runAgent } from '../server/agent.ts';
+import { gatewayAgentModel } from '../server/agent.ts';
+import { GatewayError } from '../server/gateway.ts';
 
 test('new projects start empty; undo, redo, and branching preserve the previous design', () => {
   const initial = newProject();
@@ -79,128 +80,76 @@ test('local storage serializes writes and preserves the last valid project if a 
     await rm(directory, { recursive: true, force: true });
   }
 });
-test('agent sends a bounded scene context and validates returned edits', async () => {
-  let body: any;
-  const scene = sampleScene();
-  const fetcher = (async (url: unknown, init: RequestInit) => {
+test('agent gateway adapter sends documented tool contracts and preserves usage', async () => {
+  const signal = new AbortController().signal;
+  let requests = 0;
+  const client = gatewayAgentModel('test-only', 'anthropic/claude-sonnet-5.5', (async (
+    url,
+    init,
+  ) => {
+    requests++;
     assert.equal(url, 'https://ai-gateway.vercel.sh/v1/chat/completions');
-    assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer test-only');
-    body = JSON.parse(String(init.body));
+    assert.equal(new Headers(init?.headers).get('Authorization'), 'Bearer test-only');
+    assert.equal(init?.signal, signal);
+    const body = JSON.parse(String(init?.body));
+    assert.equal(body.model, 'anthropic/claude-sonnet-5.5');
+    assert.equal(body.provider, undefined);
+    assert.equal(body.response_format, undefined);
+    assert.equal(body.tool_choice, 'required');
+    assert.equal(body.parallel_tool_calls, false);
+    assert.ok(body.max_tokens > 0 && body.max_tokens <= 6000);
+    assert.deepEqual(
+      body.tools.map((tool: { function: { name: string } }) => tool.function.name).sort(),
+      ['apply_operations', 'finish_design', 'inspect_design', 'reset_draft'],
+    );
+    assert.ok(
+      body.tools.every(
+        (tool: { function: { parameters: { type: string } } }) =>
+          tool.function.parameters.type === 'object',
+      ),
+    );
     return Response.json({
       choices: [
         {
-          finish_reason: 'stop',
+          finish_reason: 'tool_calls',
           message: {
-            content: JSON.stringify({
-              reply: 'I changed the exterior to cedar.',
-              needsConfirmation: false,
-              scene: { ...scene, palette: 'cedar' },
-            }),
+            content: null,
+            tool_calls: [
+              {
+                id: 'done',
+                type: 'function',
+                function: {
+                  name: 'finish_design',
+                  arguments: JSON.stringify({ mode: 'question', reply: 'Which room?' }),
+                },
+              },
+            ],
           },
         },
       ],
-      usage: { prompt_tokens: 500, completion_tokens: 400, cost: 0.0005 },
+      usage: { prompt_tokens: 500, completion_tokens: 40, cost: 0.0005 },
     });
-  }) as typeof fetch;
-  const result = await runAgent({
-    key: 'test-only',
-    model: 'test-model',
-    scene,
-    messages: Array.from({ length: 15 }, (_, i) => ({
-      id: String(i),
-      role: 'user',
-      text: 'Use cedar',
-    })),
-    fetcher,
-  });
-  assert.equal(result.scene?.palette, 'cedar');
-  assert.equal(body.messages.length, 12);
-  assert.equal(body.provider, undefined);
-  assert.equal(body.response_format.json_schema.strict, true);
+  }) as typeof fetch);
+  const result = await client.complete([{ role: 'user', content: 'Make it bigger' }], signal);
+  assert.equal(requests, 1);
+  assert.equal(result.calls[0].function.name, 'finish_design');
   assert.equal(result.usage.cost, 0.0005);
-  assert.equal(scene.palette, 'limestone');
-});
-test('agent rejects truncated, malformed, or invalid geometry without automatic paid retries', async () => {
-  for (const response of [
-    { choices: [{ finish_reason: 'length', message: { content: '{"scene":' } }] },
-    { choices: [{ finish_reason: 'stop', message: { content: 'not JSON' } }] },
-    {
-      choices: [
-        {
-          finish_reason: 'stop',
-          message: {
-            content: JSON.stringify({
-              reply: 'Done',
-              needsConfirmation: false,
-              scene: { ...sampleScene(), slope: 50 },
-            }),
-          },
-        },
-      ],
-    },
-  ]) {
-    let calls = 0;
-    const scene = sampleScene();
-    await assert.rejects(
-      runAgent({
-        key: 'test-only',
-        model: 'test-model',
-        scene,
-        messages: [{ id: '1', role: 'user', text: 'Change it' }],
-        fetcher: (async () => {
-          calls++;
-          return Response.json(response);
-        }) as typeof fetch,
-      }),
-    );
-    assert.equal(calls, 1);
-    assert.equal(scene.slope, 0.16);
-  }
-});
-test('major changes remain proposals, while clarification leaves geometry alone', async () => {
-  for (const result of [
-    {
-      reply: 'Would you like to replace the layout?',
-      needsConfirmation: true,
-      scene: sampleScene(),
-    },
-    { reply: 'Which side should the kitchen be on?', needsConfirmation: false, scene: null },
-  ]) {
-    const returned = await runAgent({
-      key: 'test-only',
-      model: 'test-model',
-      scene: newProject().scene,
-      messages: [{ id: '1', role: 'user', text: 'Change it' }],
-      fetcher: (async () =>
-        Response.json({
-          choices: [{ message: { content: JSON.stringify(result) } }],
-        })) as typeof fetch,
-    });
-    assert.equal(returned.needsConfirmation, result.needsConfirmation);
-    assert.deepEqual(returned.scene, result.scene);
-  }
+  assert.equal(result.usage.inputTokens, 500);
+  assert.equal(result.usage.outputTokens, 40);
+  assert.equal(result.truncated, false);
 });
 
-test('substantial deletion always requires review even when the model forgets to ask', async () => {
-  const result = await runAgent({
-    key: 'test-only',
-    model: 'test-model',
-    scene: sampleScene(),
-    messages: [{ id: '1', role: 'user', text: 'Make it simpler' }],
-    fetcher: (async () =>
-      Response.json({
-        choices: [
-          {
-            message: {
-              content: JSON.stringify({
-                reply: 'Here is a smaller direction.',
-                needsConfirmation: false,
-                scene: newProject().scene,
-              }),
-            },
-          },
-        ],
-      })) as typeof fetch,
+test('agent gateway adapter rejects provider failures without retries or secret leakage', async () => {
+  let calls = 0;
+  const client = gatewayAgentModel('test-secret', 'test/model', (async () => {
+    calls++;
+    return Response.json({ error: 'test-secret' }, { status: 429 });
+  }) as typeof fetch);
+  await assert.rejects(client.complete([]), (error) => {
+    assert.ok(error instanceof GatewayError);
+    assert.doesNotMatch(error.message, /test-secret/);
+    assert.match(error.message, /429/);
+    return true;
   });
-  assert.equal(result.needsConfirmation, true);
+  assert.equal(calls, 1);
 });

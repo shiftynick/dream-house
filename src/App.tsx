@@ -38,10 +38,13 @@ import {
   VolumeX,
   X,
 } from 'lucide-react';
-import { api, type Status } from './api';
+import { api, ApiError, type Status } from './api';
+import { useProject } from './useProject';
 import { useVoice } from './useVoice';
-import SceneView, { type Light, type Quality, type View } from './SceneView';
+import SceneView, { type CameraContext, type Light, type Quality, type View } from './SceneView';
 import { DEFAULT_MODELS, DEFAULT_SPEECH_VOICE } from '../shared/connections';
+import type { DraftCommitResult, HarnessResult, RunStatus } from '../shared/harness';
+import { executeCommands, validateDesign } from '../shared/design';
 import {
   area,
   documentSchema,
@@ -53,13 +56,31 @@ import {
   sampleScene,
   undo,
   validateScene,
-  type AgentResponse,
-  type Project,
+  type DesignRequirement,
   type Room,
   type Scene,
 } from '../shared/model';
 
 const uid = () => crypto.randomUUID();
+type DesignResult = HarnessResult;
+type RunProgress = Pick<RunStatus, 'message' | 'status'> & {
+  stage: RunStatus['stage'] | 'saving' | 'committing';
+  preview?: Scene | null;
+};
+
+function captureViewport(): string | undefined {
+  const canvas = document.querySelector<HTMLCanvasElement>('.viewport canvas');
+  if (!canvas?.width || !canvas.height) return;
+  const thumbnail = document.createElement('canvas');
+  const scale = Math.min(1, 640 / Math.max(canvas.width, canvas.height));
+  thumbnail.width = Math.round(canvas.width * scale);
+  thumbnail.height = Math.round(canvas.height * scale);
+  const context = thumbnail.getContext('2d');
+  if (!context) return;
+  context.drawImage(canvas, 0, 0, thumbnail.width, thumbnail.height);
+  const image = thumbnail.toDataURL('image/jpeg', 0.72);
+  return image.length <= 1_000_000 ? image : undefined;
+}
 const qualityNames: Record<Quality, string> = {
   live: 'Live',
   refined: 'Light study',
@@ -312,10 +333,7 @@ function Connections({
 }
 
 export default function App() {
-  const [project, setProject] = useState<Project | null>(null),
-    [loadError, setLoadError] = useState('');
-  const [status, setStatus] = useState<Status | null>(null),
-    [saved, setSaved] = useState<'saving' | 'saved' | 'error'>('saved');
+  const [status, setStatus] = useState<Status | null>(null);
   const [selected, setSelected] = useState<string | null>(null),
     [quality, setQuality] = useState<Quality>('live'),
     [view, setView] = useState<View>('orbit'),
@@ -329,7 +347,7 @@ export default function App() {
     [busy, setBusy] = useState(false),
     [error, setError] = useState(''),
     [renderStatus, setRenderStatus] = useState('Live rendering');
-  const [pending, setPending] = useState<Scene | null>(null),
+  const [pending, setPending] = useState<DesignResult | null>(null),
     [versionName, setVersionName] = useState(''),
     [compareId, setCompareId] = useState<string | null>(null),
     [compareSide, setCompareSide] = useState<'current' | 'saved'>('current');
@@ -340,51 +358,37 @@ export default function App() {
     audioUrl = useRef<string | null>(null),
     speechRun = useRef(0),
     busyRef = useRef(false),
-    projectRef = useRef(project),
-    saveQueue = useRef(Promise.resolve()),
-    saveRevision = useRef(0);
-  projectRef.current = project;
+    runIdRef = useRef<string | null>(null),
+    cancelledRef = useRef(false);
+  const [runProgress, setRunProgress] = useState<RunProgress | null>(null);
+  const [lastResult, setLastResult] = useState<DesignResult | null>(null);
+  const [includeView, setIncludeView] = useState(false);
+  const cameraRef = useRef<CameraContext | undefined>(undefined);
+  const onCameraChange = useCallback((camera: CameraContext) => {
+    cameraRef.current = camera;
+  }, []);
+  const [requirementText, setRequirementText] = useState('');
+  const [requirementSource, setRequirementSource] =
+    useState<DesignRequirement['source']>('confirmed');
   const notify = useCallback((text: string) => setError(text), []);
   const refreshStatus = useCallback(() => {
     api<Status>('status')
       .then(setStatus)
       .catch(() => {});
   }, []);
+  const {
+    project,
+    projectRef,
+    setProject,
+    saved,
+    loadError,
+    flush,
+    acceptPersisted,
+    markConflict,
+  } = useProject(notify);
   useEffect(() => {
-    api<Project>('project')
-      .then((data) => setProject(documentSchema.parse(data)))
-      .catch((e) => setLoadError(e.message));
     refreshStatus();
   }, [refreshStatus]);
-  useEffect(() => {
-    if (!project) return;
-    const revision = ++saveRevision.current;
-    setSaved('saving');
-    const timer = setTimeout(() => {
-      saveQueue.current = saveQueue.current
-        .catch(() => {})
-        .then(async () => {
-          try {
-            await api('project', { method: 'PUT', body: JSON.stringify(project) });
-            if (revision === saveRevision.current) setSaved('saved');
-          } catch (e) {
-            if (revision === saveRevision.current) setSaved('error');
-            notify(`Could not save: ${(e as Error).message}`);
-          }
-        });
-    }, 350);
-    return () => clearTimeout(timer);
-  }, [project, notify]);
-  useEffect(() => {
-    const warn = (e: BeforeUnloadEvent) => {
-      if (saved !== 'saved') {
-        e.preventDefault();
-        e.returnValue = '';
-      }
-    };
-    window.addEventListener('beforeunload', warn);
-    return () => window.removeEventListener('beforeunload', warn);
-  }, [saved]);
   useEffect(() => {
     chatEnd.current?.scrollIntoView({ behavior: 'smooth' });
   }, [project?.messages.length, busy]);
@@ -399,7 +403,7 @@ export default function App() {
   }, []);
   useEffect(() => () => stopSpeech(), [stopSpeech]);
   const speak = useCallback(
-    async (text: string) => {
+    async (text: string, designApplied = false) => {
       stopSpeech();
       const run = speechRun.current;
       if (speech === 'off') return;
@@ -429,7 +433,9 @@ export default function App() {
         await audio.current.play();
         refreshStatus();
       } catch (e) {
-        notify((e as Error).message);
+        notify(
+          `${designApplied ? 'Design applied' : 'Your design response is ready'}, but the spoken reply failed: ${(e as Error).message}`,
+        );
       }
     },
     [speech, notify, refreshStatus, stopSpeech],
@@ -438,6 +444,8 @@ export default function App() {
     (scene: Scene) => {
       try {
         validateScene(scene);
+        const problem = validateDesign(scene).find((issue) => issue.severity === 'error');
+        if (problem) throw new Error(problem.message);
         setProject((p) => (p ? editProject(p, scene) : p));
         setCompareId(null);
         setPending(null);
@@ -445,15 +453,134 @@ export default function App() {
         notify((e as Error).message);
       }
     },
-    [notify],
+    [notify, setProject],
   );
   const mutateRoom = (patch: Partial<Room>) => {
     if (!project || !selected) return;
-    commit({
-      ...project.scene,
-      rooms: project.scene.rooms.map((r) => (r.id === selected ? { ...r, ...patch } : r)),
-    });
+    const room = project.scene.rooms.find((item) => item.id === selected);
+    if (!room) return;
+    const position =
+      patch.x !== undefined || patch.z !== undefined || patch.elevation !== undefined;
+    const dimensions =
+      patch.width !== undefined || patch.depth !== undefined || patch.height !== undefined;
+    const command = patch.palette
+      ? { type: 'set_material', palette: patch.palette, roomIds: [selected] }
+      : position
+        ? {
+            type: 'move_group',
+            roomIds: [selected],
+            dx: (patch.x ?? room.x) - room.x,
+            dz: (patch.z ?? room.z) - room.z,
+            elevationDelta: (patch.elevation ?? room.elevation) - room.elevation,
+          }
+        : dimensions
+          ? {
+              type: 'resize_room',
+              roomId: selected,
+              ...patch,
+              anchor: 'center',
+              moveConnected: true,
+            }
+          : { type: 'update_room', roomId: selected, patch };
+    const result = executeCommands(project.scene, [command]);
+    if (!result.applied) {
+      notify(result.issues.map((issue) => issue.message).join(' '));
+      return;
+    }
+    commit(result.scene);
   };
+  const applyDraft = useCallback(
+    async (result: DesignResult, confirm: boolean) => {
+      if (!result.draftId)
+        throw new Error('The agent did not return a committable draft. Please retry.');
+      const latest = await flush();
+      if (!latest) throw new Error('Your project is not loaded yet.');
+      setRunProgress({
+        stage: 'committing',
+        status: 'running',
+        message: 'Saving the validated design…',
+      });
+      const committed = await api<DraftCommitResult>(`design/drafts/${result.draftId}/commit`, {
+        method: 'POST',
+        body: JSON.stringify({ expectedRevision: latest.revision, confirm }),
+      });
+      const wasEmpty = !latest.scene.rooms.length;
+      acceptPersisted(committed.project);
+      setPending(null);
+      setCompareId(null);
+      if (!committed.project.scene.rooms.some((room) => room.id === selected)) setSelected(null);
+      if (wasEmpty && committed.project.scene.rooms.length) setResetKey((key) => key + 1);
+      void speak(committed.reply, true);
+    },
+    [flush, acceptPersisted, selected, speak],
+  );
+  const discardDraft = useCallback(async () => {
+    if (!pending?.draftId) return;
+    try {
+      await api(`design/drafts/${pending.draftId}`, { method: 'DELETE' });
+      setPending(null);
+      setLastResult(null);
+      setRunProgress(null);
+    } catch (error) {
+      notify((error as Error).message);
+    }
+  }, [pending, notify]);
+  const keepDraft = useCallback(async () => {
+    if (!pending || busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    try {
+      await applyDraft(pending, true);
+    } catch (error) {
+      if (error instanceof ApiError && error.code === 'revision_conflict') markConflict();
+      notify((error as Error).message);
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
+  }, [pending, applyDraft, notify, markConflict]);
+  const cancelRun = useCallback(async () => {
+    cancelledRef.current = true;
+    setRunProgress(
+      (progress) => progress && { ...progress, message: 'Cancelling this design request…' },
+    );
+    const runId = runIdRef.current;
+    if (runId) {
+      try {
+        await api(`agent/runs/${runId}/cancel`, { method: 'POST' });
+      } catch {
+        /* A request still flushing local saves has not registered its run yet. */
+      }
+    }
+  }, []);
+  useEffect(() => {
+    if (!busy) return;
+    let active = true;
+    let fetching = false;
+    const poll = async () => {
+      if (!runIdRef.current || fetching) return;
+      fetching = true;
+      try {
+        const runId = runIdRef.current;
+        const result = await api<RunProgress>(`agent/runs/${runId}`);
+        if (active && cancelledRef.current && result.status === 'running') {
+          await api(`agent/runs/${runId}/cancel`, { method: 'POST' });
+        }
+        if (active && !cancelledRef.current) setRunProgress(result);
+      } catch {
+        /* The run becomes visible after the request is accepted. */
+      } finally {
+        fetching = false;
+      }
+    };
+    const interval = setInterval(() => {
+      void poll();
+    }, 500);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [busy]);
   const send = useCallback(
     async (text: string) => {
       text = text.trim();
@@ -461,6 +588,14 @@ export default function App() {
       if (!text || !current || busyRef.current) return;
       if (pending) {
         notify('Keep or discard the proposed change before making another request.');
+        return;
+      }
+      if (compareId) {
+        notify('Exit comparison before asking for a change to your current house.');
+        return;
+      }
+      if (saved === 'conflict') {
+        notify('Reload the saved project before asking for another design change.');
         return;
       }
       stopSpeech();
@@ -494,50 +629,122 @@ export default function App() {
         setModal('connections');
         return;
       }
-      const messages = [...current.messages, { id: uid(), role: 'user' as const, text }].slice(
-        -100,
+      setProject((p) =>
+        p
+          ? {
+              ...p,
+              messages: [...p.messages, { id: uid(), role: 'user' as const, text }].slice(-100),
+            }
+          : p,
       );
-      setProject((p) => (p ? { ...p, messages } : p));
       busyRef.current = true;
+      cancelledRef.current = false;
+      runIdRef.current = uid();
       setBusy(true);
+      setRunProgress({
+        stage: 'saving',
+        status: 'running',
+        message: 'Saving your latest changes…',
+      });
       try {
-        const result = await api<AgentResponse>('agent', {
+        const latest = await flush();
+        if (!latest) throw new Error('Your project is not loaded yet.');
+        if (cancelledRef.current) throw new Error('Design request cancelled.');
+        const result = await api<DesignResult>('agent', {
           method: 'POST',
-          body: JSON.stringify({ scene: current.scene, messages }),
+          body: JSON.stringify({
+            runId: runIdRef.current,
+            scene: latest.scene,
+            messages: latest.messages,
+            baseRevision: latest.revision,
+            context: {
+              selectedRoomId: selected,
+              view,
+              ...(view !== 'plan' && cameraRef.current ? { camera: cameraRef.current } : {}),
+              ...(includeView && view !== 'plan' ? { image: captureViewport() } : {}),
+            },
+          }),
         });
-        setProject((p) => {
-          if (!p) return p;
-          const next = result.scene && !result.needsConfirmation ? editProject(p, result.scene) : p;
-          return {
-            ...next,
-            messages: [
-              ...next.messages,
-              { id: uid(), role: 'assistant' as const, text: result.reply },
-            ].slice(-100),
-          };
-        });
-        if (result.scene && result.needsConfirmation) setPending(result.scene);
-        if (result.scene) {
-          setCompareId(null);
-          setSelected(null);
-          if (!current.scene.rooms.length) setResetKey((k) => k + 1);
+        runIdRef.current = null;
+        if (cancelledRef.current) {
+          if (result.draftId) await api(`design/drafts/${result.draftId}`, { method: 'DELETE' });
+          throw new Error('Design request cancelled.');
         }
-        void speak(result.reply);
-      } catch (e) {
-        notify((e as Error).message);
+        if (result.scene) {
+          if (result.needsConfirmation) {
+            setPending(result);
+            setCompareId(null);
+          } else await applyDraft(result, false);
+        } else {
+          setProject((p) =>
+            p
+              ? {
+                  ...p,
+                  messages: [
+                    ...p.messages,
+                    { id: uid(), role: 'assistant' as const, text: result.reply },
+                  ].slice(-100),
+                }
+              : p,
+          );
+          await flush();
+          void speak(result.reply);
+        }
+        setLastResult(result);
+      } catch (error) {
+        if (error instanceof ApiError && error.code === 'revision_conflict') markConflict();
+        const message = cancelledRef.current
+          ? 'Design request cancelled. Your house is unchanged.'
+          : (error as Error).message;
+        setProject((p) =>
+          p
+            ? {
+                ...p,
+                messages: [
+                  ...p.messages,
+                  {
+                    id: uid(),
+                    role: 'assistant' as const,
+                    text: message,
+                    kind: cancelledRef.current ? ('status' as const) : ('error' as const),
+                    retryText: text,
+                  },
+                ].slice(-100),
+              }
+            : p,
+        );
+        if (!cancelledRef.current) notify(message);
       } finally {
+        runIdRef.current = null;
         busyRef.current = false;
         setBusy(false);
         refreshStatus();
       }
     },
-    [status, pending, notify, refreshStatus, speak, stopSpeech],
+    [
+      status,
+      pending,
+      compareId,
+      saved,
+      notify,
+      refreshStatus,
+      speak,
+      stopSpeech,
+      setProject,
+      projectRef,
+      flush,
+      selected,
+      view,
+      includeView,
+      applyDraft,
+      markConflict,
+    ],
   );
   const voice = useVoice({
     onText: send,
     onError: notify,
     enabled: !!status?.voiceConnected,
-    busy: busy || !!modal || !!pending,
+    busy: busy || !!modal || !!pending || saved === 'conflict',
   });
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
@@ -545,6 +752,9 @@ export default function App() {
         (e.ctrlKey || e.metaKey) &&
         e.key.toLowerCase() === 'z' &&
         !busyRef.current &&
+        !pending &&
+        !compareId &&
+        saved !== 'conflict' &&
         !(e.target as HTMLElement).closest('input,textarea')
       ) {
         e.preventDefault();
@@ -554,7 +764,7 @@ export default function App() {
     };
     window.addEventListener('keydown', key);
     return () => window.removeEventListener('keydown', key);
-  }, []);
+  }, [pending, compareId, saved, setProject]);
   const closeModal = useCallback(() => setModal(null), []);
   const download = () => {
     if (!project) return;
@@ -579,7 +789,8 @@ export default function App() {
     a.click();
   };
   const saveVersion = () => {
-    if (!project || !versionName.trim()) return;
+    if (!project || !versionName.trim() || busyRef.current || pending || saved === 'conflict')
+      return;
     if (project.variants.length >= 30) {
       notify('You have 30 saved alternatives. Remove one before saving another.');
       return;
@@ -625,10 +836,25 @@ export default function App() {
       </div>
     );
   const house = project.scene;
+  const requirements = house.design?.requirements || [];
+  const updateRequirements = (next: DesignRequirement[]) => {
+    commit({
+      ...house,
+      design: {
+        groups: house.design?.groups || [],
+        connections: house.design?.connections || [],
+        stairLinks: house.design?.stairLinks || [],
+        requirements: next,
+      },
+    });
+  };
   const selectedRoom = house.rooms.find((r) => r.id === selected);
   const comparison = project.variants.find((v) => v.id === compareId);
-  const displayed = pending || (comparison && compareSide === 'saved' ? comparison.scene : house);
-  const locked = busy || !!pending || !!comparison;
+  const displayed =
+    pending?.scene ||
+    (busy ? runProgress?.preview : null) ||
+    (comparison && compareSide === 'saved' ? comparison.scene : house);
+  const locked = busy || !!pending || !!comparison || saved === 'conflict';
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -643,7 +869,9 @@ export default function App() {
         <span className="header-divider" />
         <div className="project-title">
           <span>{house.name}</span>
-          <span className={`save-state ${saved === 'error' ? 'failed' : ''}`}>
+          <span
+            className={`save-state ${saved === 'error' || saved === 'conflict' ? 'failed' : ''}`}
+          >
             {saved === 'saved' ? (
               <CheckCheck size={12} />
             ) : saved === 'saving' ? (
@@ -655,7 +883,9 @@ export default function App() {
               ? 'Saved on this device'
               : saved === 'saving'
                 ? 'Saving locally…'
-                : 'Save failed'}
+                : saved === 'conflict'
+                  ? 'Save conflict · reload needed'
+                  : 'Save failed'}
           </span>
         </div>
         <nav className="header-actions">
@@ -834,11 +1064,34 @@ export default function App() {
                         </label>
                       ))}
                     </div>
+                    <label className="field-label">
+                      Room material
+                      <select
+                        disabled={locked}
+                        value={selectedRoom.palette ?? house.palette}
+                        onChange={(event) =>
+                          mutateRoom({ palette: event.target.value as Room['palette'] })
+                        }
+                      >
+                        {Object.entries(palettes).map(([id, palette]) => (
+                          <option key={id} value={id}>
+                            {palette.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
                     <button
                       className="text-button danger"
                       disabled={locked}
                       onClick={() => {
-                        commit({ ...house, rooms: house.rooms.filter((r) => r.id !== selected) });
+                        const result = executeCommands(house, [
+                          { type: 'remove_objects', ids: [selected] },
+                        ]);
+                        if (!result.applied) {
+                          notify(result.issues.map((issue) => issue.message).join(' '));
+                          return;
+                        }
+                        commit(result.scene);
                         setSelected(null);
                       }}
                     >
@@ -875,6 +1128,123 @@ export default function App() {
                     onChange={(e) => commit({ ...house, slope: Number(e.target.value) })}
                   />
                 </label>
+                <section className="design-brief" aria-label="Design brief">
+                  <div className="section-title">
+                    <span>YOUR DESIGN BRIEF</span>
+                  </div>
+                  <p className="panel-note">
+                    Keep the ideas the agent should remember. Confirmed requirements carry more
+                    weight than assumptions and preferences.
+                  </p>
+                  {requirements.map((requirement) => (
+                    <div className="requirement-card" key={requirement.id}>
+                      <div className="requirement-heading">
+                        <select
+                          aria-label={`Source for ${requirement.description}`}
+                          disabled={locked}
+                          value={requirement.source}
+                          onChange={(event) =>
+                            updateRequirements(
+                              requirements.map((item) =>
+                                item.id === requirement.id
+                                  ? {
+                                      ...item,
+                                      source: event.target.value as DesignRequirement['source'],
+                                    }
+                                  : item,
+                              ),
+                            )
+                          }
+                        >
+                          <option value="confirmed">Confirmed</option>
+                          <option value="assumption">Assumption</option>
+                          <option value="preference">Preference</option>
+                        </select>
+                        <button
+                          className="tiny-button"
+                          aria-label={`Remove requirement ${requirement.description}`}
+                          disabled={locked}
+                          onClick={() =>
+                            updateRequirements(
+                              requirements.filter((item) => item.id !== requirement.id),
+                            )
+                          }
+                        >
+                          <X size={13} />
+                        </button>
+                      </div>
+                      <textarea
+                        key={`${requirement.id}-${requirement.description}`}
+                        aria-label={`Requirement ${requirement.id}`}
+                        disabled={locked}
+                        maxLength={500}
+                        rows={3}
+                        defaultValue={requirement.description}
+                        onBlur={(event) => {
+                          const description = event.target.value.trim();
+                          if (description && description !== requirement.description)
+                            updateRequirements(
+                              requirements.map((item) =>
+                                item.id === requirement.id ? { ...item, description } : item,
+                              ),
+                            );
+                        }}
+                      />
+                      <small>
+                        {requirement.kind === 'intent'
+                          ? 'Design note'
+                          : `${requirement.kind} · geometry checked`}
+                      </small>
+                    </div>
+                  ))}
+                  <form
+                    className="requirement-form"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      if (!requirementText.trim() || locked) return;
+                      updateRequirements([
+                        ...requirements,
+                        {
+                          id: uid(),
+                          kind: 'intent',
+                          source: requirementSource,
+                          description: requirementText.trim(),
+                        },
+                      ]);
+                      setRequirementText('');
+                    }}
+                  >
+                    <textarea
+                      aria-label="New design requirement"
+                      placeholder="Keep the fireplace centered…"
+                      rows={3}
+                      maxLength={500}
+                      disabled={locked || requirements.length >= 60}
+                      value={requirementText}
+                      onChange={(event) => setRequirementText(event.target.value)}
+                    />
+                    <div>
+                      <select
+                        aria-label="New requirement source"
+                        disabled={locked}
+                        value={requirementSource}
+                        onChange={(event) =>
+                          setRequirementSource(event.target.value as DesignRequirement['source'])
+                        }
+                      >
+                        <option value="confirmed">Confirmed</option>
+                        <option value="assumption">Assumption</option>
+                        <option value="preference">Preference</option>
+                      </select>
+                      <button
+                        className="text-button"
+                        disabled={locked || !requirementText.trim() || requirements.length >= 60}
+                      >
+                        <Plus size={13} /> Add note
+                      </button>
+                    </div>
+                  </form>
+                </section>
               </>
             ) : (
               <>
@@ -882,7 +1252,8 @@ export default function App() {
                   <span>EXPLORE A FEELING</span>
                 </div>
                 <p className="panel-note">
-                  Same house. A different character. Choose what feels like you.
+                  A palette for the whole house, including rooms with their own materials. Choose
+                  what feels like you.
                 </p>
                 <div className="material-options">
                   {Object.entries(palettes).map(([key, p]) => (
@@ -890,7 +1261,16 @@ export default function App() {
                       className={`material-card ${house.palette === key ? 'selected' : ''}`}
                       key={key}
                       disabled={locked}
-                      onClick={() => commit({ ...house, palette: key as Scene['palette'] })}
+                      onClick={() => {
+                        const result = executeCommands(house, [
+                          { type: 'set_material', palette: key },
+                        ]);
+                        if (!result.applied) {
+                          notify(result.issues.map((issue) => issue.message).join(' '));
+                          return;
+                        }
+                        commit(result.scene);
+                      }}
                     >
                       <div
                         className={`material-preview ${key}`}
@@ -1005,6 +1385,7 @@ export default function App() {
               selected={selected}
               onSelect={setSelected}
               onRenderStatus={setRenderStatus}
+              onCameraChange={onCameraChange}
               resetKey={resetKey}
             />
             {!house.rooms.length && !pending && view !== 'plan' && (
@@ -1032,7 +1413,7 @@ export default function App() {
                 </button>
                 <button
                   className="sample-button"
-                  disabled={busy}
+                  disabled={locked}
                   onClick={() => {
                     commit(sampleScene());
                     setResetKey((k) => k + 1);
@@ -1104,17 +1485,30 @@ export default function App() {
             {busy && (
               <div className="thinking-overlay">
                 <span className="thinking-orb" />
-                <span>Finding the shape of your idea…</span>
+                <span>{runProgress?.message || 'Finding the shape of your idea…'}</span>
+                {runIdRef.current && (
+                  <button
+                    className="text-button"
+                    onClick={() => void cancelRun()}
+                    disabled={cancelledRef.current}
+                  >
+                    Cancel
+                  </button>
+                )}
               </div>
             )}
             {pending && (
               <div className="proposal-bar">
                 <Sparkles size={17} />
-                <span>Previewing a proposed change</span>
-                <button className="text-button" onClick={() => setPending(null)}>
+                <span>Validated proposal · review before keeping</span>
+                <button className="text-button" disabled={busy} onClick={() => void discardDraft()}>
                   Discard
                 </button>
-                <button className="primary small" onClick={() => commit(pending)}>
+                <button
+                  className="primary small"
+                  disabled={busy || saved === 'conflict'}
+                  onClick={() => void keepDraft()}
+                >
                   <Check size={14} /> Keep this
                 </button>
               </div>
@@ -1243,18 +1637,59 @@ export default function App() {
                       <Sparkles size={13} />
                     </span>
                   )}
-                  <div>{m.text}</div>
+                  <div className={m.kind === 'error' ? 'message-error' : undefined}>
+                    {m.kind === 'error' && <strong>Design change failed</strong>}
+                    <span>{m.text}</span>
+                    {m.retryText && (
+                      <button
+                        className="text-button retry-request"
+                        disabled={locked}
+                        onClick={() => void send(m.retryText!)}
+                      >
+                        <Redo2 size={12} /> Try this request again
+                      </button>
+                    )}
+                  </div>
                 </div>
               ))}
+              {pending && (
+                <div className="assistant-message proposal-message">
+                  <span className="mini-spark">
+                    <Sparkles size={13} />
+                  </span>
+                  <div>
+                    <strong>Proposed change</strong>
+                    <p>{pending.reply}</p>
+                  </div>
+                </div>
+              )}
+              {!busy &&
+                lastResult &&
+                (lastResult.changes.length > 0 || lastResult.issues.length > 0) && (
+                  <details className="design-summary">
+                    <summary>{pending ? 'Proposal details' : 'Latest design check'}</summary>
+                    {lastResult.changes.map((change, i) => (
+                      <p key={`change-${i}`}>{change}</p>
+                    ))}
+                    {lastResult.issues.map((issue, i) => (
+                      <p className="design-warning" key={`issue-${i}`}>
+                        {issue.message}
+                      </p>
+                    ))}
+                  </details>
+                )}
               {busy && (
                 <div className="assistant-message">
                   <span className="mini-spark">
                     <Sparkles size={13} />
                   </span>
-                  <div className="thinking-dots">
-                    <i />
-                    <i />
-                    <i />
+                  <div className="run-progress" aria-live="polite">
+                    <span>{runProgress?.message || 'Working on your design…'}</span>
+                    <div className="thinking-dots">
+                      <i />
+                      <i />
+                      <i />
+                    </div>
                   </div>
                 </div>
               )}
@@ -1281,7 +1716,7 @@ export default function App() {
                   ref={inputRef}
                   placeholder="Tell me what you’re imagining…"
                   value={input}
-                  disabled={busy || !!pending}
+                  disabled={busy || !!pending || saved === 'conflict'}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
@@ -1296,7 +1731,9 @@ export default function App() {
                     type="button"
                     aria-label="Hold to talk"
                     className={`mic-button ${voice.state === 'recording' ? 'recording' : ''}`}
-                    disabled={busy || !!pending || voice.state === 'transcribing'}
+                    disabled={
+                      busy || !!pending || saved === 'conflict' || voice.state === 'transcribing'
+                    }
                     onPointerDown={(e) => {
                       e.preventDefault();
                       e.currentTarget.setPointerCapture(e.pointerId);
@@ -1332,7 +1769,7 @@ export default function App() {
                   <button
                     className="send-button"
                     aria-label="Send description"
-                    disabled={!input.trim() || busy || !!pending}
+                    disabled={!input.trim() || busy || !!pending || saved === 'conflict'}
                   >
                     {busy ? <LoaderCircle className="spin" size={15} /> : <ArrowRight size={17} />}
                   </button>
@@ -1366,22 +1803,55 @@ export default function App() {
                   <option value="off">Spoken replies off</option>
                 </select>
               </label>
+              <label className="view-context-control">
+                <input
+                  type="checkbox"
+                  checked={includeView}
+                  disabled={locked}
+                  onChange={(event) => setIncludeView(event.target.checked)}
+                />
+                Include current 3D view with my request
+              </label>
+              {selectedRoom && (
+                <p className="selected-context">
+                  <Square size={11} /> Referring to {selectedRoom.name}
+                </p>
+              )}
             </div>
           </aside>
         )}
       </div>
-      {error && (
+      {(error || saved === 'conflict') && (
         <div className="toast" role="alert">
           <CircleHelp size={18} />
-          <span>{error}</span>
+          <span>
+            {error ||
+              'This project changed elsewhere. Export your local work, then reload the saved project.'}
+          </span>
           {saved === 'error' && (
-            <button className="text-button" onClick={() => setProject((p) => (p ? { ...p } : p))}>
+            <button className="text-button" onClick={() => void flush().catch(() => {})}>
               Retry save
             </button>
           )}
-          <button aria-label="Dismiss message" className="tiny-button" onClick={() => setError('')}>
-            <X size={16} />
-          </button>
+          {saved === 'conflict' && (
+            <>
+              <button className="text-button" onClick={download}>
+                Export local work
+              </button>
+              <button className="text-button" onClick={() => location.reload()}>
+                Reload saved project
+              </button>
+            </>
+          )}
+          {saved !== 'conflict' && (
+            <button
+              aria-label="Dismiss message"
+              className="tiny-button"
+              onClick={() => setError('')}
+            >
+              <X size={16} />
+            </button>
+          )}
         </div>
       )}
       {modal === 'connections' && (
@@ -1413,7 +1883,7 @@ export default function App() {
               value={versionName}
               onChange={(e) => setVersionName(e.target.value)}
             />
-            <button className="primary" disabled={!versionName.trim() || busy}>
+            <button className="primary" disabled={!versionName.trim() || locked}>
               <Plus size={15} /> Save alternative
             </button>
           </form>
@@ -1443,6 +1913,7 @@ export default function App() {
                   </div>
                   <button
                     className="text-button"
+                    disabled={busy || !!pending}
                     onClick={() => {
                       setCompareId(v.id);
                       setCompareSide('saved');
@@ -1453,7 +1924,7 @@ export default function App() {
                   </button>
                   <button
                     className="text-button"
-                    disabled={busy}
+                    disabled={locked}
                     onClick={() => {
                       commit(structuredClone(v.scene));
                       closeModal();
@@ -1463,7 +1934,7 @@ export default function App() {
                   </button>
                   <IconButton
                     label={`Delete alternative ${v.name}`}
-                    disabled={busy}
+                    disabled={locked}
                     onClick={() =>
                       setProject((p) =>
                         p ? { ...p, variants: p.variants.filter((a) => a.id !== v.id) } : p,
@@ -1479,7 +1950,7 @@ export default function App() {
           <div className="modal-footer">
             <button
               className="text-button"
-              disabled={busy}
+              disabled={locked}
               onClick={() => {
                 commit(structuredClone(emptyScene));
                 setSelected(null);
@@ -1498,7 +1969,7 @@ export default function App() {
                 accept=".json"
                 onChange={async (e) => {
                   const file = e.target.files?.[0];
-                  if (!file || busy) return;
+                  if (!file || locked) return;
                   try {
                     const incoming = documentSchema.parse(JSON.parse(await file.text()));
                     validateScene(incoming.scene);
