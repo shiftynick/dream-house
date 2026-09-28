@@ -28,7 +28,7 @@ The editable defaults live in `shared/connections.ts`:
 
 | Purpose                 | Model / voice                      |
 | ----------------------- | ---------------------------------- |
-| Design and conversation | `openai/gpt-4.1-mini`              |
+| Design and conversation | `anthropic/claude-sonnet-5.5`      |
 | Speech output           | `google/gemini-3.8-flash-lite-tts` |
 | Speech voice            | `Kore`                             |
 | Transcription           | `spacexai/grok-stt`                |
@@ -66,6 +66,8 @@ Legacy OpenRouter and OpenAI keys are not reused as Gateway credentials. No cred
 
 The agent can apply a small change directly, ask a question, or present a proposed scene for confirmation. Responses are validated before mutation. Out-of-range dimensions, duplicate IDs, and overlapping enclosed room volumes are rejected.
 
+The current harness makes one structured-output model request for each design instruction. Typed text goes directly to the agent; held-key audio is transcribed first. The request includes the complete current scene and the last ten conversation messages. The model returns a short reply and either a complete replacement scene or no scene when it needs to ask a question. The server checks the schema and room geometry and requires review for substantial deletions. Valid edits update the shared 3D model, enter undo history, and save locally; the reply is then spoken when enabled. There is no tool loop or automatic geometry-repair pass: an invalid proposed scene is rejected and leaves the current house unchanged.
+
 ## Local files
 
 `.data/project.json` stores the house, up to 60 undo steps, saved alternatives, and up to 100 messages. Saves are queued and atomically renamed. Invalid saves do not replace a valid file. A corrupt existing file produces an error rather than silently resetting the project. Keep a backup by exporting periodically. Use one editing tab at a time; concurrent collaborative editing is not implemented.
@@ -93,7 +95,9 @@ npm run verify:gateway -- --live
 
 This makes **three small paid requests**: generate a spoken sentence, transcribe that audio, and generate and validate a simple one-room design. It uses three requests from the daily cap and verifies that the saved project remains unchanged. With `ffmpeg` on PATH, generated speech is converted to WebM/Opus to exercise the browser recording format; otherwise the check transcribes the generated WAV directly. `TERRAIN_BASE_URL` can point the check at a different local port. A real microphone session is still needed to assess recording permissions and conversational voice quality.
 
-The default models passed this basic live speech-to-WebM transcription roundtrip and single-room design check with exactly three requests and no saved-project changes. Noisy microphone recordings and complex-scene latency remain unbenchmarked.
+The initial Gateway integration passed this basic live speech-to-WebM transcription roundtrip and single-room design check with exactly three requests and no saved-project changes. That run used `openai/gpt-4.1-mini` for design, with the current speech and transcription defaults.
+
+The current `anthropic/claude-sonnet-5.5` design default also passed a bedroom-layout edit to an existing 12-room house through the actual interface, using an isolated project copy. The result passed geometry validation, saved locally, survived reload, and supported undo and redo; the spoken reply played successfully. The design request took about 26.9 seconds and reported $0.040768 in Gateway cost, excluding speech. This is one successful sample, not a general latency, cost, or design-quality benchmark. The original saved project was preserved. Noisy microphone recordings remain unbenchmarked.
 
 ## Architecture
 
