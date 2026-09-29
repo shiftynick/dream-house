@@ -12,6 +12,7 @@ import {
   wallSchema,
   roofSchema,
   wallOpeningSchema,
+  furnitureSchema,
   type Connection,
   type DesignMetadata,
   type DesignRequirement,
@@ -36,6 +37,13 @@ import {
   volumeOverlap,
 } from './geometry.ts';
 import { inspectSpatial } from './spatial.ts';
+import {
+  furnitureBounds,
+  furnitureCatalog,
+  materializeFurniture,
+  roomFurniture,
+} from './furniture.ts';
+import { arrangeFurniture } from './furniture-layout.ts';
 import { effectiveRoof, roofHeightAt, roofMaximumHeight } from './architecture.ts';
 import { mirroredOpening, openingWorldCenter, roomOpenings, validateOpenings } from './openings.ts';
 
@@ -71,6 +79,33 @@ const attach = {
 
 /** Public, transport-independent command contract. All coordinates and lengths are meters. */
 export const commandSchema = z.discriminatedUnion('type', [
+  z
+    .object({
+      type: z.literal('add_furniture'),
+      roomId: id,
+      items: z.array(furnitureSchema.strict()).min(1).max(32),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('update_furniture'),
+      roomId: id,
+      furnitureId: id,
+      patch: furnitureSchema
+        .omit({ id: true })
+        .partial()
+        .extend({ rotation: z.number().min(-360).max(360).optional() })
+        .strict(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('remove_furniture'),
+      roomId: id,
+      furnitureIds: z.array(id).min(1).max(32),
+    })
+    .strict(),
+  z.object({ type: z.literal('arrange_furniture'), roomIds: z.array(id).min(1).max(8) }).strict(),
   z.object({ type: z.literal('add_rooms'), rooms: z.array(roomSchema).min(1).max(32) }).strict(),
   z
     .object({
@@ -933,6 +968,47 @@ function execute(scene: Scene, command: DesignCommand): DesignChange {
       description = 'Closed the passage between rooms.';
       break;
     }
+    case 'add_furniture': {
+      const room = roomById(scene, command.roomId),
+        items = materializeFurniture(room);
+      for (const item of command.items) {
+        if (items.some((existing) => existing.id === item.id))
+          throw new Error(`Furniture ID ${item.id} already exists in ${room.name}.`);
+        items.push(structuredClone(item));
+      }
+      changed = [room.id, ...command.items.map((item) => item.id)];
+      description = `Added furniture to ${room.name}.`;
+      break;
+    }
+    case 'update_furniture': {
+      const room = roomById(scene, command.roomId);
+      const item = materializeFurniture(room).find((item) => item.id === command.furnitureId);
+      if (!item)
+        throw new Error(
+          `Furniture ${command.furnitureId} does not exist in ${room.name}. Inspect furniture IDs first.`,
+        );
+      Object.assign(item, command.patch);
+      changed = [room.id, item.id];
+      description = `Updated ${item.name} in ${room.name}.`;
+      break;
+    }
+    case 'remove_furniture': {
+      const room = roomById(scene, command.roomId),
+        items = materializeFurniture(room);
+      for (const id of command.furnitureIds)
+        if (!items.some((item) => item.id === id))
+          throw new Error(`Furniture ${id} does not exist in ${room.name}.`);
+      room.furniture = items.filter((item) => !command.furnitureIds.includes(item.id));
+      changed = [room.id, ...command.furnitureIds];
+      description = `Removed the specified furniture from ${room.name}.`;
+      break;
+    }
+    case 'arrange_furniture': {
+      for (const id of new Set(command.roomIds)) arrangeFurniture(scene, roomById(scene, id));
+      changed = command.roomIds;
+      description = 'Rearranged existing furniture; inspect remaining clearance warnings.';
+      break;
+    }
     case 'set_roof': {
       const { style, pitch, direction } = command;
       if (command.roomIds) {
@@ -1125,6 +1201,7 @@ function execute(scene: Scene, command: DesignCommand): DesignChange {
           surfacePalettes: effectiveSurfacePalettes(scene, room),
           roof: effectiveRoof(scene, room),
           wallOpenings: effectiveOpeningSnapshot(scene, room),
+          furniture: structuredClone(roomFurniture(room)),
           walls: { north: room.north, south: room.south, east: room.east, west: room.west },
         };
         const previous = design.requirements.find((r) => r.id === requirement.id);
@@ -1150,6 +1227,8 @@ function execute(scene: Scene, command: DesignCommand): DesignChange {
           }
           if (previous.properties.includes('roof'))
             requirement.snapshot.roof = structuredClone(previous.snapshot.roof);
+          if (previous.properties.includes('furniture'))
+            requirement.snapshot.furniture = structuredClone(previous.snapshot.furniture);
           if (previous.properties.includes('openings')) {
             requirement.snapshot.wallOpenings = structuredClone(previous.snapshot.wallOpenings);
             requirement.snapshot.walls = structuredClone(previous.snapshot.walls);
@@ -1311,17 +1390,19 @@ function requirementIssues(
           ? !close(r.width, s.width) || !close(r.depth, s.depth)
           : property === 'height'
             ? !close(r.height, s.height)
-            : property === 'roof'
-              ? JSON.stringify(effectiveRoof(scene, r)) !== JSON.stringify(s.roof)
-              : property === 'openings'
-                ? JSON.stringify(effectiveOpeningSnapshot(scene, r)) !==
-                    JSON.stringify(s.wallOpenings) ||
-                  sides.some((side) => r[side] !== s.walls?.[side])
-                : surfaces.some(
-                    (surface) =>
-                      effectiveSurfacePalettes(scene, r)[surface] !==
-                      (s.surfacePalettes?.[surface] ?? s.palette),
-                  ),
+            : property === 'furniture'
+              ? JSON.stringify(roomFurniture(r)) !== JSON.stringify(s.furniture)
+              : property === 'roof'
+                ? JSON.stringify(effectiveRoof(scene, r)) !== JSON.stringify(s.roof)
+                : property === 'openings'
+                  ? JSON.stringify(effectiveOpeningSnapshot(scene, r)) !==
+                      JSON.stringify(s.wallOpenings) ||
+                    sides.some((side) => r[side] !== s.walls?.[side])
+                  : surfaces.some(
+                      (surface) =>
+                        effectiveSurfacePalettes(scene, r)[surface] !==
+                        (s.surfacePalettes?.[surface] ?? s.palette),
+                    ),
     );
     return changed.length
       ? [
@@ -1372,6 +1453,31 @@ export function validateDesign(scene: Scene): DesignIssue[] {
       ),
     ];
   const issues: DesignIssue[] = [];
+  for (const room of scene.rooms) {
+    const ids = (room.furniture || []).map((item) => item.id);
+    if (new Set(ids).size !== ids.length)
+      issues.push(
+        issue('duplicate_furniture_id', `Furniture IDs must be unique inside ${room.name}.`, [
+          room.id,
+        ]),
+      );
+    for (const item of room.furniture || []) {
+      if (item.kind === 'rug') continue;
+      const size = furnitureBounds(item);
+      if (
+        Math.abs(item.x) + size.width / 2 > room.width / 2 + 0.02 ||
+        Math.abs(item.z) + size.depth / 2 > room.depth / 2 + 0.02 ||
+        item.height > room.height
+      )
+        issues.push(
+          issue(
+            'furniture_does_not_fit',
+            `${item.name} does not fit inside ${room.name}. Move, rotate or resize the furniture.`,
+            [room.id, item.id],
+          ),
+        );
+    }
+  }
   const ids = [...scene.rooms, ...scene.stairs].map((r) => r.id);
   if (new Set(ids).size !== ids.length)
     issues.push(
@@ -1550,12 +1656,17 @@ export function inspectDesign(scene: Scene) {
   return {
     units: 'meters',
     axes: { x: 'east', z: 'south', elevation: 'up' },
+    furnitureCatalog,
+    furnitureCoordinates:
+      'x/z relative to the room center, meters; rotation is yaw in degrees. At 0°, furniture fronts face south; +90° faces east. Rugs are not obstacles.',
     rooms: scene.rooms.map((room) => ({
       ...room,
       bounds: bounds(room),
       effectivePalette: room.palette ?? scene.palette,
       effectiveSurfacePalettes: effectiveSurfacePalettes(scene, room),
       effectiveRoof: effectiveRoof(scene, room),
+      furniture: roomFurniture(room),
+      furnitureMode: room.furniture === undefined ? 'generated' : 'explicit',
       roofMaximumElevation: roofMaximumHeight(scene, room),
       openings: Object.fromEntries(sides.map((side) => [side, roomOpenings(scene, room.id, side)])),
       groups: getDesign(scene)

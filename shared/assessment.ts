@@ -3,10 +3,27 @@ import { inspectDesign } from './design.ts';
 import { effectiveRoof } from './architecture.ts';
 import { roomOpenings } from './openings.ts';
 import { paletteSchema, sideSchema, surfaceSchema, type Scene } from './model.ts';
+import { roomFurniture } from './furniture.ts';
+import { furnitureBlockingCodes } from './furniture-layout.ts';
+import { inspectRoomFurniture } from './spatial.ts';
 
 const id = z.string().min(1).max(60);
 const tolerance = z.number().finite().min(0).max(0.5).default(0.01);
 export const designAssertionSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('furniture_layout'), roomId: id }).strict(),
+  z
+    .object({
+      kind: z.literal('furniture_item'),
+      roomId: id,
+      furnitureId: id,
+      present: z.boolean().default(true),
+      x: z.number().optional(),
+      z: z.number().optional(),
+      rotation: z.number().optional(),
+      width: z.number().optional(),
+      depth: z.number().optional(),
+    })
+    .strict(),
   z
     .object({ kind: z.literal('room_exists'), roomId: id, present: z.boolean().default(true) })
     .strict(),
@@ -134,6 +151,36 @@ export function evaluateDesignAssessment(
       };
     if (!room)
       return { passed: false, actual: null, reason: `Room ${assertion.roomId} does not exist.` };
+    if (assertion.kind === 'furniture_item') {
+      const item = roomFurniture(room).find((item) => item.id === assertion.furnitureId);
+      const fields = ['x', 'z', 'rotation', 'width', 'depth'] as const;
+      const passed = assertion.present
+        ? !!item &&
+          fields.every(
+            (field) =>
+              assertion[field] === undefined || Math.abs(item[field] - assertion[field]!) <= 0.01,
+          )
+        : !item;
+      return {
+        passed,
+        actual: item || null,
+        reason: passed
+          ? `Furniture ${assertion.furnitureId} matches the requested values.`
+          : `Furniture ${assertion.furnitureId} does not match the requested values.`,
+      };
+    }
+    if (assertion.kind === 'furniture_layout') {
+      const problems = inspectRoomFurniture(scene, room).filter((problem) =>
+        furnitureBlockingCodes.has(problem.code),
+      );
+      return {
+        passed: !problems.length,
+        actual: problems,
+        reason: problems.length
+          ? problems.map((p) => p.message).join(' ')
+          : `${room.name} furniture fits without detected overlaps or blocked doors/stairs. Aisle checks remain advisory.`,
+      };
+    }
     if (assertion.kind === 'room_dimension') {
       const actual = room[assertion.dimension];
       const difference = actual - assertion.value;

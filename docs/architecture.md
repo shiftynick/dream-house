@@ -32,7 +32,7 @@ Visual review is enabled by default in the browser and stored as a browser prefe
 
 `shared/model.ts` keeps version-1 project compatibility. A project has its own identity/name, revision, scene, conversation, alternatives, and undo/redo history. Rooms have stable IDs, purpose, center, elevation, dimensions, four base wall types, optional room/surface palettes, optional roof configuration, and optional dimensioned wall openings. Units are meters: x points east, z south, elevation up.
 
-`DesignSelection` in `shared/selection.ts` is `{ roomId, surface }`, where surface is `room`, `north`, `south`, `east`, `west`, `floor`, or `roof`. Three-dimensional picking, floor-plan controls, and the inspector use this same identity. The harness rejects missing rooms, invalid surfaces, and disagreement between `selection.roomId` and the legacy `selectedRoomId` field. Material precedence is surface → room → house. A whole-room or whole-house palette command clears applicable surface overrides.
+`DesignSelection` in `shared/selection.ts` is `{ roomId, surface, furnitureId? }`, where surface is `room`, `north`, `south`, `east`, `west`, `floor`, or `roof`. Furniture selection uses `surface: 'room'` and a piece ID scoped to that room. Three-dimensional picking, floor-plan controls, and the inspector use this same identity. The harness rejects missing rooms/pieces, invalid surfaces, and disagreement between `selection.roomId` and the legacy `selectedRoomId` field. Material precedence is surface → room → house; furniture overrides independently inherit room/house palettes. A whole-room or whole-house palette command clears applicable surface overrides.
 
 Optional `scene.design` metadata contains:
 
@@ -65,6 +65,18 @@ Legacy whole-wall flags remain the fallback when there are no resolved apertures
 
 ## Commands and validation
 
+### Furniture
+
+`shared/furniture.ts` resolves optional `Room.furniture` records with stable room-local IDs, kind/name, x/z position in meters, rotation in degrees, dimensions, and optional palette. Yaw 0 faces south; +90 faces east. Missing arrays use legacy generated positions without rewriting the project; `[]` means deliberately empty. The first furniture edit materializes all existing pieces. Draft inspection also reports added, removed and changed furniture IDs relative to the saved baseline, so later model rounds can distinguish an edited draft from the original layout. Room moves carry them once because positions are local. 3D meshes, SVG plans, selection and inspection share this model.
+
+`add_furniture {roomId, items}`, `update_furniture {roomId, furnitureId, patch}`, `remove_furniture {roomId, furnitureIds}`, and `arrange_furniture {roomIds}` use the same command contract as architecture. The catalog in `inspectDesign` provides default dimensions. Update can also replace a piece's kind/dimensions while retaining its ID. IDs must be unique within a room; explicit solid pieces exceeding room bounds or height block commit. Rugs are decorative and exempt. Legacy generated fit problems remain advisory so unrelated edits do not force a furnishing migration.
+
+`shared/furniture-layout.ts` performs a bounded deterministic search over positions and cardinal orientations. It preserves inventory, dimensions, material, and architecture, prioritizes room fit, overlaps, doors/open passages, stairs and circulation, then balances a sofa/coffee-table group. Rugs follow the sofa. Unsolvable layouts keep their pieces and report remaining issues. Arbitrarily rotated bounds are conservative axis-aligned boxes; this is not a general interior-design or pedestrian-path solver.
+
+The `furniture_layout` assessment checks room fit, collisions, doorway obstructions and stair conflicts; `furniture_item` checks existence and optional exact position/orientation/dimensions. A false required claim triggers proposal review through the normal assessment policy. Furniture can also be protected by a `locked` requirement with `properties: ['furniture']`; snapshots record resolved pieces and cannot be rebased by repeating the lock. Saves, history, alternatives and the existing transport-independent draft service require no furniture-specific storage or MCP adapter.
+
+### Architectural operations
+
 `shared/design.ts` exports Zod schemas, `executeCommands`, `inspectDesign`, `validateDesign`, and `validateDesignChange`. These have no HTTP, provider, browser, or filesystem dependencies. Model tools and the control API generate JSON Schema from the same definitions.
 
 | Operation family         | Commands                                                                                         |
@@ -74,6 +86,7 @@ Legacy whole-wall flags remain the fallback when there are no resolved apertures
 | Dimensions and openings  | `resize_room`, `move_wall`, `connect_rooms`, `disconnect_rooms`, `set_wall_openings`             |
 | Appearance and site      | `set_roof`, `reset_roof`, `set_material`, `set_surface_material`, `update_site`, `set_fireplace` |
 | Levels                   | `add_stairs`, `link_stairs`, `connect_levels`                                                    |
+| Furniture                | `add_furniture`, `update_furniture`, `remove_furniture`, `arrange_furniture`                     |
 | Brief                    | `set_requirement`, `remove_requirement`                                                          |
 
 Attachment aligns a room with a target edge and optionally creates a shared opening. `elevationOffset` is relative to the target floor and defaults to zero; a deliberate split-level attachment uses `connect: false` followed by linked stairs. Anchored resizing keeps the requested edge fixed and can move connected assemblies. `move_wall` takes a room ID, wall side, and signed delta: positive moves outward, negative inward, with the opposite wall fixed. Movement preserves groups and updates relevant relationships. These are deterministic editing algorithms, not a general constraint solver. An impossible placement returns a conflict rather than searching arbitrary layouts.

@@ -2003,3 +2003,43 @@ kbd {
 .assessment-unmet {
   color: #996b31;
 }
+
+.furniture-controls {
+  margin: 20px 0;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.furniture-controls form {
+  margin-top: 14px;
+}
+.furniture-controls .field-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 9px;
+}
+.furniture-controls .field-label {
+  min-width: 0;
+}
+.furniture-controls input {
+  width: 100%;
+  min-width: 0;
+}
+.furniture-actions,
+.furniture-add {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 12px;
+}
+.furniture-add .field-label {
+  flex: 1;
+}
+.furniture-warnings {
+  margin-top: 12px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #806640;
+}
+.furniture-warnings summary {
+  cursor: pointer;
+}

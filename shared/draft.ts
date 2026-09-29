@@ -5,6 +5,7 @@ import {
   type DesignIssue,
 } from './design.ts';
 import { validateScene, type Scene } from './model.ts';
+import { roomFurniture } from './furniture.ts';
 
 export function canonical(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
@@ -54,6 +55,8 @@ export function describeChanges(before: Scene, after: Scene): string[] {
     )
       changes.push(`Updated the walls and openings of ${room.name}.`);
     if (old.palette !== room.palette) changes.push(`Changed the materials of ${room.name}.`);
+    if (canonical(roomFurniture(old)) !== canonical(roomFurniture(room)))
+      changes.push(`Updated the furniture in ${room.name}.`);
     if (canonical(old.roof) !== canonical(room.roof))
       changes.push(
         room.roof
@@ -127,7 +130,27 @@ export class DesignDraft {
     return requiresConfirmation(this.original, this.working);
   }
   inspect() {
-    return { ...inspectDesign(this.working), issues: this.issues };
+    const furnitureChanges = this.working.rooms.flatMap((room) => {
+      const previous = this.original.rooms.find((item) => item.id === room.id);
+      const before = previous ? roomFurniture(previous) : [],
+        after = roomFurniture(room);
+      const added = after
+        .filter((item) => !before.some((old) => old.id === item.id))
+        .map((item) => item.id);
+      const removed = before
+        .filter((item) => !after.some((next) => next.id === item.id))
+        .map((item) => item.id);
+      const changed = after
+        .filter((item) => {
+          const old = before.find((old) => old.id === item.id);
+          return old && canonical(old) !== canonical(item);
+        })
+        .map((item) => item.id);
+      return added.length || removed.length || changed.length
+        ? [{ roomId: room.id, added, removed, changed }]
+        : [];
+    });
+    return { ...inspectDesign(this.working), issues: this.issues, furnitureChanges };
   }
   /** Record a rejected mutation whose arguments could not reach the command engine. */
   recordFailure(issues: DesignIssue[]) {

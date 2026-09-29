@@ -1,3 +1,17 @@
+# Editable furniture — September 29, 2026
+
+**204 automated tests and the production build passed.** Furniture is now persistent scene data, shared by 3D meshes, furnished floor plans, selection, clearance inspection and agent commands. Tests cover legacy lazy materialization, stable IDs, room-local movement, rotated bounds, deterministic arrangement, impossible fits, duplicate/missing IDs, locks, request assertions, rendered-evidence invalidation, baseline inventory deltas and save/reload/undo/redo through the shared design service.
+
+Browser checks used a private copy of the existing house. Manual movement and rotation, addition/removal, selection for voice context, persistence across reload, and undo/redo succeeded. A simulated chat used real geometry, HTTP, storage and a matching local plan capture; it committed as one undo entry with all architecture unchanged. The plan and cutaway were visually inspected. These injected scenarios made no cloud calls.
+
+The first real Sonnet evaluation exposed excessive additions followed by repeated clearance polishing. It ended in a proposal without changing the saved scene, used all three capture opportunities, and inaccurately described its modified inventory as original. The workflow now requires the deterministic rearranger first for broad placement requests, keeps additions tied to requested functions, distinguishes advisory clearances from actual collisions/access obstructions, and includes furniture deltas against the saved baseline in every draft inspection.
+
+Repeating the same request with the original conversation succeeded using `anthropic/claude-sonnet-5.5`: the sofa, coffee table and rug were rearranged; no pieces were added/replaced; bedroom/bath furniture and every architectural field were preserved. A fresh furnished plan matched the committed scene fingerprint. The result had no living-room clearance warnings and saved as exactly one undo entry. This took **three model calls, one local capture and $0.163190 reported design cost**. Both live attempts together used eight model calls and **$0.730664**. One automatic speech request was also counted; no additional speech charge was reported, so this is design cost rather than a complete provider bill. These are individual regression checks, not general quality or cost guarantees.
+
+Furniture remains schematic. The arranger uses a bounded search and conservative rotated bounding boxes; it does not solve general furnishing relationships, arbitrary shapes, or complete pedestrian routes. Remaining aisle/wall notes may need judgment, especially for intentional bed/nightstand and table/chair groupings. Existing furniture stays generated until its first edit. The production workspace remained byte-identical through verification and restart at `http://localhost:5173`. Source/bundle credential scans and formatting passed; test usage was merged into the local counter once. Private test projects, captures and credentials are excluded from Git.
+
+---
+
 # Geometry, harness and rendering upgrade — September 28, 2026
 
 **192 automated tests, TypeScript and the production build passed.** Browser scenarios used isolated storage and injected model/audio responses except for two explicitly evaluated Sonnet design requests. The production workspace remained byte-identical through verification and restart. Source and bundle credential scans passed. Existing non-blocking Vite bundle-size and upstream Zod annotation warnings remain.

@@ -23,6 +23,37 @@ export const wallOpeningSchema = z.object({
 export type Roof = z.infer<typeof roofSchema>;
 export type WallOpening = z.infer<typeof wallOpeningSchema>;
 export const paletteSchema = z.enum(['limestone', 'cedar', 'charcoal', 'chalk']);
+export const furnitureKindSchema = z.enum([
+  'sofa',
+  'armchair',
+  'coffee-table',
+  'dining-table',
+  'chair',
+  'bed',
+  'nightstand',
+  'wardrobe',
+  'counter',
+  'island',
+  'bath',
+  'vanity',
+  'toilet',
+  'rug',
+]);
+/** Positions are room-local meters; rotation is yaw in degrees, matching stairs. */
+export const furnitureSchema = z.object({
+  id: z.string().min(1).max(60),
+  kind: furnitureKindSchema,
+  name: z.string().min(1).max(80),
+  x: z.number().min(-40).max(40),
+  z: z.number().min(-40).max(40),
+  rotation: z.number().min(-360).max(360).default(0),
+  width: z.number().min(0.2).max(30),
+  depth: z.number().min(0.2).max(30),
+  height: z.number().min(0.02).max(4),
+  palette: paletteSchema.optional(),
+});
+export type Furniture = z.infer<typeof furnitureSchema>;
+export type FurnitureKind = z.infer<typeof furnitureKindSchema>;
 export const surfaceSchema = z.enum(['north', 'south', 'east', 'west', 'floor', 'roof']);
 export const surfacePalettesSchema = z.object({
   north: paletteSchema.optional(),
@@ -61,6 +92,8 @@ export const roomSchema = z.object({
   surfacePalettes: surfacePalettesSchema.optional(),
   roof: roofSchema.optional(),
   wallOpenings: z.array(wallOpeningSchema).max(64).optional(),
+  // Absent = the legacy schematic layout; [] = deliberately unfurnished.
+  furniture: z.array(furnitureSchema).max(32).optional(),
 });
 export const stairSchema = z.object({
   id: z.string().min(1).max(60),
@@ -110,6 +143,7 @@ export const lockSnapshotSchema = z.object({
   surfacePalettes: surfacePalettesSchema.optional(),
   roof: roofSchema.optional(),
   wallOpenings: z.array(wallOpeningSchema).max(256).optional(),
+  furniture: z.array(furnitureSchema).max(32).optional(),
   walls: z
     .object({ north: wallSchema, south: wallSchema, east: wallSchema, west: wallSchema })
     .optional(),
@@ -137,9 +171,9 @@ export const requirementSchema = z.discriminatedUnion('kind', [
     kind: z.literal('locked'),
     roomId: idSchema,
     properties: z
-      .array(z.enum(['position', 'size', 'height', 'material', 'roof', 'openings']))
+      .array(z.enum(['position', 'size', 'height', 'material', 'roof', 'openings', 'furniture']))
       .min(1)
-      .max(6),
+      .max(7),
     snapshot: lockSnapshotSchema.optional(),
   }),
   z.object({

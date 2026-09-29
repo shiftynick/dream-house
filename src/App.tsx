@@ -1,3 +1,5 @@
+import { FurnitureControls } from './FurnitureControls';
+import { roomFurniture } from '../shared/furniture';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   ArrowDownToLine,
@@ -1098,8 +1100,9 @@ export default function App() {
                       <select
                         aria-label="Selected house part"
                         disabled={busy}
-                        value={selection?.surface || 'room'}
+                        value={selection?.furnitureId ? 'furniture' : selection?.surface || 'room'}
                         onChange={(event) =>
+                          event.target.value !== 'furniture' &&
                           setSelection({
                             roomId: selectedRoom.id,
                             surface: event.target.value as DesignSelection['surface'],
@@ -1107,6 +1110,15 @@ export default function App() {
                         }
                       >
                         <option value="room">Whole room</option>
+                        {selection?.furnitureId && (
+                          <option value="furniture">
+                            {
+                              roomFurniture(selectedRoom).find(
+                                (item) => item.id === selection.furnitureId,
+                              )?.name
+                            }
+                          </option>
+                        )}
                         {(['north', 'south', 'east', 'west', 'floor', 'roof'] as const).map(
                           (surface) => (
                             <option
@@ -1207,14 +1219,32 @@ export default function App() {
                       ))}
                     </div>
                     <label className="field-label">
-                      {selection?.surface === 'room'
-                        ? 'Room material'
-                        : 'Selected surface material'}
+                      {selection?.furnitureId
+                        ? 'Furniture material'
+                        : selection?.surface === 'room'
+                          ? 'Room material'
+                          : 'Selected surface material'}
                       <select
                         disabled={locked}
-                        value={surfacePalette(house, selectedRoom, selection?.surface || 'room')}
+                        value={
+                          (selection?.furnitureId
+                            ? roomFurniture(selectedRoom).find(
+                                (item) => item.id === selection.furnitureId,
+                              )?.palette
+                            : undefined) ??
+                          surfacePalette(house, selectedRoom, selection?.surface || 'room')
+                        }
                         onChange={(event) => {
-                          if (!selection || selection.surface === 'room')
+                          if (selection?.furnitureId)
+                            applyArchitecture([
+                              {
+                                type: 'update_furniture',
+                                roomId: selectedRoom.id,
+                                furnitureId: selection.furnitureId,
+                                patch: { palette: event.target.value as Room['palette'] },
+                              },
+                            ]);
+                          else if (!selection || selection.surface === 'room')
                             mutateRoom({ palette: event.target.value as Room['palette'] });
                           else {
                             const result = executeCommands(house, [
@@ -1240,6 +1270,21 @@ export default function App() {
                         ))}
                       </select>
                     </label>
+                    <FurnitureControls
+                      key={`${project.projectId}-${selectedRoom.id}-furniture`}
+                      scene={house}
+                      room={selectedRoom}
+                      selectedId={selection?.furnitureId}
+                      disabled={locked}
+                      onApply={applyArchitecture}
+                      onSelect={(furnitureId) =>
+                        setSelection({
+                          roomId: selectedRoom.id,
+                          surface: 'room',
+                          ...(furnitureId ? { furnitureId } : {}),
+                        })
+                      }
+                    />
                     {!['courtyard', 'terrace'].includes(selectedRoom.kind) && (
                       <>
                         <RoofControls
@@ -2017,7 +2062,7 @@ export default function App() {
               )}
               {!selectedRoom && house.rooms.length > 0 && (
                 <p className="selected-context">
-                  Point to a room, wall, floor, or roof, then hold Space to speak.
+                  Select a room, surface, or furniture piece, then hold Space to speak.
                 </p>
               )}
             </div>

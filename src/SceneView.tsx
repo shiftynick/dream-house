@@ -23,6 +23,8 @@ import { effectiveRoof, roofHeightAt } from '../shared/architecture';
 import { roomOpenings } from '../shared/openings';
 import { renderCamera, renderRequestSchema } from '../shared/render';
 import { surfacePalette, type DesignSelection, type DesignSurface } from '../shared/selection';
+import { roomFurniture } from '../shared/furniture';
+import type { Furniture } from '../shared/model';
 
 export type Quality = 'live' | 'refined' | 'clay' | 'wireframe';
 export type View = 'orbit' | 'walk' | 'plan';
@@ -151,6 +153,102 @@ function Box({
     </mesh>
   );
 }
+function FurnitureMesh({
+  item,
+  materials: m,
+  selected,
+  onSelect,
+}: {
+  item: Furniture;
+  materials: Record<string, THREE.Material>;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const box = (
+    key: string,
+    x: number,
+    y: number,
+    z: number,
+    w: number,
+    h: number,
+    d: number,
+    material: THREE.Material,
+  ) => <Box key={key} position={[x, y, z]} size={[w, h, d]} material={material} />;
+  const seating = ['sofa', 'armchair', 'chair'].includes(item.kind);
+  const table = ['coffee-table', 'dining-table', 'nightstand'].includes(item.kind);
+  return (
+    <group
+      position={[item.x, 0, item.z]}
+      rotation={[0, (item.rotation * Math.PI) / 180, 0]}
+      scale={[item.width, item.height, item.depth]}
+      userData={{ furnitureId: item.id }}
+      onClick={(e) => {
+        e.stopPropagation();
+        onSelect();
+      }}
+    >
+      {seating ? (
+        <>
+          {box('base', 0, 0.3, 0, 1, 0.35, 1, m.fabric)}
+          {box('back', 0, 0.72, -0.41, 1, 0.56, 0.18, m.fabric)}
+          {item.kind !== 'chair' &&
+            [-1, 1].map((sign) => box(`arm${sign}`, sign * 0.45, 0.53, 0, 0.1, 0.36, 1, m.fabric))}
+          {[-1, 1].flatMap((x) =>
+            [-1, 1].map((z) =>
+              box(`leg${x}${z}`, x * 0.38, 0.09, z * 0.34, 0.08, 0.18, 0.08, m.wood),
+            ),
+          )}
+        </>
+      ) : item.kind === 'bed' ? (
+        <>
+          {box('base', 0, 0.16, 0, 0.92, 0.3, 1, m.wood)}
+          {box('mattress', 0, 0.36, 0.02, 0.9, 0.2, 0.94, m.fabric)}
+          {box('headboard', 0, 0.5, -0.46, 1, 1, 0.08, m.wood)}
+          {[-1, 1].map((sign) =>
+            box(`pillow${sign}`, sign * 0.23, 0.49, -0.27, 0.34, 0.09, 0.2, m.rug),
+          )}
+        </>
+      ) : table ? (
+        <>
+          {box('top', 0, 0.93, 0, 1, 0.14, 1, m.wood)}
+          {[-1, 1].flatMap((x) =>
+            [-1, 1].map((z) =>
+              box(`leg${x}${z}`, x * 0.4, 0.43, z * 0.36, 0.07, 0.86, 0.08, m.frame),
+            ),
+          )}
+        </>
+      ) : item.kind === 'rug' ? (
+        box('rug', 0, 0.5, 0, 1, 1, 1, m.rug)
+      ) : item.kind === 'bath' ? (
+        <>
+          {box('base', 0, 0.4, 0, 1, 0.8, 1, m.fabric)}
+          {box('water', 0, 0.805, 0, 0.82, 0.012, 0.65, m.glass)}
+          {box('tap', 0.38, 0.9, 0, 0.025, 0.2, 0.05, m.frame)}
+        </>
+      ) : item.kind === 'toilet' ? (
+        <>
+          {box('tank', 0, 0.58, -0.34, 1, 0.84, 0.32, m.fabric)}
+          {box('bowl', 0, 0.32, 0.1, 0.86, 0.55, 0.8, m.fabric)}
+        </>
+      ) : (
+        <>
+          {box('body', 0, 0.46, 0, 0.94, 0.92, 0.94, m.wood)}
+          {box('top', 0, 0.96, 0, 1, 0.08, 1, item.kind === 'wardrobe' ? m.wood : m.wall)}
+          {box('handle', 0, 0.64, 0.48, 0.25, 0.025, 0.04, m.frame)}
+          {['island', 'vanity'].includes(item.kind) &&
+            box('sink', 0, 0.999, 0, 0.35, 0.002, 0.45, m.frame)}
+        </>
+      )}
+      {selected && (
+        <mesh position={[0, 0.5, 0]}>
+          <boxGeometry args={[1.015, 1.015, 1.015]} />
+          <meshBasicMaterial color="#d3933d" wireframe toneMapped={false} />
+        </mesh>
+      )}
+    </group>
+  );
+}
+
 function RoomMesh({
   house,
   room: r,
@@ -410,123 +508,23 @@ function RoomMesh({
               )}
             </>
           )}
-          {r.kind === 'living' && (
-            <>
-              {[-1, 0, 1].map((i) => (
-                <Box
-                  key={`seat-${i}`}
-                  position={[-r.width * 0.22 + i * 1.04, 0.56, r.depth * 0.13]}
-                  size={[1.01, 0.12, 0.94]}
-                  material={m.fabric}
-                />
-              ))}
-              {[-1, 1].map((sign) => (
-                <Box
-                  key={`arm-${sign}`}
-                  position={[-r.width * 0.22 + sign * 1.53, 0.61, r.depth * 0.13]}
-                  size={[0.22, 0.38, 1.15]}
-                  material={m.fabric}
-                />
-              ))}
-
-              <Box
-                position={[-r.width * 0.22, 0.28, r.depth * 0.13]}
-                size={[3.3, 0.5, 1.15]}
-                material={m.fabric}
-              />
-              <Box
-                position={[-r.width * 0.22, 0.68, r.depth * 0.13 - 0.5]}
-                size={[3.3, 0.55, 0.22]}
-                material={m.fabric}
-              />
-              <Box
-                position={[-r.width * 0.22, 0.28, r.depth * 0.13 + 1.6]}
-                size={[1.7, 0.35, 0.8]}
-                material={m.wood}
-              />
-              <Box
-                position={[-r.width * 0.22, 0.02, r.depth * 0.13 + 0.6]}
-                size={[4.8, 0.025, 3.9]}
-                material={m.rug}
-              />
-            </>
-          )}
-          {r.kind === 'kitchen' && (
-            <>
-              {Array.from({ length: Math.max(1, Math.floor((r.width - 1.2) / 0.7)) }, (_, i) => {
-                const count = Math.max(1, Math.floor((r.width - 1.2) / 0.7));
-                const x = -(r.width - 1.2) / 2 + ((i + 0.5) * (r.width - 1.2)) / count;
-                return (
-                  <Box
-                    key={`drawer-${i}`}
-                    position={[x, 0.65, -r.depth / 2 + 1.105]}
-                    size={[Math.min(0.25, ((r.width - 1.2) / count) * 0.5), 0.018, 0.022]}
-                    material={m.frame}
-                  />
-                );
-              })}
-              <Box
-                position={[Math.min(0.7, r.width * 0.15), 1.09, 0]}
-                size={[0.72, 0.018, 0.52]}
-                material={m.frame}
-              />
-
-              <Box
-                position={[0, 0.45, -r.depth / 2 + 0.6]}
-                size={[r.width - 1.2, 0.9, 1]}
-                material={m.wood}
-              />
-              <Box
-                position={[0, 0.94, -r.depth / 2 + 0.6]}
-                size={[r.width - 1.1, 0.07, 1.1]}
-                material={m.wall}
-              />
-              <Box
-                position={[0, 0.5, 0]}
-                size={[Math.min(3.8, r.width - 1), 1, 1.2]}
-                material={m.wood}
-              />
-              <Box
-                position={[0, 1.04, 0]}
-                size={[Math.min(4, r.width - 0.8), 0.09, 1.35]}
-                material={m.wall}
-              />
-            </>
-          )}
-          {r.kind === 'bedroom' && (
-            <>
-              <Box position={[0, 0.23, -r.depth * 0.1]} size={[2.05, 0.4, 2.3]} material={m.wood} />
-              <Box position={[0, 0.5, -r.depth * 0.1]} size={[2, 0.22, 2.2]} material={m.fabric} />
-              <Box
-                position={[0, 0.8, -r.depth * 0.1 - 1.1]}
-                size={[2.25, 1.4, 0.15]}
-                material={m.wood}
-              />
-              {[-0.5, 0.5].map((x) => (
-                <Box
-                  key={x}
-                  position={[x, 0.68, -r.depth * 0.1 - 0.65]}
-                  size={[0.75, 0.15, 0.45]}
-                  material={m.rug}
-                />
-              ))}
-            </>
-          )}
-          {r.kind === 'bathroom' && (
-            <>
-              <Box position={[0, 0.32, 0]} size={[1.8, 0.6, 0.8]} material={m.fabric} />
-              <Box
-                position={[0, 0.626, 0]}
-                size={[1.48, 0.018, 0.52]}
-                material={m.glass}
-                cast={false}
-              />
-              <Box position={[0.75, 0.72, 0]} size={[0.04, 0.2, 0.04]} material={m.frame} />
-              <Box position={[0.64, 0.8, 0]} size={[0.24, 0.04, 0.04]} material={m.frame} />
-            </>
-          )}
         </>
       )}
+      {roomFurniture(r).map((item) => (
+        <FurnitureMesh
+          key={item.id}
+          item={item}
+          materials={item.palette ? materialSets[item.palette] : m}
+          selected={
+            quality !== 'refined' && selection?.roomId === r.id && selection.furnitureId === item.id
+          }
+          onSelect={() =>
+            onSelectSurface
+              ? onSelectSurface({ roomId: r.id, surface: 'room', furnitureId: item.id })
+              : onSelect()
+          }
+        />
+      ))}
       {r.kind === 'courtyard' && (
         <>
           <Box position={[0, 0.18, 0]} size={[1.2, 0.35, 1.2]} material={m.wall} />
@@ -535,7 +533,7 @@ function RoomMesh({
       )}
       {selected && quality !== 'refined' && (
         <>
-          {(!selection || selection.surface === 'room') && (
+          {(!selection || (selection.surface === 'room' && !selection.furnitureId)) && (
             <mesh position={[0, 0.03, 0]} rotation={[-Math.PI / 2, 0, 0]}>
               <planeGeometry args={[r.width, r.depth]} />
               <meshBasicMaterial color="#b87f45" transparent opacity={0.19} depthWrite={false} />
@@ -1362,16 +1360,89 @@ export function FloorPlanSvg({
               strokeWidth={0.08}
               strokeDasharray=".25 .15"
             />
+            {[...roomFurniture(r)]
+              .sort((a, b) => Number(b.kind === 'rug') - Number(a.kind === 'rug'))
+              .map((item) => (
+                <g
+                  key={item.id}
+                  data-furniture-id={item.id}
+                  data-furniture-kind={item.kind}
+                  transform={`translate(${r.x + item.x} ${r.z + item.z}) rotate(${-item.rotation})`}
+                  role={onSelectSurface ? 'button' : undefined}
+                  tabIndex={onSelectSurface ? 0 : undefined}
+                  aria-label={`${item.name} in ${r.name}`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onSelectSurface?.({ roomId: r.id, surface: 'room', furnitureId: item.id });
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      onSelectSurface?.({ roomId: r.id, surface: 'room', furnitureId: item.id });
+                    }
+                  }}
+                >
+                  <title>{`${item.name} · ${item.width} × ${item.depth} m`}</title>
+                  <rect
+                    x={-item.width / 2}
+                    y={-item.depth / 2}
+                    width={item.width}
+                    height={item.depth}
+                    rx={Math.min(0.08, item.width * 0.1)}
+                    fill={item.kind === 'rug' ? '#ded2b9' : '#f3eee4'}
+                    fillOpacity={item.kind === 'rug' ? 0.28 : 0.92}
+                    stroke={
+                      selection?.roomId === r.id && selection.furnitureId === item.id
+                        ? '#b87f45'
+                        : '#7e897f'
+                    }
+                    strokeWidth={
+                      selection?.roomId === r.id && selection?.furnitureId === item.id
+                        ? 0.08
+                        : 0.035
+                    }
+                    strokeDasharray={item.kind === 'rug' ? '.12 .08' : undefined}
+                  />
+                  {['sofa', 'armchair', 'chair', 'bed'].includes(item.kind) && (
+                    <rect
+                      pointerEvents="none"
+                      x={-item.width * 0.44}
+                      y={-item.depth * 0.44}
+                      width={item.width * 0.88}
+                      height={item.depth * 0.2}
+                      fill="#c3c6ba"
+                    />
+                  )}
+                  {item.kind !== 'rug' && (
+                    <path
+                      pointerEvents="none"
+                      d={`M 0 ${item.depth * 0.2} l -.12 -.12 m .12 .12 l .12 -.12`}
+                      fill="none"
+                      stroke="#7e897f"
+                      strokeWidth=".035"
+                    />
+                  )}
+                </g>
+              ))}
             <text
+              pointerEvents="none"
               x={r.x}
-              y={r.z - 0.2}
+              y={r.z - r.depth / 2 + 0.45}
               textAnchor="middle"
               fontSize={Math.min(0.52, r.width / 15)}
               fill="#384d43"
             >
               {r.name}
             </text>
-            <text x={r.x} y={r.z + 0.55} textAnchor="middle" fontSize=".4" fill="#8b8f81">
+            <text
+              pointerEvents="none"
+              x={r.x}
+              y={r.z - r.depth / 2 + 0.95}
+              textAnchor="middle"
+              fontSize=".4"
+              fill="#8b8f81"
+            >
               {r.width} × {r.depth} m
             </text>
           </g>

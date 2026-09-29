@@ -1,6 +1,7 @@
 import type { DesignIssue } from './design.ts';
 import type { Room, Scene, Side, Stair } from './model.ts';
 import { roomOpenings } from './openings.ts';
+import { roomFurniture, furnitureBounds, furnitureClearance } from './furniture.ts';
 import { roofHeightAt } from './architecture.ts';
 import {
   bounds,
@@ -29,78 +30,24 @@ const DOOR_APPROACH = 0.9;
 const STAIR_LANDING = 0.9;
 const HEADROOM = 2;
 export const spatialAssumptions = [
-  'Concept checks use schematic furniture bounding boxes, not detailed furnishing plans.',
+  'Concept checks use the saved furniture positions and dimensions; rotated items use conservative axis-aligned bounds. Rugs are not obstacles.',
   'Assumed usable door approach depth is 0.9 m; swing checks assume a single inward-swinging leaf as wide as the opening. Handing and leaf count are not modeled.',
   'Assumed stair headroom is 2 m and clear landing depth is 0.9 m. Linked stair floor and ceiling cutouts are excluded from overhead obstruction checks.',
   'Furniture circulation targets are 0.6 m, or 0.9 m around kitchen work areas. These are design assumptions, not building-code or accessibility certification.',
 ];
 
-/** World-space outer bounds of the actual schematic meshes in SceneView. Rugs are not obstacles. */
+/** World-space bounds shared with the editable meshes and floor-plan symbols. */
 export function furnitureFootprints(room: Room): Footprint[] {
-  const item = (
-    kind: string,
-    label: string,
-    x: number,
-    z: number,
-    width: number,
-    depth: number,
-    clearance = 0.6,
-    clearanceSides: Side[] = sides,
-  ): Footprint => ({
-    id: `${room.id}:${kind}`,
-    label,
-    x: room.x + x,
-    z: room.z + z,
-    width,
-    depth,
-    clearance,
-    clearanceSides,
-  });
-  if (room.kind === 'living')
-    return [
-      item(
-        'sofa',
-        'schematic sofa',
-        -room.width * 0.22,
-        room.depth * 0.13 - 0.0175,
-        3.3,
-        1.185,
-        0.6,
-        ['west', 'east', 'south'],
-      ),
-      item(
-        'table',
-        'schematic coffee table',
-        -room.width * 0.22,
-        room.depth * 0.13 + 1.6,
-        1.7,
-        0.8,
-      ),
-    ];
-  if (room.kind === 'kitchen')
-    return [
-      item(
-        'counter',
-        'schematic kitchen counter',
-        0,
-        -room.depth / 2 + 0.6,
-        room.width - 1.1,
-        1.1,
-        0.9,
-        ['south'],
-      ),
-      item('island', 'schematic kitchen island', 0, 0, Math.min(4, room.width - 0.8), 1.35, 0.9),
-    ];
-  if (room.kind === 'bedroom')
-    return [
-      item('bed', 'schematic bed and headboard', 0, -room.depth * 0.1 - 0.0125, 2.25, 2.325, 0.6, [
-        'west',
-        'east',
-        'south',
-      ]),
-    ];
-  if (room.kind === 'bathroom') return [item('bath', 'schematic bath fixture', 0, 0, 1.8, 0.8)];
-  return [];
+  return roomFurniture(room)
+    .filter((item) => item.kind !== 'rug')
+    .map((item) => ({
+      id: `${room.id}:${item.id}`,
+      label: item.name,
+      x: room.x + item.x,
+      z: room.z + item.z,
+      ...furnitureBounds(item),
+      ...furnitureClearance(item),
+    }));
 }
 
 const footprintRect = (item: Pick<Footprint, 'x' | 'z' | 'width' | 'depth'>): Rect => ({
@@ -152,20 +99,23 @@ function doors(scene: Scene, room: Room) {
     const declared = roomOpenings(scene, room.id, side);
     if (declared.length)
       return declared
-        .filter((opening) => opening.kind === 'door' && opening.sill <= 0.03)
+        .filter((opening) => opening.kind !== 'window' && opening.sill <= 0.03)
         .map((opening) => ({
           id: opening.id,
+          kind: opening.kind,
           side,
           center: (horizontalSide(side) ? room.x : room.z) + opening.offset,
           width: opening.width,
         }));
-    return room[side] === 'door'
+    const kind = room[side];
+    return kind === 'door' || kind === 'open'
       ? [
           {
             id: `${room.id}:${side}:door`,
+            kind,
             side,
             center: horizontalSide(side) ? room.x : room.z,
-            width: 1.3,
+            width: room[side] === 'open' ? (horizontalSide(side) ? room.width : room.depth) : 1.3,
           },
         ]
       : [];
@@ -292,6 +242,25 @@ function furnitureIssues(scene: Scene, room: Room, items: Footprint[]): DesignIs
           ),
         );
     }
+  for (const stair of scene.stairs) {
+    if (
+      stair.elevation >= room.elevation + room.height ||
+      stair.elevation + stair.rise < room.elevation
+    )
+      continue;
+    const rect = stairPlanFootprint(stair, 0.15);
+    for (const item of items.filter((item) => item.id !== 'fireplace')) {
+      if (intersects(rect, footprintRect(item)))
+        result.push(
+          issue(
+            'furniture_stair_blocked',
+            `The ${item.label} in “${room.name}” overlaps the stair footprint.`,
+            [room.id, item.id, stair.id],
+            { assumption: 'Keep the stair flight and its floor opening free of furniture.' },
+          ),
+        );
+    }
+  }
   for (const door of doors(scene, room)) {
     const approach = {
       minX: -Math.min(door.width, 0.9) / 2,
@@ -327,7 +296,7 @@ function furnitureIssues(scene: Scene, room: Room, items: Footprint[]): DesignIs
       );
     const left = mapped.filter(({ rect }) => blocksSwing(rect, door.width, 'left'));
     const right = mapped.filter(({ rect }) => blocksSwing(rect, door.width, 'right'));
-    if (left.length && right.length)
+    if (door.kind === 'door' && left.length && right.length)
       result.push(
         issue(
           'door_swing_obstructed',
@@ -481,6 +450,10 @@ function stairIssues(scene: Scene): DesignIssue[] {
     }
   }
   return result;
+}
+
+export function inspectRoomFurniture(scene: Scene, room: Room) {
+  return furnitureIssues(scene, room, roomObstacles(scene, room));
 }
 
 export function inspectSpatial(scene: Scene) {
