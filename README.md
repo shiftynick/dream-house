@@ -75,8 +75,9 @@ Generated thumbnails stay local. If visual review is enabled, the agent can sepa
 
 ## Cost and privacy
 
-- No background model calls. A design run can make **up to six model calls**, with up to two repair opportunities and twenty tool calls. Local geometry operations and image rendering do not make provider calls. Sending rendered evidence to the model uses image tokens and another model round. Provider failures and truncated responses are not automatically retried; geometry repair does involve additional paid model calls.
-- Generated alternatives run this bounded loop for each of two or three options, up to twelve or eighteen model calls in total. Each model response is capped at 6,000 output tokens. The initial request contains the current house/brief and ten recent messages; subsequent rounds include tool results from that run.
+- No background model calls. A design run can make **up to twelve model calls**, with up to two repair opportunities and thirty-two tool calls. Local geometry operations and image rendering do not make provider calls. Sending rendered evidence to the model uses image tokens and another model round. Provider failures and truncated responses are not automatically retried; geometry repair does involve additional paid model calls.
+- The model receives its remaining budget each round and instructions to finish during its last three rounds. Three consecutive rounds without a new draft state, fewer blocking errors, a successful capture, or new image review stop the run before another model call. Repeated inspections and unchanged edits do not count as progress; stopping leaves the saved house unchanged.
+- Generated alternatives run this bounded loop for each of two or three options, up to twenty-four or thirty-six model calls in total. Each model response is capped at 6,000 output tokens. The initial request contains the current house/brief and ten recent messages; subsequent rounds include tool results from that run.
 - The default daily cap is **60 cloud requests**, shared across every design round, transcription, and speech. It persists across restarts and resets at UTC midnight. A spoken exchange uses a variable number of requests. This is a request cap, not a dollar budget.
 - Displayed costs include only reported design charges. Audio charges and unreported design charges are excluded; check Vercel AI Gateway for complete spending. A run with any unknown model charge reports its total as unknown.
 - Recordings are capped at 60 seconds and sent after release. Audio is processed in memory, not stored as a project asset.
@@ -115,7 +116,7 @@ npm run verify:gateway -- --live
 npm run verify:design -- --live --case selected
 ```
 
-The Gateway check synthesizes a sentence, transcribes the generated audio, and runs a bounded design task. The two audio calls plus design rounds use up to eight paid requests. With `ffmpeg` available, transcription exercises WebM/Opus; otherwise it uses WAV. The design check defaults to a small selected-room material edit; `--case attach`, `empty`, `resize`, or `all` exercise other synthetic scenarios, with up to six model calls per case.
+The Gateway check synthesizes a sentence, transcribes the generated audio, and runs a bounded design task. The two audio calls plus design rounds use up to fourteen paid requests. With `ffmpeg` available, transcription exercises WebM/Opus; otherwise it uses WAV. The design check defaults to a small selected-room material edit; `--case attach`, `empty`, `resize`, or `all` exercise other synthetic scenarios, with up to twelve model calls per case.
 
 Both scripts use preview-only fixtures, report actual usage, and verify that the saved project stays byte-identical. They do not commit generated designs. `TERRAIN_BASE_URL` selects another loopback port. Microphone permissions and real-world recording quality still need a microphone session.
 

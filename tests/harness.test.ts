@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  AGENT_LIMITS,
   AgentRunError,
   runAgent,
   type AgentModel,
@@ -10,6 +11,8 @@ import {
 } from '../server/agent.ts';
 import { DesignDraft } from '../shared/draft.ts';
 import { emptyScene, makeRoom, type Scene } from '../shared/model.ts';
+import { renderCamera } from '../shared/render.ts';
+import { sceneFingerprint, type RenderProvider } from '../server/render-service.ts';
 
 const messages = [{ id: 'request', role: 'user' as const, text: 'Make this room larger.' }];
 function house(): Scene {
@@ -62,6 +65,13 @@ const toolResults = (history: ModelMessage[]) =>
   history
     .filter((message) => message.role === 'tool')
     .map((message) => JSON.parse(String(message.content)));
+const runBudget = (history: ModelMessage[]) => {
+  const message = history.find(
+    (message) => message.role === 'system' && String(message.content).startsWith('Live run budget'),
+  );
+  assert.ok(message, 'each model call receives an updated run budget');
+  return JSON.parse(String(message.content).split('\n')[1]);
+};
 
 test('harness supplies bounded history, selected object, camera and persistent brief', async () => {
   const scene = house();
@@ -247,6 +257,187 @@ test('repair allowance and model-call allowance bound unsuccessful loops', async
     /model-call limit/,
   );
   assert.equal(calls, 3);
+});
+
+test('a repair and visual correction can finish beyond six calls with a fresh final image', async () => {
+  const scene = house();
+  const original = structuredClone(scene);
+  let captures = 0;
+  const render: RenderProvider = async (draft, request) => {
+    captures++;
+    const { position, target } = renderCamera(draft, request);
+    return {
+      image: 'data:image/png;base64,iVBORw0KGgo=',
+      width: 768,
+      height: 576,
+      sceneHash: sceneFingerprint(draft),
+      view: request.view,
+      camera: { position, target },
+    };
+  };
+  const resize = (dimensions: { width?: number; depth?: number }) =>
+    call('apply_operations', {
+      operations: [
+        {
+          type: 'resize_room',
+          roomId: 'kitchen',
+          ...dimensions,
+          anchor: 'center',
+          moveConnected: false,
+        },
+      ],
+    });
+  const material = (palette: string) =>
+    call('apply_operations', {
+      operations: [{ type: 'set_material', roomIds: ['kitchen'], palette }],
+    });
+  const model = script([
+    turn([material('cedar'), call('inspect_design', {})]),
+    turn([resize({ width: 18 })]),
+    (history) => {
+      assert.ok(runBudget(history).blockingErrors > 0);
+      assert.equal(runBudget(history).remainingRepairRejections, 1);
+      return turn([resize({ width: 6 })]);
+    },
+    (history) => {
+      assert.equal(runBudget(history).needsFreshCapture, true);
+      return turn([call('render_view', { view: 'exterior' })]);
+    },
+    (history) => {
+      assert.equal(runBudget(history).imageAvailableToReviewNow, true);
+      assert.equal(runBudget(history).needsFreshCapture, false);
+      return turn([material('chalk'), call('inspect_design', {})]);
+    },
+    turn([resize({ depth: 5 })]),
+    (history) => {
+      assert.equal(runBudget(history).needsFreshCapture, true);
+      assert.equal(runBudget(history).remainingCaptures, 2);
+      return turn([call('render_view', { view: 'exterior' })]);
+    },
+    (history) => {
+      assert.equal(runBudget(history).needsFreshCapture, false);
+      assert.equal(runBudget(history).imageAvailableToReviewNow, true);
+      return turn([finish()]);
+    },
+  ]);
+  const result = await runAgent({
+    scene,
+    messages,
+    client: model.client,
+    context: { allowVisualReview: true },
+    render,
+  });
+  assert.equal(result.usage.calls, 8);
+  assert.equal(captures, 2);
+  assert.equal(result.scene?.rooms[0].width, 6);
+  assert.equal(result.scene?.rooms[0].depth, 5);
+  assert.equal(result.scene?.rooms[0].palette, 'chalk');
+  assert.equal(
+    result.issues.some((issue) => issue.severity === 'error'),
+    false,
+  );
+  assert.deepEqual(
+    scene,
+    original,
+    'a completed draft remains isolated until the service commits it',
+  );
+});
+
+test('default budget stops endless novel edits and reserves the final three calls for finishing', async () => {
+  const scene = house();
+  const original = structuredClone(scene);
+  let calls = 0;
+  const notices: string[] = [];
+  await assert.rejects(
+    runAgent({
+      scene,
+      messages,
+      client: {
+        async complete(history) {
+          const budget = runBudget(history);
+          assert.equal(budget.remainingModelCalls, AGENT_LIMITS.modelCalls - calls);
+          assert.equal(budget.remainingToolCalls, AGENT_LIMITS.toolCalls - calls);
+          notices.push(String(history[2].content));
+          calls++;
+          return turn([
+            call('apply_operations', {
+              operations: [
+                {
+                  type: 'resize_room',
+                  roomId: 'kitchen',
+                  width: 4 + calls / 10,
+                  anchor: 'center',
+                  moveConnected: false,
+                },
+              ],
+            }),
+          ]);
+        },
+      },
+    }),
+    /model-call limit/,
+  );
+  assert.equal(calls, 12, 'genuine progress never makes the default run unbounded');
+  assert.ok(notices.slice(-3).every((message) => message.includes('FINALIZATION WINDOW')));
+  assert.ok(notices.slice(0, -3).every((message) => !message.includes('FINALIZATION WINDOW')));
+  assert.deepEqual(scene, original);
+});
+
+test('repeated inspections and cycling through prior drafts stop without consuming the full budget', async () => {
+  for (const cycle of [false, true]) {
+    const scene = house();
+    const original = structuredClone(scene);
+    let calls = 0;
+    await assert.rejects(
+      runAgent({
+        scene,
+        messages,
+        client: {
+          async complete(history) {
+            calls++;
+            if (!cycle) return turn([call('inspect_design', {})]);
+            const palette = calls % 2 ? 'cedar' : 'chalk';
+            assert.equal(runBudget(history).consecutiveIdleRounds, Math.max(0, calls - 3));
+            return turn([
+              call('apply_operations', {
+                operations: [{ type: 'set_material', roomIds: ['kitchen'], palette }],
+              }),
+            ]);
+          },
+        },
+      }),
+      /stopped making progress/,
+    );
+    assert.equal(calls, cycle ? 5 : 3);
+    assert.deepEqual(scene, original);
+  }
+});
+
+test('tool-heavy turns retain an independent cap even within the model-call allowance', async () => {
+  let calls = 0;
+  let inspections = 0;
+  await assert.rejects(
+    runAgent({
+      scene: house(),
+      messages,
+      onEvent(event) {
+        if (event.tool === 'inspect_design') inspections++;
+      },
+      client: {
+        async complete() {
+          calls++;
+          return turn(
+            Array.from({ length: 12 }, (_, index) =>
+              call('inspect_design', {}, `inspect-${calls}-${index}`),
+            ),
+          );
+        },
+      },
+    }),
+    /tool limit/,
+  );
+  assert.equal(calls, 3);
+  assert.equal(inspections, 32);
 });
 
 test('provider errors, truncation and missing tool calls do not trigger retries', async () => {

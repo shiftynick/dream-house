@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { performance } from 'node:perf_hooks';
+import { AGENT_LIMITS } from '../server/agent.ts';
 import { emptyScene, agentResponseSchema, validateScene } from '../shared/model.ts';
 import { validateDesignChange } from '../shared/design.ts';
 import type { HarnessResult } from '../shared/harness.ts';
@@ -41,8 +42,8 @@ try {
     'Configure AI_GATEWAY_API_KEY in .env or a saved Vercel key, then restart the server if using .env.',
   );
   assert.ok(
-    status.dailyLimit - status.usage.requests >= 8,
-    'Reserve eight cloud request slots: two audio calls and at most six agent model rounds.',
+    status.dailyLimit - status.usage.requests >= 2 + AGENT_LIMITS.modelCalls,
+    `Reserve ${2 + AGENT_LIMITS.modelCalls} cloud request slots: two audio calls and at most ${AGENT_LIMITS.modelCalls} agent model rounds.`,
   );
   savedProjectBefore = await (await request('project')).text();
   const text = 'Make the kitchen face the courtyard, with a fireplace in the living room.';

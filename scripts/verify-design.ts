@@ -1,6 +1,7 @@
 // Opt-in model evaluations. Synthetic scenes and previewOnly never enter saved history.
 import assert from 'node:assert/strict';
 import { performance } from 'node:perf_hooks';
+import { AGENT_LIMITS } from '../server/agent.ts';
 import { circulationEdges, executeCommands, validateDesignChange } from '../shared/design.ts';
 import { bounds, sharedBoundary } from '../shared/geometry.ts';
 import {
@@ -342,8 +343,8 @@ try {
   const status = await (await request('status')).json();
   assert.ok(status.gatewayConnected, 'Configure a Vercel AI Gateway key before live verification.');
   assert.ok(
-    status.dailyLimit - status.usage.requests >= chosen.length * 6,
-    `Reserve ${chosen.length * 6} cloud request slots for the bounded model rounds.`,
+    status.dailyLimit - status.usage.requests >= chosen.length * AGENT_LIMITS.modelCalls,
+    `Reserve ${chosen.length * AGENT_LIMITS.modelCalls} cloud request slots for the bounded model rounds.`,
   );
   savedBefore = await (await request('project')).text();
   for (const name of chosen) {
@@ -373,7 +374,7 @@ try {
       `${name}: the design must satisfy geometry and circulation checks.`,
     );
     fixture.verify(design.scene);
-    assert.ok(result.usage.calls >= 1 && result.usage.calls <= 6);
+    assert.ok(result.usage.calls >= 1 && result.usage.calls <= AGENT_LIMITS.modelCalls);
     console.log(
       JSON.stringify({
         check: name,

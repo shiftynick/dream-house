@@ -1,6 +1,7 @@
 import { Component, Suspense, useEffect, useRef, useState, type ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { Canvas, useFrame, useThree } from '@react-three/fiber';
+import { createRoot, extend, useThree } from '@react-three/fiber';
+import { captureAfterRender } from './captureSchedule';
 import * as THREE from 'three';
 import { Architecture, Environment, FloorPlanSvg, Site } from './SceneView';
 import {
@@ -47,42 +48,161 @@ function CaptureFrames({
   fail: Props['onError'];
 }) {
   const { gl, scene, camera } = useThree();
-  const frames = useRef(0);
-  const finished = useRef(false);
   useEffect(() => {
+    const controller = new AbortController();
     const lost = (event: Event) => {
       event.preventDefault();
+      controller.abort();
       fail('The local render context was lost while capturing the house.');
     };
     gl.domElement.addEventListener('webglcontextlost', lost);
-    return () => gl.domElement.removeEventListener('webglcontextlost', lost);
-  }, [gl, fail]);
-  useFrame(() => {
-    if (finished.current) return;
-    try {
-      scene.updateMatrixWorld(true);
-      camera.updateMatrixWorld(true);
-      gl.render(scene, camera);
-      if (++frames.current < 4) return;
-      const image = gl.domElement.toDataURL('image/jpeg', 0.88);
-      if (!image.startsWith('data:image/jpeg;base64,') || image.length < 1000)
-        throw new Error('The local renderer returned an empty image.');
-      finished.current = true;
-      const framing = renderCamera(job.scene, job.request);
-      complete({
-        image,
-        width: WIDTH,
-        height: HEIGHT,
-        camera: { position: framing.position, target: framing.target },
-        sceneHash: job.sceneHash,
-        view: job.request.view,
+    void captureAfterRender({
+      signal: controller.signal,
+      render: () => {
+        if (gl.getContext().isContextLost())
+          throw new Error('The local render context is unavailable.');
+        scene.updateMatrixWorld(true);
+        camera.updateMatrixWorld(true);
+        gl.render(scene, camera);
+      },
+      capture: () => {
+        const context = gl.getContext();
+        if (context.isContextLost() || gl.info.render.calls === 0)
+          throw new Error('The local renderer did not draw the house.');
+        const pixels = new Uint8Array(WIDTH * HEIGHT * 4);
+        context.readPixels(0, 0, WIDTH, HEIGHT, context.RGBA, context.UNSIGNED_BYTE, pixels);
+        let opaque = false;
+        for (let index = 3; index < pixels.length; index += 4)
+          if (pixels[index] !== 0) {
+            opaque = true;
+            break;
+          }
+        if (!opaque) throw new Error('The local renderer returned an empty image.');
+        const image = gl.domElement.toDataURL('image/jpeg', 0.88);
+        if (!image.startsWith('data:image/jpeg;base64,') || image.length < 1000)
+          throw new Error('The local renderer returned an empty image.');
+        const framing = renderCamera(job.scene, job.request);
+        return {
+          image,
+          width: WIDTH,
+          height: HEIGHT,
+          camera: { position: framing.position, target: framing.target },
+          sceneHash: job.sceneHash,
+          view: job.request.view,
+        };
+      },
+    })
+      .then((result) => {
+        if (!controller.signal.aborted) complete(result);
+      })
+      .catch((error) => {
+        if (!controller.signal.aborted)
+          fail(error instanceof Error ? error.message : 'The local image capture failed.');
       });
-    } catch (error) {
-      finished.current = true;
-      fail(error instanceof Error ? error.message : 'The local image capture failed.');
-    }
-  }, 1);
+    return () => {
+      controller.abort();
+      gl.domElement.removeEventListener('webglcontextlost', lost);
+    };
+  }, [job, gl, scene, camera, complete, fail]);
   return null;
+}
+
+/** Explicit size avoids Canvas/useMeasure's ResizeObserver gate, which can also
+ * wait for a browser paint. A fresh canvas per effect owns and releases its root. */
+function OffscreenScene({
+  job,
+  complete,
+  fail,
+}: {
+  job: RenderJob;
+  complete: Props['onComplete'];
+  fail: Props['onError'];
+}) {
+  const host = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!host.current) return;
+    let cancelled = false;
+    const framing = renderCamera(job.scene, job.request);
+    const canvas = document.createElement('canvas');
+    canvas.width = WIDTH;
+    canvas.height = HEIGHT;
+    canvas.style.width = `${WIDTH}px`;
+    canvas.style.height = `${HEIGHT}px`;
+    host.current.appendChild(canvas);
+    extend({
+      Group: THREE.Group,
+      Mesh: THREE.Mesh,
+      BoxGeometry: THREE.BoxGeometry,
+      PlaneGeometry: THREE.PlaneGeometry,
+      CylinderGeometry: THREE.CylinderGeometry,
+      IcosahedronGeometry: THREE.IcosahedronGeometry,
+      SphereGeometry: THREE.SphereGeometry,
+      MeshBasicMaterial: THREE.MeshBasicMaterial,
+      MeshStandardMaterial: THREE.MeshStandardMaterial,
+      GridHelper: THREE.GridHelper,
+      AmbientLight: THREE.AmbientLight,
+      HemisphereLight: THREE.HemisphereLight,
+      DirectionalLight: THREE.DirectionalLight,
+      PointLight: THREE.PointLight,
+    });
+    const root = createRoot(canvas);
+    void root
+      .configure({
+        size: { width: WIDTH, height: HEIGHT, top: 0, left: 0 },
+        frameloop: 'never',
+        shadows: true,
+        dpr: 1,
+        camera: {
+          position: framing.position,
+          fov: framing.fov,
+          near: job.request.view === 'interior' ? 0.04 : 0.1,
+          far: 1500,
+        },
+        gl: {
+          antialias: true,
+          preserveDrawingBuffer: true,
+          powerPreference: 'high-performance',
+          toneMapping: THREE.ACESFilmicToneMapping,
+        },
+        onCreated: ({ camera }) => {
+          camera.lookAt(...framing.target);
+          camera.updateMatrixWorld(true);
+        },
+      })
+      .then(() => {
+        if (cancelled) return;
+        root.render(
+          <CaptureBoundary onError={fail}>
+            <Suspense fallback={null}>
+              <Environment light={job.request.light} />
+              <Site house={job.scene} quality={job.request.quality} />
+              <Architecture
+                house={job.scene}
+                quality={job.request.quality}
+                cutaway={job.request.view === 'cutaway'}
+                cutawaySides={[
+                  job.request.angle.startsWith('south') ? 'south' : 'north',
+                  job.request.angle.endsWith('east') ? 'east' : 'west',
+                ]}
+                selected={null}
+                onSelect={noSelection}
+              />
+              <CaptureFrames job={job} complete={complete} fail={fail} />
+            </Suspense>
+          </CaptureBoundary>,
+        );
+      })
+      .catch((error) => {
+        if (!cancelled)
+          fail(error instanceof Error ? error.message : 'The local renderer could not initialize.');
+      });
+    return () => {
+      cancelled = true;
+      root.unmount();
+      canvas.remove();
+    };
+  }, [job, complete, fail]);
+  return <div ref={host} style={{ width: WIDTH, height: HEIGHT }} />;
 }
 
 async function capturePlan(job: RenderJob): Promise<RenderCaptureResult> {
@@ -178,7 +298,6 @@ function CaptureTask({ job, onComplete, onError }: Props) {
     };
   }, [job, framingError, complete, fail]);
   if (done || !framing || job.request.view === 'plan') return null;
-  const camera = framing;
   return (
     <div
       aria-hidden="true"
@@ -194,44 +313,7 @@ function CaptureTask({ job, onComplete, onError }: Props) {
       }}
     >
       <CaptureBoundary onError={fail}>
-        <Canvas
-          key={job.id}
-          shadows
-          dpr={1}
-          camera={{
-            position: camera.position,
-            fov: camera.fov,
-            near: job.request.view === 'interior' ? 0.04 : 0.1,
-            far: 1500,
-          }}
-          gl={{
-            antialias: true,
-            preserveDrawingBuffer: true,
-            powerPreference: 'high-performance',
-            toneMapping: THREE.ACESFilmicToneMapping,
-          }}
-          onCreated={({ camera: viewCamera }) => {
-            viewCamera.lookAt(...camera.target);
-            viewCamera.updateMatrixWorld(true);
-          }}
-        >
-          <Suspense fallback={null}>
-            <Environment light={job.request.light} />
-            <Site house={job.scene} quality={job.request.quality} />
-            <Architecture
-              house={job.scene}
-              quality={job.request.quality}
-              cutaway={job.request.view === 'cutaway'}
-              cutawaySides={[
-                job.request.angle.startsWith('south') ? 'south' : 'north',
-                job.request.angle.endsWith('east') ? 'east' : 'west',
-              ]}
-              selected={null}
-              onSelect={noSelection}
-            />
-            <CaptureFrames job={job} complete={complete} fail={fail} />
-          </Suspense>
-        </Canvas>
+        <OffscreenScene job={job} complete={complete} fail={fail} />
       </CaptureBoundary>
     </div>
   );

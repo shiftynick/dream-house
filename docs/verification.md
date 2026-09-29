@@ -1,3 +1,18 @@
+# Model-budget and background-capture follow-up — September 28, 2026
+
+The reported cabin request exhausted the former six-call budget while refining and reviewing a valid draft. The harness now allows at most 12 model calls and 32 tool calls, supplies the remaining budget before every round, reserves time for final visual review, and stops repeated rounds that make no progress. Advisory furniture warnings no longer invite unnecessary layout changes in the system instructions.
+
+- **126 automated tests passed**, including an eight-round repair/capture/correction/final-review regression, hard model/tool limits, repeated-inspection and scene-cycling termination, and capture cancellation/error handling.
+- **TypeScript, production build, formatting, whitespace and credential scans passed.** Existing non-blocking Vite bundle-size and upstream Zod annotation warnings remain.
+- Retried the exact failed cabin description through the browser's retry button on an isolated copy. Sonnet completed in **five calls**, with one local exterior capture, a geometry repair, review of the matching final scene, and a successful save. The saved scene matched the returned result and contained four spaces. Reported model cost was **$0.175854**.
+- This is a completed agent flow, not exact fulfillment of every architectural detail: the generated cabin explicitly disclosed a flat-roof approximation because mono-pitch roofs are unsupported, and a wide south door instead of a full glazed south wall. Schematic furnishing warnings remained visible.
+- An initial live retry exposed capture's dependency on browser animation frames. After replacing that dependency, the real render bridge completed exterior, interior, cutaway and plan captures with `requestAnimationFrame` disabled. All four returned 768 × 576 images in approximately 1–2 seconds; each image was visually inspected and showed the requested scene/view.
+- Reviewed the simplified empty-state interface and project, alternatives and help dialogs. Removed decorative slogans and renamed the terrain control **Site slope**.
+
+The two live verification attempts used seven model calls with total reported cost **$0.249202**. That includes the failed capture attempt; it is not a per-edit estimate. These charges were added to local usage accounting. The user's production workspace remained byte-identical throughout testing and restart. Private captures, test projects and credentials remain excluded from Git.
+
+---
+
 # Visual design and project-library verification — September 28, 2026
 
 Verified with Vercel AI Gateway and `anthropic/claude-sonnet-5.5`, using a separate local data directory and the real browser render bridge. The original project remained byte-identical and has a separate backup. Private projects, captures and credentials are excluded from Git.
