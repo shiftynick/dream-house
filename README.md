@@ -2,6 +2,8 @@
 
 A local, voice-first architectural concept studio. Keep separate houses, start on an empty hillside, and describe what you imagine. The design agent uses architectural operations, checks geometry and locally rendered views, and can repair an unsaved draft before applying it.
 
+For the current development checkpoint and next-session context, see [HANDOFF.md](HANDOFF.md).
+
 ## Run
 
 Requires Node.js 22.12+ (developed with Node 24).
