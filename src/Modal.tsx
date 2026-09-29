@@ -9,7 +9,7 @@ export default function Modal({
   wide = false,
 }: {
   title: string;
-  subtitle: string;
+  subtitle?: string;
   onClose: () => void;
   children: ReactNode;
   wide?: boolean;
@@ -62,9 +62,8 @@ export default function Modal({
       >
         <div className="modal-header">
           <div>
-            <span className="eyebrow">TERRAIN STUDIO</span>
             <h2>{title}</h2>
-            <p>{subtitle}</p>
+            {subtitle && <p>{subtitle}</p>}
           </div>
           <button className="icon-button" aria-label="Close dialog" onClick={onClose}>
             <X size={19} />

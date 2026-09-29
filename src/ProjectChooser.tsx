@@ -40,7 +40,7 @@ export default function ProjectChooser({
   };
   return (
     <Modal
-      title="A place for every dream."
+      title="Projects"
       subtitle="Each house has its own conversation, design brief, alternatives, and history."
       onClose={() => {
         if (!busy) onClose();
@@ -55,11 +55,11 @@ export default function ProjectChooser({
         }}
       >
         <label className="field-label">
-          Start a new house
+          Project name
           <input
             aria-label="New house name"
             maxLength={100}
-            placeholder="Give your next idea a name…"
+            placeholder="New house name"
             value={name}
             disabled={busy}
             onChange={(event) => setName(event.target.value)}
@@ -80,7 +80,7 @@ export default function ProjectChooser({
       <div className="project-library">
         {!directory && !error && (
           <span className="project-loading">
-            <LoaderCircle size={16} className="spin" /> Opening your collection…
+            <LoaderCircle size={16} className="spin" /> Loading projects…
           </span>
         )}
         {directory?.projects.map((project) => (

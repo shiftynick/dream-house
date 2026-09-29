@@ -808,12 +808,12 @@ function ProgressiveRenderer({
   const lastStatus = useRef('');
   useEffect(() => {
     let cancelled = false;
-    onStatus(enabled ? 'Preparing light study' : 'Live rendering');
+    onStatus(enabled ? 'Preparing path tracer' : 'Live rendering');
     if (enabled) {
       import('three-gpu-pathtracer')
         .then(({ WebGLPathTracer }) => {
           if (cancelled) return;
-          onStatus('Building light study');
+          onStatus('Building path-traced scene');
           const pt = new WebGLPathTracer(gl);
           pt.textureSize.set(256, 256);
           pt.bounces = 4;
@@ -829,7 +829,7 @@ function ProgressiveRenderer({
           tracer.current = pt;
           scene.updateMatrixWorld(true);
           pt.setScene(scene, camera);
-          onStatus('Light study ready');
+          onStatus('Path tracer ready');
         })
         .catch((error) => {
           console.error('Path tracer initialization failed', error);
@@ -866,7 +866,7 @@ function ProgressiveRenderer({
       if (pt.samples < 128) pt.renderSample();
       const status =
         pt.samples >= 128
-          ? 'Light study · 128 samples'
+          ? 'Path traced · 128 samples'
           : pt.samples < 1
             ? 'Settling light…'
             : `Refining · ${Math.floor(pt.samples)} / 128 samples`;
@@ -1135,8 +1135,7 @@ function FloorPlan({
   return (
     <div className="floor-plan">
       <div className="plan-heading">
-        <span className="eyebrow">THE SAME HOUSE, ANOTHER PERSPECTIVE</span>
-        <h2>Room by room.</h2>
+        <h2>Floor plan</h2>
         <p>Dimensions in meters · gaps show openings · select a space to inspect it</p>
       </div>
       <div className="plan-levels">

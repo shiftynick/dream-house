@@ -17,7 +17,6 @@ import {
   GitBranch,
   House,
   Layers3,
-  Leaf,
   LoaderCircle,
   Maximize2,
   Mic,
@@ -82,7 +81,7 @@ type RunProgress = Pick<RunStatus, 'message' | 'status'> & {
 
 const qualityNames: Record<Quality, string> = {
   live: 'Live',
-  refined: 'Light study',
+  refined: 'Path traced',
   clay: 'Clay',
   wireframe: 'Wireframe',
 };
@@ -138,11 +137,7 @@ function Connections({
         ? 'Environment key configured'
         : 'Key needed';
   return (
-    <Modal
-      title="A little intelligence, connected."
-      subtitle="Your house lives here. Your chosen AI helps shape it."
-      onClose={onClose}
-    >
+    <Modal title="Connections" onClose={onClose}>
       <form
         onSubmit={async (e) => {
           e.preventDefault();
@@ -174,7 +169,7 @@ function Connections({
           </span>
           <div>
             <h3>
-              One connection{' '}
+              AI Gateway{' '}
               <span className={`pill ${status?.gatewayConnected ? 'green' : ''}`}>{keyLabel}</span>
             </h3>
             <p>Vercel AI Gateway · design, transcription, and speech</p>
@@ -207,7 +202,7 @@ function Connections({
             <AudioLines size={19} />
           </span>
           <div>
-            <h3>A voice for your ideas</h3>
+            <h3>Voice</h3>
             <p>Push-to-talk transcription and optional AI speech, using the same key</p>
           </div>
         </div>
@@ -877,7 +872,7 @@ export default function App() {
     return (
       <div className="boot-screen">
         <House size={36} />
-        <h1>Your project needs attention.</h1>
+        <h1>Could not load project</h1>
         <p>{loadError}</p>
         <p>The existing file has not been overwritten.</p>
         <button className="primary" onClick={() => location.reload()}>
@@ -986,11 +981,6 @@ export default function App() {
       </header>
       <div className={`studio ${partner ? '' : 'partner-hidden'}`}>
         <aside className="sidebar">
-          <div className="sidebar-top">
-            <span className="eyebrow">YOUR PLACE IN THE WORLD</span>
-            <h1>A home, imagined.</h1>
-            <p>Make room for the way you live.</p>
-          </div>
           <div className="sidebar-tabs">
             <button
               className={panel === 'spaces' ? 'active' : ''}
@@ -1009,7 +999,7 @@ export default function App() {
             {panel === 'spaces' ? (
               <>
                 <div className="section-title">
-                  <span>THE HOUSE</span>
+                  <span>ROOMS</span>
                   <button
                     className="tiny-button"
                     aria-label="Add a room"
@@ -1032,12 +1022,8 @@ export default function App() {
                 </div>
                 {!house.rooms.length ? (
                   <div className="empty-spaces">
-                    <div className="empty-room-icon">
-                      <Square size={29} strokeWidth={1} />
-                      <Plus size={12} />
-                    </div>
-                    <h3>Room for possibility.</h3>
-                    <p>Your spaces will appear here as we bring your home to life.</p>
+                    <h3>No rooms yet</h3>
+                    <p>Add a room or describe a layout.</p>
                   </div>
                 ) : (
                   <div className="room-list">
@@ -1228,26 +1214,12 @@ export default function App() {
                     </button>
                   </div>
                 )}
-                <div className="site-card">
-                  <div className="site-icon">
-                    <Leaf size={19} />
-                  </div>
-                  <div>
-                    <h3>Your hillside site</h3>
-                    <p>
-                      {house.slope === 0
-                        ? 'Flat terrain'
-                        : `${Math.round(house.slope * 100)}% gentle slope`}{' '}
-                      · open surroundings
-                    </p>
-                  </div>
-                </div>
                 <label className="slope-control">
                   <span>
-                    Land slope <b>{Math.round(house.slope * 100)}%</b>
+                    Site slope <b>{Math.round(house.slope * 100)}%</b>
                   </span>
                   <input
-                    aria-label="Land slope"
+                    aria-label="Site slope"
                     type="range"
                     min="0"
                     max=".35"
@@ -1259,11 +1231,10 @@ export default function App() {
                 </label>
                 <section className="design-brief" aria-label="Design brief">
                   <div className="section-title">
-                    <span>YOUR DESIGN BRIEF</span>
+                    <span>DESIGN BRIEF</span>
                   </div>
                   <p className="panel-note">
-                    Keep the ideas the agent should remember. Confirmed requirements carry more
-                    weight than assumptions and preferences.
+                    Confirmed requirements take priority over assumptions and preferences.
                   </p>
                   {requirements.map((requirement) => (
                     <div className="requirement-card" key={requirement.id}>
@@ -1378,11 +1349,10 @@ export default function App() {
             ) : (
               <>
                 <div className="section-title">
-                  <span>EXPLORE A FEELING</span>
+                  <span>HOUSE MATERIALS</span>
                 </div>
                 <p className="panel-note">
-                  A palette for the whole house, including rooms with their own materials. Choose
-                  what feels like you.
+                  Applies to the whole house, replacing room and surface overrides.
                 </p>
                 <div className="material-options">
                   {Object.entries(palettes).map(([key, p]) => (
@@ -1447,11 +1417,6 @@ export default function App() {
               </>
             )}
           </div>
-          <div className="sidebar-bottom">
-            <span className="local-dot" />
-            <span>Made here. Saved here.</span>
-            <span className="local-tag">LOCAL</span>
-          </div>
         </aside>
         <main className="workspace">
           <div className="viewport-header">
@@ -1496,7 +1461,7 @@ export default function App() {
               </IconButton>
               <span className="small-divider" />
               <IconButton
-                label="Toggle design partner"
+                label="Toggle design chat"
                 active={partner}
                 onClick={() => setPartner(!partner)}
               >
@@ -1521,18 +1486,7 @@ export default function App() {
             />
             {!house.rooms.length && !pending && view !== 'plan' && (
               <div className="welcome-overlay">
-                <span className="eyebrow">
-                  <span /> A BLANK CANVAS, A BEAUTIFUL POSSIBILITY
-                </span>
-                <h2>
-                  It starts with
-                  <br />a place to <em>call home.</em>
-                </h2>
-                <p>
-                  Describe the home in your head.
-                  <br />
-                  We’ll find its shape, together.
-                </p>
+                <h2>No house yet</h2>
                 <button
                   className="welcome-button"
                   onClick={() => {
@@ -1540,7 +1494,7 @@ export default function App() {
                     setTimeout(() => inputRef.current?.focus(), 50);
                   }}
                 >
-                  Tell me about your home <ArrowRight size={15} />
+                  Describe a house <ArrowRight size={15} />
                 </button>
                 <button
                   className="sample-button"
@@ -1550,7 +1504,7 @@ export default function App() {
                     setResetKey((k) => k + 1);
                   }}
                 >
-                  Or explore a sample house <ChevronRight size={12} />
+                  Load sample house <ChevronRight size={12} />
                 </button>
               </div>
             )}
@@ -1653,7 +1607,7 @@ export default function App() {
             {alternativeModel.preview && (
               <div className="proposal-bar alternative-preview-bar">
                 <Eye size={16} />
-                <span>Exploring {alternativeModel.preview.name}</span>
+                <span>Preview: {alternativeModel.preview.name}</span>
                 <button
                   className="text-button"
                   disabled={busy}
@@ -1681,7 +1635,7 @@ export default function App() {
                     )
                   }
                 >
-                  <Check size={13} /> Keep this
+                  <Check size={13} /> Use this design
                 </button>
               </div>
             )}
@@ -1718,7 +1672,7 @@ export default function App() {
                 {view === 'walk'
                   ? 'Click to look around · WASD move · Q/E down/up · Esc release'
                   : view === 'orbit'
-                    ? 'Drag to orbit · Scroll to explore · Right-drag to pan'
+                    ? 'Drag to orbit · Scroll to zoom · Right-drag to pan'
                     : 'Select a space for dimensions'}
               </span>
             </div>
@@ -1728,10 +1682,7 @@ export default function App() {
               <span className="tiny-dot" />{' '}
               {house.rooms.length
                 ? `${house.rooms.length} spaces · ${area(house).toFixed(0)} m² interior`
-                : 'Your story starts here'}
-            </span>
-            <span>
-              CONCEPT DESIGN <span className="footer-cross">✳</span> ENDLESS POSSIBILITY
+                : '0 spaces'}
             </span>
           </footer>
         </main>
@@ -1742,41 +1693,23 @@ export default function App() {
                 <Sparkles size={18} />
               </span>
               <div>
-                <h2>Your design partner</h2>
+                <h2>Design chat</h2>
                 <p>
                   <span className={status?.modelConnected ? 'online-dot' : 'offline-dot'} />
-                  {status?.modelConnected ? 'Gateway key configured' : 'Let’s get connected'}
+                  {status?.modelConnected ? 'Gateway key configured' : 'API key required'}
                 </p>
               </div>
-              <IconButton label="Hide design partner" onClick={() => setPartner(false)}>
+              <IconButton label="Hide design chat" onClick={() => setPartner(false)}>
                 <X size={15} />
               </IconButton>
             </div>
             <div className="conversation">
-              <div className="partner-intro">
-                <span className="eyebrow">A CONVERSATION, NOT A FLOOR PLAN</span>
-                <h3>
-                  You bring the dream.
-                  <br />
-                  We’ll find the details.
-                </h3>
-                <p>
-                  Start anywhere. A feeling, a room, a view you’d love to wake up to. You don’t need
-                  the right words.
-                </p>
-              </div>
               {!project.messages.length && (
                 <>
-                  <div className="assistant-message">
-                    <span className="mini-spark">
-                      <Sparkles size={13} />
-                    </span>
-                    <div>What do you picture when you think of home?</div>
-                  </div>
                   <div className="prompt-chips">
                     {[
                       'A hillside home with an open kitchen overlooking a two-story living room',
-                      'Something quiet, warm, and full of natural light',
+                      'A single-story house with large windows and an open kitchen',
                       'A home wrapped around a garden courtyard',
                     ].map((prompt, i) => (
                       <button
@@ -1786,13 +1719,7 @@ export default function App() {
                           inputRef.current?.focus();
                         }}
                       >
-                        {
-                          [
-                            'Start with the layout',
-                            'Start with a feeling',
-                            'Start with the outdoors',
-                          ][i]
-                        }
+                        {['Open-plan layout', 'Large windows', 'Courtyard layout'][i]}
                         <ArrowRight size={12} />
                       </button>
                     ))}
@@ -1890,7 +1817,7 @@ export default function App() {
                 <textarea
                   aria-label="Describe your home"
                   ref={inputRef}
-                  placeholder="Tell me what you’re imagining…"
+                  placeholder="Describe a house or request a change…"
                   value={input}
                   disabled={locked}
                   onChange={(e) => setInput(e.target.value)}
@@ -2058,12 +1985,7 @@ export default function App() {
         />
       )}
       {modal === 'versions' && (
-        <Modal
-          title="Room for another possibility."
-          subtitle="Keep the ideas you love. Try a different direction."
-          onClose={closeModal}
-          wide
-        >
+        <Modal title="Alternatives" onClose={closeModal} wide>
           <VisualAlternatives
             model={alternativeModel}
             disabled={
@@ -2089,7 +2011,7 @@ export default function App() {
             <input
               aria-label="Alternative name"
               maxLength={80}
-              placeholder="Name this moment. ‘Courtyard idea’, perhaps…"
+              placeholder="Alternative name"
               value={versionName}
               onChange={(e) => setVersionName(e.target.value)}
             />
@@ -2101,8 +2023,8 @@ export default function App() {
             {!project.variants.length ? (
               <div className="empty-versions">
                 <GitBranch size={29} strokeWidth={1} />
-                <h3>Every good idea deserves a place.</h3>
-                <p>Save your current design above, then explore something new.</p>
+                <h3>No saved alternatives</h3>
+                <p>Enter a name to save the current design.</p>
               </div>
             ) : (
               project.variants.map((v) => (
@@ -2223,11 +2145,7 @@ export default function App() {
         </Modal>
       )}
       {modal === 'help' && (
-        <Modal
-          title="Make yourself at home."
-          subtitle="A few small gestures. A world of possibilities."
-          onClose={closeModal}
-        >
+        <Modal title="Help and shortcuts" onClose={closeModal}>
           <div className="help-list">
             <p>
               <kbd>Space</kbd>
@@ -2235,7 +2153,7 @@ export default function App() {
             </p>
             <p>
               <kbd>↵</kbd>
-              <span>Send a typed idea. Shift + Enter adds a new line.</span>
+              <span>Send a message. Shift + Enter adds a new line.</span>
             </p>
             <p>
               <kbd>Ctrl Z</kbd>
@@ -2250,7 +2168,7 @@ export default function App() {
             </p>
           </div>
           <div className="help-note">
-            <h3>Try saying it simply.</h3>
+            <h3>Example requests</h3>
             <p>
               “Make the living room wider.” “Give the bedrooms more privacy.” “Use darker wood
               outside.”
@@ -2259,11 +2177,10 @@ export default function App() {
               Local commands: “undo”, “redo”, “show wireframe”, “show floor plan”, “show exterior”,
               “walk inside”, “hide roof”, “show roof”.
             </p>
-            <h3>A study, not a building plan.</h3>
+            <h3>Limitations</h3>
             <p>
-              Terrain explores rectangular spaces and architectural character. Layouts need review
-              for access, structure, and construction. Light study progressively traces the same 3D
-              scene; it can take a moment to settle.
+              Rooms use rectangular geometry. Layouts need review for access, structure, and
+              construction. Path tracing refines lighting over time.
             </p>
             <p>
               {status?.usage.requests || 0} / {status?.dailyLimit || 60} cloud requests today.

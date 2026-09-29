@@ -236,26 +236,8 @@ button.primary,
   flex-direction: column;
   min-height: 0;
 }
-.sidebar-top {
-  padding: 29px 23px 24px;
-}
-.sidebar-top h1 {
-  font-family: 'Instrument Serif', serif;
-  font-size: 28px;
-  font-weight: 400;
-  letter-spacing: -0.45px;
-  margin: 11px 0 7px;
-}
-.sidebar-top p {
-  font-size: 11px;
-  color: #959889;
-}
-.sidebar-top .eyebrow {
-  font-size: 8px;
-  letter-spacing: 1.2px;
-}
 .sidebar-tabs {
-  margin: 0 18px;
+  margin: 12px 18px 0;
   display: flex;
   border-bottom: 1px solid var(--line);
   gap: 18px;
@@ -300,18 +282,6 @@ button.primary,
   text-align: center;
   padding: 19px 10px 30px;
 }
-.empty-room-icon {
-  position: relative;
-  display: inline-flex;
-  color: #a0aa92;
-  margin-bottom: 16px;
-}
-.empty-room-icon svg:last-child {
-  position: absolute;
-  bottom: -3px;
-  right: -4px;
-  background: #f9f9f4;
-}
 .empty-spaces h3 {
   font-weight: 450;
   font-size: 12px;
@@ -322,35 +292,10 @@ button.primary,
   line-height: 1.8;
   color: #989e8f;
 }
-.site-card {
-  border-top: 1px solid var(--line);
-  padding: 20px 0 14px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 9px;
-}
-.site-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: #ebeee1;
-  width: 34px;
-  height: 36px;
-  border-radius: 5px;
-  color: #7e906b;
-}
-.site-card h3 {
-  font-size: 11px;
-  font-weight: 500;
-  margin-bottom: 4px;
-}
-.site-card p {
-  font-size: 9px;
-  color: #9a9f90;
-}
 .slope-control {
   display: block;
+  border-top: 1px solid var(--line);
+  padding-top: 18px;
   font-size: 10px;
   color: #8a9281;
   margin: 5px 0 10px;
@@ -368,16 +313,6 @@ button.primary,
   margin: 14px 0;
   accent-color: #738662;
 }
-.sidebar-bottom {
-  padding: 18px;
-  border-top: 1px solid var(--line);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 9px;
-  color: #929985;
-}
-.local-dot,
 .online-dot,
 .offline-dot,
 .tiny-dot {
@@ -390,14 +325,6 @@ button.primary,
 }
 .offline-dot {
   background: #b4a77e;
-}
-.local-tag {
-  font-size: 7px;
-  letter-spacing: 1px;
-  border: 1px solid #dce1d0;
-  border-radius: 3px;
-  padding: 3px 4px;
-  margin-left: auto;
 }
 .workspace {
   display: flex;
@@ -452,40 +379,11 @@ button.primary,
   pointer-events: none;
   max-width: 540px;
 }
-.welcome-overlay .eyebrow {
-  font-size: 8px;
-  letter-spacing: 1.8px;
-  color: #66775b;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.welcome-overlay .eyebrow > span {
-  display: inline-block;
-  width: 4px;
-  height: 4px;
-  background: #9b865d;
-  border-radius: 50%;
-}
 .welcome-overlay h2 {
-  font-family: 'Instrument Serif', serif;
-  font-size: clamp(37px, 4.1vw, 66px);
-  font-weight: 400;
-  line-height: 1.06;
-  letter-spacing: -1.4px;
+  font-size: 24px;
+  font-weight: 500;
   color: #354b38;
-  margin: 20px 0 18px;
-  text-shadow: 0 1px 30px #dce2d16b;
-}
-.welcome-overlay h2 em {
-  font-weight: 400;
-  color: #66765b;
-}
-.welcome-overlay p {
-  font-size: 12px;
-  line-height: 1.85;
-  color: #64715f;
-  margin-bottom: 23px;
+  margin: 0 0 20px;
 }
 .welcome-button {
   pointer-events: auto;
@@ -623,15 +521,6 @@ button.primary,
   align-items: center;
   gap: 6px;
 }
-.workspace-footer > span:last-child {
-  font-size: 7px;
-  letter-spacing: 1.1px;
-}
-.footer-cross {
-  margin: 0 7px;
-  font-size: 11px;
-  color: #a4aa91;
-}
 .partner-panel {
   background: #fafaf6;
   border-left: 1px solid var(--line);
@@ -681,27 +570,6 @@ button.primary,
   padding: 25px 19px 20px;
   scrollbar-width: thin;
   scrollbar-color: #d9ddce transparent;
-}
-.partner-intro {
-  margin-bottom: 27px;
-}
-.partner-intro .eyebrow {
-  font-size: 7px;
-  letter-spacing: 1.1px;
-  white-space: nowrap;
-}
-.partner-intro h3 {
-  font-family: 'Instrument Serif', serif;
-  font-size: 28px;
-  line-height: 1.13;
-  font-weight: 400;
-  letter-spacing: -0.3px;
-  margin: 14px 0;
-}
-.partner-intro p {
-  font-size: 11px;
-  color: #919885;
-  line-height: 1.85;
 }
 .assistant-message {
   display: flex;
@@ -1492,9 +1360,6 @@ kbd {
   .studio.partner-hidden {
     grid-template-columns: 280px minmax(350px, 1fr);
   }
-  .sidebar-top {
-    padding: 34px 27px 29px;
-  }
   .sidebar-scroll {
     padding: 24px;
   }
@@ -1507,10 +1372,6 @@ kbd {
   .composer-area {
     padding: 18px 20px;
   }
-  .partner-intro h3 {
-    font-size: 32px;
-  }
-  .partner-intro p,
   .assistant-message,
   .user-message {
     font-size: 12px;
@@ -1534,32 +1395,17 @@ kbd {
   .header-actions {
     gap: 9px;
   }
-  .sidebar-top {
-    padding: 25px 18px 21px;
-  }
-  .sidebar-top h1 {
-    font-size: 25px;
-  }
   .sidebar-scroll {
     padding: 17px 13px;
   }
   .sidebar-tabs {
-    margin: 0 13px;
+    margin: 12px 13px 0;
   }
   .partner-header {
     padding: 0 14px;
   }
   .conversation {
     padding: 23px 15px;
-  }
-  .partner-intro .eyebrow {
-    font-size: 6.5px;
-  }
-  .welcome-overlay h2 {
-    font-size: 44px;
-  }
-  .welcome-overlay .eyebrow {
-    font-size: 6px;
   }
   .view-tabs button {
     padding: 7px 6px;
@@ -1569,9 +1415,6 @@ kbd {
     padding: 0 10px;
   }
   .navigation-hint {
-    display: none;
-  }
-  .workspace-footer > span:last-child {
     display: none;
   }
   .room-item > span:nth-child(2) {
@@ -1597,26 +1440,10 @@ kbd {
     width: 290px;
     box-shadow: -10px 0 30px #30432617;
   }
-  .sidebar-top h1 {
-    font-size: 22px;
-  }
-  .sidebar-top p {
-    font-size: 9px;
-  }
-  .sidebar-top .eyebrow {
-    font-size: 6px;
-  }
   .header-actions > .text-button {
     font-size: 10px;
   }
   .project-title {
-    display: none;
-  }
-  .sidebar-bottom {
-    font-size: 8px;
-    padding: 14px;
-  }
-  .local-tag {
     display: none;
   }
   .sidebar-tabs {
@@ -1631,9 +1458,6 @@ kbd {
   }
   .material-options {
     grid-template-columns: 1fr;
-  }
-  .welcome-overlay h2 {
-    font-size: 42px;
   }
 }
 @media (max-width: 600px) {
@@ -1679,15 +1503,9 @@ kbd {
     top: 62px;
     width: 280px;
   }
-  .welcome-overlay h2 {
-    font-size: 42px;
-  }
   .welcome-overlay {
     top: 15%;
     left: 8%;
-  }
-  .welcome-overlay .eyebrow {
-    font-size: 6px;
   }
   .workspace-footer {
     font-size: 8px;

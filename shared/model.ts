@@ -299,8 +299,8 @@ export const palettes: Record<
   }
 > = {
   limestone: {
-    name: 'Warm limestone',
-    description: 'Quiet stone. Natural oak. Bronze.',
+    name: 'Limestone',
+    description: 'Stone, oak, bronze.',
     wall: '#c9c0a9',
     wood: '#a87d50',
     roof: '#67675e',
@@ -308,8 +308,8 @@ export const palettes: Record<
     accent: '#393c32',
   },
   cedar: {
-    name: 'Woodland cedar',
-    description: 'Warm timber. Forest tones.',
+    name: 'Cedar',
+    description: 'Timber with dark green accents.',
     wall: '#947052',
     wood: '#a07547',
     roof: '#444a42',
@@ -317,8 +317,8 @@ export const palettes: Record<
     accent: '#29382e',
   },
   charcoal: {
-    name: 'Dark & sculptural',
-    description: 'Charred wood. Concrete. Black steel.',
+    name: 'Charcoal',
+    description: 'Charred wood, concrete, black steel.',
     wall: '#444945',
     wood: '#806b52',
     roof: '#2c312e',
@@ -326,8 +326,8 @@ export const palettes: Record<
     accent: '#242a27',
   },
   chalk: {
-    name: 'Soft minimal',
-    description: 'Chalk plaster. Pale oak. Light.',
+    name: 'Chalk plaster',
+    description: 'Plaster and pale oak.',
     wall: '#e8e5dc',
     wood: '#baa588',
     roof: '#a7a69e',

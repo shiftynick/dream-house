@@ -68,7 +68,7 @@ Generated thumbnails stay local. If visual review is enabled, the agent can sepa
 ## Editor and rendering
 
 - Orbit and pan, inspect a floor plan with wall openings and stairs, or enter the walkthrough. Walkthrough: click the view, WASD to move, Q/E down/up, Shift to move faster, Escape to release the mouse. Movement has no collision or gravity simulation.
-- Choose Live, Clay, Wireframe, or Light study. Light study progressively path-traces the same geometry, resets on camera changes, and accumulates up to 128 samples. Shader compilation can be slow on integrated GPUs; the browser/OS chooses the GPU.
+- Choose Live, Clay, Wireframe, or Path traced. Path traced mode progressively path-traces the same geometry, resets on camera changes, and accumulates up to 128 samples. Shader compilation can be slow on integrated GPUs; the browser/OS chooses the GPU.
 - Select a space to edit its name, dimensions, position, use, walls, and material. Point to a particular surface or choose **Selected part** to edit its material independently. Surface palettes override room palettes, which override the house palette. Whole-house material choices reset room and surface overrides. Roof style and terrain slope are editable.
 - Undo/redo use buttons or Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z. Save named alternatives and compare them using the same camera. Restoring an alternative is undoable.
 - Export/import the active project as JSON or save a PNG of the 3D view. Imports replace the active house’s design while preserving its local project identity. The optional sample never loads by default.
