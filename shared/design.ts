@@ -10,6 +10,8 @@ import {
   stairSchema,
   surfaceSchema,
   wallSchema,
+  roofSchema,
+  wallOpeningSchema,
   type Connection,
   type DesignMetadata,
   type DesignRequirement,
@@ -17,6 +19,7 @@ import {
   type Scene,
   type Side,
   type Surface,
+  type WallOpening,
 } from './model.ts';
 import {
   bounds,
@@ -33,8 +36,11 @@ import {
   volumeOverlap,
 } from './geometry.ts';
 import { inspectSpatial } from './spatial.ts';
+import { effectiveRoof, roofHeightAt, roofMaximumHeight } from './architecture.ts';
+import { mirroredOpening, openingWorldCenter, roomOpenings, validateOpenings } from './openings.ts';
 
 export { oppositeSide } from './geometry.ts';
+export { roomOpenings } from './openings.ts';
 export type DesignIssue = {
   code: string;
   severity: 'error' | 'warning';
@@ -59,6 +65,7 @@ const attach = {
   side: sideSchema,
   alignment,
   connect: z.boolean().default(true),
+  elevationOffset: z.number().min(-10).max(10).default(0),
   ...opening,
 };
 
@@ -122,9 +129,26 @@ export const commandSchema = z.discriminatedUnion('type', [
       roomBId: id,
       ...opening,
       center: z.number().min(-90).max(90).optional(),
+      connectionId: id.optional(),
     })
     .strict(),
   z.object({ type: z.literal('disconnect_rooms'), roomAId: id, roomBId: id }).strict(),
+  z
+    .object({
+      type: z.literal('set_roof'),
+      roomIds: ids.optional(),
+      ...roofSchema.shape,
+    })
+    .strict(),
+  z.object({ type: z.literal('reset_roof'), roomIds: ids }).strict(),
+  z
+    .object({
+      type: z.literal('set_wall_openings'),
+      roomId: id,
+      side: sideSchema,
+      openings: z.array(wallOpeningSchema.omit({ side: true }).strict()).max(32),
+    })
+    .strict(),
   z
     .object({
       type: z.literal('set_material'),
@@ -194,21 +218,18 @@ export function effectiveSurfacePalettes(
   ) as Record<Surface, Scene['palette']>;
 }
 
-export function roomOpenings(scene: Scene, roomId: string, side: Side) {
-  const room = scene.rooms.find((candidate) => candidate.id === roomId);
-  if (!room) return [];
-  return getDesign(scene)
-    .connections.filter(
-      (connection) =>
-        (connection.roomAId === roomId && connection.sideA === side) ||
-        (connection.roomBId === roomId && oppositeSide(connection.sideA) === side),
-    )
-    .map((connection) => ({
-      id: connection.id,
-      offset: round(connection.center - (horizontalSide(side) ? room.x : room.z)),
-      width: connection.width,
-      height: connection.kind === 'open' ? room.height : connection.height,
-    }));
+function effectiveOpeningSnapshot(scene: Scene, room: Room): WallOpening[] {
+  return sides.flatMap((side) =>
+    roomOpenings(scene, room.id, side).map((opening) => ({
+      id: opening.id,
+      side,
+      kind: opening.kind,
+      offset: opening.offset,
+      width: opening.width,
+      height: opening.height,
+      sill: opening.sill,
+    })),
+  );
 }
 
 function issue(
@@ -334,7 +355,13 @@ function connect(
   scene: Scene,
   aId: string,
   bId: string,
-  options: { kind: 'door' | 'open'; width: number; height: number; center?: number },
+  options: {
+    kind: 'door' | 'open';
+    width: number;
+    height: number;
+    center?: number;
+    connectionId?: string;
+  },
 ) {
   if (aId === bId)
     throw new CommandError('self_connection', 'A room cannot connect to itself.', [aId]);
@@ -379,9 +406,20 @@ function connect(
       { start: boundary.start, end: boundary.end },
     );
   const design = getDesign(scene);
-  const existing = design.connections.find((c) => pair(c, aId, bId));
+  const existing = design.connections.find((c) =>
+    options.connectionId ? c.id === options.connectionId : pair(c, aId, bId),
+  );
+  if (existing && !pair(existing, aId, bId))
+    throw new CommandError(
+      'connection_id_in_use',
+      'This connection ID belongs to a different pair of rooms.',
+      [existing.id, aId, bId],
+    );
   const connection = connectionSchema.parse({
-    id: existing?.id ?? `opening-${design.connections.length + 1}-${aId}`.slice(0, 60),
+    id:
+      existing?.id ??
+      options.connectionId ??
+      `opening-${design.connections.length + 1}-${aId}`.slice(0, 60),
     roomAId: aId,
     roomBId: bId,
     sideA: boundary.sideA,
@@ -410,6 +448,7 @@ function attachRooms(
     side: Side;
     alignment: 'start' | 'center' | 'end' | 'preserve';
     connect: boolean;
+    elevationOffset: number;
     kind: 'door' | 'open';
     width: number;
     height: number;
@@ -448,7 +487,7 @@ function attachRooms(
     roomIds,
     round(newX - anchor.x),
     round(newZ - anchor.z),
-    round(target.elevation - anchor.elevation),
+    round(target.elevation + options.elevationOffset - anchor.elevation),
   );
   if (options.connect) connect(scene, target.id, anchorId, options);
 }
@@ -457,7 +496,9 @@ function intervals(scene: Scene, room: Room, side: Side) {
   const explicit = roomOpenings(scene, room.id, side);
   const center = horizontalSide(side) ? room.x : room.z;
   if (explicit.length)
-    return explicit.map((o) => [center + o.offset - o.width / 2, center + o.offset + o.width / 2]);
+    return explicit
+      .filter((o) => o.kind !== 'window' && o.sill <= 0.03 && o.height >= 2)
+      .map((o) => [center + o.offset - o.width / 2, center + o.offset + o.width / 2]);
   if (outdoor(room) || room[side] === 'open') {
     const length = horizontalSide(side) ? room.width : room.depth;
     return [[center - length / 2, center + length / 2]];
@@ -550,16 +591,51 @@ function stairLinkIssue(
       );
   }
   const boundary = sharedBoundary(lower, upper);
-  if (
-    boundary &&
-    (!['door', 'open'].includes(upper[boundary.sideB]) ||
-      !['door', 'open'].includes(lower[boundary.sideA]))
-  )
-    return issue(
-      'stair_wall_blocked',
-      `A wall between the stair and its landing into “${upper.name}” is closed.`,
-      ids,
-    );
+  if (boundary) {
+    const horizontal = horizontalSide(boundary.sideA);
+    const normal = horizontal ? 'z' : 'x',
+      tangent = horizontal ? 'x' : 'z';
+    const travel = endpoints.top[normal] - endpoints.bottom[normal];
+    const t =
+      Math.abs(travel) > 0.001
+        ? (bounds(lower)[boundary.sideA] - endpoints.bottom[normal]) / travel
+        : 0;
+    const center =
+      endpoints.bottom[tangent] + t * (endpoints.top[tangent] - endpoints.bottom[tangent]);
+    const normalRate = Math.abs(horizontal ? Math.cos(angle) : Math.sin(angle));
+    const requiredHalfWidth = normalRate > 0.001 ? stair.width / (2 * normalRate) : Infinity;
+    const passes = (room: Room, side: Side) => {
+      const openings = roomOpenings(scene, room.id, side);
+      const offset = center - room[tangent];
+      if (openings.length)
+        return openings.some(
+          (opening) =>
+            opening.kind !== 'window' &&
+            opening.offset - opening.width / 2 <= offset - requiredHalfWidth + 0.03 &&
+            opening.offset + opening.width / 2 >= offset + requiredHalfWidth - 0.03 &&
+            room.elevation + opening.sill <= upper.elevation + 0.03 &&
+            room.elevation + opening.sill + opening.height >= upper.elevation + 2 - 0.03,
+        );
+      if (room[side] === 'open') return true;
+      return (
+        room[side] === 'door' &&
+        Math.abs(offset) + requiredHalfWidth <= 0.65 + 0.03 &&
+        room.elevation + Math.min(2.4, room.height) >= upper.elevation + 2 - 0.03
+      );
+    };
+    if (!passes(lower, boundary.sideA) || !passes(upper, boundary.sideB))
+      return issue(
+        'stair_wall_blocked',
+        `The stair needs an aligned wall opening at its landing into “${upper.name}”, with its full width and 2 m of headroom.`,
+        ids,
+        'error',
+        {
+          center: round(center),
+          requiredWidth: Number.isFinite(requiredHalfWidth) ? round(requiredHalfWidth * 2) : null,
+          landingElevation: upper.elevation,
+        },
+      );
+  }
   return null;
 }
 
@@ -578,6 +654,13 @@ function resize(scene: Scene, command: Extract<DesignCommand, { type: 'resize_ro
   if (command.anchor === 'south') room.z -= (room.depth - oldDepth) / 2;
   room.x = round(room.x);
   room.z = round(room.z);
+  // Keep aperture centers anchored in world space along the lengthened wall.
+  // The wall's normal movement and rigid group moves still carry them with it.
+  const oldRoom = roomById(before, room.id);
+  for (const opening of room.wallOpenings ?? []) {
+    const axis = horizontalSide(opening.side) ? 'x' : 'z';
+    opening.offset = round(opening.offset + oldRoom[axis] - room[axis]);
+  }
   if (command.moveConnected) {
     const edges = circulationEdges(before);
     const groupEdges = getDesign(before).groups.flatMap((g) =>
@@ -652,6 +735,67 @@ function resize(scene: Scene, command: Extract<DesignCommand, { type: 'resize_ro
   syncConnections(scene, before);
 }
 
+function replaceWallOpenings(
+  scene: Scene,
+  room: Room,
+  side: Side,
+  openings: Omit<WallOpening, 'side'>[],
+) {
+  ensureDistinct(
+    openings.map((opening) => opening.id),
+    'Wall openings',
+  );
+  // A stair doorway seen from below has a raised sill in that room. Preserve
+  // its upper-floor owner when editing that face, rather than creating an
+  // invalid raised doorway owned by the lower floor.
+  const raisedOwners = new Map<string, { owner: Room; side: Side }>();
+  for (const owner of scene.rooms) {
+    if (owner.id === room.id) continue;
+    for (const opening of owner.wallOpenings ?? []) {
+      const mirrored = mirroredOpening(scene, owner, opening, room);
+      if (mirrored?.side === side && mirrored.kind !== 'window' && mirrored.sill > 0.01)
+        raisedOwners.set(opening.id, { owner, side: opening.side });
+    }
+  }
+  for (const owner of scene.rooms) {
+    const retained = (owner.wallOpenings ?? []).filter((opening) =>
+      owner.id === room.id
+        ? opening.side !== side
+        : mirroredOpening(scene, owner, opening, room)?.side !== side,
+    );
+    if (retained.length) owner.wallOpenings = retained;
+    else delete owner.wallOpenings;
+  }
+  const otherIds = new Set(scene.rooms.flatMap((r) => (r.wallOpenings ?? []).map((o) => o.id)));
+  for (const opening of openings)
+    if (otherIds.has(opening.id) || getDesign(scene).connections.some((c) => c.id === opening.id))
+      throw new CommandError(
+        'opening_id_in_use',
+        'An opening ID must be unique across the house and its semantic connections.',
+        [room.id, opening.id],
+      );
+  for (const opening of openings) {
+    const origin =
+      opening.kind !== 'window' && opening.sill > 0.01 ? raisedOwners.get(opening.id) : undefined;
+    const owner = origin?.owner ?? room;
+    const ownerSide = origin?.side ?? side;
+    const axis = horizontalSide(side) ? 'x' : 'z';
+    const owned = {
+      ...opening,
+      side: ownerSide,
+      offset: round(room[axis] + opening.offset - owner[axis]),
+      sill: round(room.elevation + opening.sill - owner.elevation),
+    };
+    owner.wallOpenings = [...(owner.wallOpenings ?? []), owned];
+  }
+  const connection = getDesign(scene).connections.find(
+    (c) =>
+      (c.roomAId === room.id && c.sideA === side) ||
+      (c.roomBId === room.id && oppositeSide(c.sideA) === side),
+  );
+  room[side] = connection?.kind ?? 'solid';
+}
+
 function execute(scene: Scene, command: DesignCommand): DesignChange {
   const design = getDesign(scene);
   let changed: string[] = [];
@@ -667,11 +811,15 @@ function execute(scene: Scene, command: DesignCommand): DesignChange {
       description = `Added ${changed.length} room${changed.length === 1 ? '' : 's'}.`;
       break;
     }
-    case 'update_room':
-      Object.assign(roomById(scene, command.roomId), command.patch);
+    case 'update_room': {
+      const room = roomById(scene, command.roomId);
+      for (const side of sides)
+        if (command.patch[side] !== undefined) replaceWallOpenings(scene, room, side, []);
+      Object.assign(room, command.patch);
       changed = [command.roomId];
       description = 'Updated room details.';
       break;
+    }
     case 'remove_objects': {
       const existing = new Set([...scene.rooms, ...scene.stairs].map((r) => r.id));
       for (const id of command.ids)
@@ -757,11 +905,67 @@ function execute(scene: Scene, command: DesignCommand): DesignChange {
         boundary = sharedBoundary(a, b);
       design.connections = design.connections.filter((c) => !pair(c, a.id, b.id));
       if (boundary) {
-        a[boundary.sideA] = 'solid';
-        b[boundary.sideB] = 'solid';
+        for (const owner of [a, b]) {
+          const side = owner.id === a.id ? boundary.sideA : boundary.sideB;
+          owner.wallOpenings = (owner.wallOpenings ?? []).filter((opening) => {
+            if (opening.side !== side || opening.kind === 'window') return true;
+            const center = openingWorldCenter(owner, opening);
+            return (
+              center + opening.width / 2 <= boundary.start ||
+              center - opening.width / 2 >= boundary.end
+            );
+          });
+          if (!owner.wallOpenings.length) delete owner.wallOpenings;
+        }
+        for (const [owner, side] of [
+          [a, boundary.sideA],
+          [b, boundary.sideB],
+        ] as const) {
+          const remaining = design.connections.find(
+            (connection) =>
+              (connection.roomAId === owner.id && connection.sideA === side) ||
+              (connection.roomBId === owner.id && oppositeSide(connection.sideA) === side),
+          );
+          owner[side] = remaining?.kind ?? 'solid';
+        }
       }
       changed = [a.id, b.id];
       description = 'Closed the passage between rooms.';
+      break;
+    }
+    case 'set_roof': {
+      const { style, pitch, direction } = command;
+      if (command.roomIds) {
+        for (const roomId of command.roomIds) {
+          const room = roomById(scene, roomId);
+          const current = effectiveRoof(scene, room);
+          room.roof = {
+            style,
+            pitch: pitch ?? current.pitch,
+            direction: direction ?? current.direction,
+          };
+        }
+        changed = command.roomIds;
+      } else {
+        scene.roof = style;
+        scene.roofPitch = pitch ?? scene.roofPitch ?? 20;
+        scene.roofDirection = direction ?? scene.roofDirection ?? 'north';
+        changed = scene.rooms.filter((room) => !room.roof).map((room) => room.id);
+      }
+      description = `Set ${command.roomIds ? 'selected room roofs' : 'the house roof default'} to ${style}${style === 'flat' ? '' : `, ${pitch ?? (command.roomIds ? 'the existing' : scene.roofPitch)}° pitch`}.`;
+      break;
+    }
+    case 'reset_roof':
+      for (const roomId of command.roomIds) delete roomById(scene, roomId).roof;
+      changed = command.roomIds;
+      description = 'Restored the selected rooms to the house roof defaults.';
+      break;
+    case 'set_wall_openings': {
+      const room = roomById(scene, command.roomId);
+      const before = new Map(scene.rooms.map((r) => [r.id, JSON.stringify(r)]));
+      replaceWallOpenings(scene, room, command.side, command.openings);
+      changed = scene.rooms.filter((r) => before.get(r.id) !== JSON.stringify(r)).map((r) => r.id);
+      description = `Set ${command.openings.length} explicit opening${command.openings.length === 1 ? '' : 's'} on the ${command.side} wall of “${room.name}”, preserving its semantic room connections.`;
       break;
     }
     case 'set_material': {
@@ -864,7 +1068,11 @@ function execute(scene: Scene, command: DesignCommand): DesignChange {
           'The upper room must be 0.3–6 m above the lower room.',
           [lower.id, upper.id],
         );
-      if (bounds(lower).top < upper.elevation + 2)
+      const landing = {
+        x: horizontalSide(boundary.sideA) ? boundary.center : bounds(lower)[boundary.sideA],
+        z: horizontalSide(boundary.sideA) ? bounds(lower)[boundary.sideA] : boundary.center,
+      };
+      if (roofHeightAt(scene, lower, landing.x, landing.z) < upper.elevation + 2)
         throw new CommandError(
           'stair_headroom',
           'The lower room needs at least 2 m of headroom above the upper landing.',
@@ -879,10 +1087,6 @@ function execute(scene: Scene, command: DesignCommand): DesignChange {
       const rotations: Record<Side, number> = { south: 0, east: 90, north: 180, west: 270 };
       const rotation = rotations[boundary.sideA],
         angle = (rotation * Math.PI) / 180;
-      const landing = {
-        x: horizontalSide(boundary.sideA) ? boundary.center : bounds(lower)[boundary.sideA],
-        z: horizontalSide(boundary.sideA) ? bounds(lower)[boundary.sideA] : boundary.center,
-      };
       const stair = stairSchema.parse({
         id: command.stairId,
         x: round(landing.x - Math.sin(angle) * (command.run / 2 - 0.2)),
@@ -919,6 +1123,9 @@ function execute(scene: Scene, command: DesignCommand): DesignChange {
           height: room.height,
           palette: room.palette ?? scene.palette,
           surfacePalettes: effectiveSurfacePalettes(scene, room),
+          roof: effectiveRoof(scene, room),
+          wallOpenings: effectiveOpeningSnapshot(scene, room),
+          walls: { north: room.north, south: room.south, east: room.east, west: room.west },
         };
         const previous = design.requirements.find((r) => r.id === requirement.id);
         // Rewording or expanding a lock must not silently rebase already locked geometry.
@@ -940,6 +1147,12 @@ function execute(scene: Scene, command: DesignCommand): DesignChange {
             requirement.snapshot.surfacePalettes = structuredClone(
               previous.snapshot.surfacePalettes,
             );
+          }
+          if (previous.properties.includes('roof'))
+            requirement.snapshot.roof = structuredClone(previous.snapshot.roof);
+          if (previous.properties.includes('openings')) {
+            requirement.snapshot.wallOpenings = structuredClone(previous.snapshot.wallOpenings);
+            requirement.snapshot.walls = structuredClone(previous.snapshot.walls);
           }
         }
       }
@@ -1098,11 +1311,17 @@ function requirementIssues(
           ? !close(r.width, s.width) || !close(r.depth, s.depth)
           : property === 'height'
             ? !close(r.height, s.height)
-            : surfaces.some(
-                (surface) =>
-                  effectiveSurfacePalettes(scene, r)[surface] !==
-                  (s.surfacePalettes?.[surface] ?? s.palette),
-              ),
+            : property === 'roof'
+              ? JSON.stringify(effectiveRoof(scene, r)) !== JSON.stringify(s.roof)
+              : property === 'openings'
+                ? JSON.stringify(effectiveOpeningSnapshot(scene, r)) !==
+                    JSON.stringify(s.wallOpenings) ||
+                  sides.some((side) => r[side] !== s.walls?.[side])
+                : surfaces.some(
+                    (surface) =>
+                      effectiveSurfacePalettes(scene, r)[surface] !==
+                      (s.surfacePalettes?.[surface] ?? s.palette),
+                  ),
     );
     return changed.length
       ? [
@@ -1323,7 +1542,7 @@ export function validateDesign(scene: Scene): DesignIssue[] {
           );
       }
     }
-  return [...issues, ...inspectSpatial(scene).issues];
+  return [...issues, ...validateOpenings(scene), ...inspectSpatial(scene).issues];
 }
 
 export function inspectDesign(scene: Scene) {
@@ -1336,6 +1555,9 @@ export function inspectDesign(scene: Scene) {
       bounds: bounds(room),
       effectivePalette: room.palette ?? scene.palette,
       effectiveSurfacePalettes: effectiveSurfacePalettes(scene, room),
+      effectiveRoof: effectiveRoof(scene, room),
+      roofMaximumElevation: roofMaximumHeight(scene, room),
+      openings: Object.fromEntries(sides.map((side) => [side, roomOpenings(scene, room.id, side)])),
       groups: getDesign(scene)
         .groups.filter((g) => g.roomIds.includes(room.id))
         .map((g) => g.id),
@@ -1345,6 +1567,8 @@ export function inspectDesign(scene: Scene) {
       name: scene.name,
       palette: scene.palette,
       roof: scene.roof,
+      roofPitch: scene.roofPitch,
+      roofDirection: scene.roofDirection,
       slope: scene.slope,
       fireplace: scene.fireplace,
     },

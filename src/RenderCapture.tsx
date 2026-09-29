@@ -174,7 +174,7 @@ function OffscreenScene({
         root.render(
           <CaptureBoundary onError={fail}>
             <Suspense fallback={null}>
-              <Environment light={job.request.light} />
+              <Environment light={job.request.light} house={job.scene} />
               <Site house={job.scene} quality={job.request.quality} />
               <Architecture
                 house={job.scene}

@@ -164,3 +164,53 @@ test('browser error responses release their capture job, and polling refreshes o
   await rejected;
   assert.equal(broker.poll(active).job, null);
 });
+
+test('long waits wake for new jobs and completion, keep leases alive and isolate other clients', async () => {
+  let now = 0;
+  const broker = new RenderBroker(60_000, () => now);
+  const client = broker.register().clientId;
+  const other = broker.register().clientId;
+  const listening = broker.waitForJob(client);
+  let otherWoke = false;
+  const stopOther = new AbortController();
+  const otherWait = broker.waitForJob(other, undefined, stopOther.signal).then(
+    () => {
+      otherWoke = true;
+    },
+    () => {},
+  );
+  const pending = broker.render(client, scene(), request());
+  const job = (await listening).job!;
+  assert.ok(job);
+  assert.equal(otherWoke, false);
+  now = 9000;
+  const completion = broker.waitForJob(client, job.id);
+  broker.submit(job.id, client, result(job));
+  assert.equal((await completion).job, null);
+  await pending;
+  now = 18_000;
+  assert.equal(broker.available(client), true);
+  stopOther.abort();
+  await otherWait;
+});
+
+test('cancelled, duplicate and disconnected waits release resources without orphaning jobs', async () => {
+  const broker = new RenderBroker();
+  const client = broker.register().clientId;
+  const abort = new AbortController();
+  const wait = broker.waitForJob(client, undefined, abort.signal);
+  const cancelled = assert.rejects(wait, { name: 'AbortError' });
+  await assert.rejects(broker.waitForJob(client), /already has/);
+  abort.abort();
+  await cancelled;
+  assert.equal((await broker.waitForJob(client, undefined, undefined, 2)).job, null);
+  const disconnected = broker.waitForJob(client);
+  const rejected = assert.rejects(disconnected, RenderUnavailable);
+  broker.disconnect(client);
+  await rejected;
+  const preAborted = new AbortController();
+  preAborted.abort();
+  await assert.rejects(broker.waitForJob(client, undefined, preAborted.signal), {
+    name: 'AbortError',
+  });
+});

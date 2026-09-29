@@ -100,7 +100,14 @@ test('agent gateway adapter sends documented tool contracts and preserves usage'
     assert.ok(body.max_tokens > 0 && body.max_tokens <= 6000);
     assert.deepEqual(
       body.tools.map((tool: { function: { name: string } }) => tool.function.name).sort(),
-      ['apply_operations', 'finish_design', 'inspect_design', 'render_view', 'reset_draft'],
+      [
+        'apply_operations',
+        'finish_design',
+        'inspect_design',
+        'render_view',
+        'reset_draft',
+        'review_design',
+      ],
     );
     assert.ok(
       body.tools.every(

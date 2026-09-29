@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { emptyScene, type Scene, type Room } from './model';
+import { effectiveRoof, roofMaximumHeight } from './architecture';
 import { stairPlanFootprint } from './spatial';
 
 const coordinate = z.number().finite().min(-500).max(500);
@@ -109,7 +110,7 @@ export function renderCamera(
           Math.min(value[1], room.elevation - 0.7),
           Math.min(value[2], room.z - room.depth / 2 - 0.5),
           Math.max(value[3], room.x + room.width / 2 + 0.5),
-          Math.max(value[4], room.elevation + room.height + (scene.roof === 'pitched' ? 2.5 : 0.3)),
+          Math.max(value[4], roofMaximumHeight(scene, room) + 0.8),
           Math.max(value[5], room.z + room.depth / 2 + 0.5),
         ],
         [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity],
@@ -170,7 +171,7 @@ export function renderCameraForScenes(
   if (!['exterior', 'cutaway'].includes(request.view))
     throw new Error('A shared comparison camera requires an exterior or cutaway view.');
   const roomBounds = scenes
-    .flatMap((scene) => scene.rooms)
+    .flatMap((scene) => scene.rooms.map((room) => ({ ...room, roof: effectiveRoof(scene, room) })))
     .filter((room) => !request.roomId || room.id === request.roomId);
   if (request.roomId && !roomBounds.length)
     throw new Error('The requested comparison room does not exist.');
@@ -182,6 +183,7 @@ export function renderCameraForScenes(
               {
                 id: `render-bound-chimney-${index}`,
                 name: 'Chimney bounds',
+                roof: { style: 'flat' as const },
                 kind: 'other' as const,
                 x: scene.fireplace.x,
                 z: scene.fireplace.z,

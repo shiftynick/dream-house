@@ -47,11 +47,11 @@ Legacy OpenRouter and direct OpenAI keys are not reused as Gateway credentials. 
 
 1. Type an instruction, or hold **Space** outside text fields/the microphone button and release to transcribe. Enter sends typed text; Shift+Enter adds a line.
 2. The agent receives the current house and brief, its last ten messages, your selected room or exact surface, and the active view/camera. Point to a wall, floor, roof, or room before saying “make this cedar” or “move this wall outward.” The space inspector also provides a **Selected part** control.
-3. It uses local commands to attach wings, resize rooms from an edge, move a selected wall or group, connect doorways or floors, change particular surface materials, and preserve requirements. The geometry engine calculates coordinates and related movements.
+3. It uses local commands to attach wings, resize rooms from an edge, move a selected wall or group, connect doorways or floors, set roofs, place dimensioned windows and doors, change particular surface materials, and preserve requirements. The geometry engine calculates coordinates and related movements.
 4. Edits happen in an unsaved draft. The interface shows progress, changes, issues, and valid previews. Structured validation errors can trigger a bounded repair pass. **Cancel** stops the run and discards its draft.
-5. A valid modest edit is committed automatically as one undo step. Deletions, substantial area changes, changes to protected requirements, and explicit agent proposals require review. A failed attempt leaves the saved geometry unchanged and offers a retry.
+5. The agent supplies a request checklist, with local geometry assertions where supported. Unfulfilled required items and consequential assumptions require review and appear in the reply. A valid modest edit is committed automatically as one undo step. Deletions, substantial area changes, changes to protected requirements, and explicit agent proposals also require review. A failed attempt leaves the saved geometry unchanged and offers a retry.
 
-The **Design brief** keeps confirmed requirements, assumptions, and preferences with the house. The agent can create machine-checked connectivity, symmetry, locked-room, and overlook requirements. You can edit descriptions/sources or add freeform notes. Freeform notes inform the agent but are not geometric assertions.
+The **Design brief** keeps confirmed requirements, assumptions, and preferences with the house. The agent can create machine-checked connectivity, symmetry, room-property locks (including roofs and openings), and overlook requirements. You can edit descriptions/sources or add freeform notes. Freeform notes inform the agent but are not geometric assertions. Request checklists distinguish geometry checks from model judgments; they do not guarantee that the model understood every detail of natural-language instructions.
 
 **Let AI inspect rendered views** is on by default; its setting persists in this browser. With it enabled and a local renderer connected, the agent requests an exterior, interior, cutaway, or floor-plan image of its valid draft. It must examine the resulting image in a later model round before finishing; another edit requires a fresh image. Up to three captures are allowed per run. These views use the same local geometry and leave your camera unchanged. Images are sent to the model only when requested by its render tool; the desktop is never captured. Turn the setting off to use geometry checks without image uploads.
 
@@ -69,17 +69,19 @@ Generated thumbnails stay local. If visual review is enabled, the agent can sepa
 
 - Orbit and pan, inspect a floor plan with wall openings and stairs, or enter the walkthrough. Walkthrough: click the view, WASD to move, Q/E down/up, Shift to move faster, Escape to release the mouse. Movement has no collision or gravity simulation.
 - Choose Live, Clay, Wireframe, or Path traced. Path traced mode progressively path-traces the same geometry, resets on camera changes, and accumulates up to 128 samples. Shader compilation can be slow on integrated GPUs; the browser/OS chooses the GPU.
-- Select a space to edit its name, dimensions, position, use, walls, and material. Point to a particular surface or choose **Selected part** to edit its material independently. Surface palettes override room palettes, which override the house palette. Whole-house material choices reset room and surface overrides. Roof style and terrain slope are editable.
+- Select a space to edit its name, dimensions, position, use, walls, and material. Point to a particular surface or choose **Selected part** to edit its material independently. Surface palettes override room palettes, which override the house palette. Whole-house material choices reset room and surface overrides.
+- **House roof default** and **Room roof** support Flat, Gable, and Single pitch, with pitch in degrees. For a single-pitch roof, **High edge** names the elevated side; room height sets the lowest eave. **Use house default** removes a room override. Changing the house default preserves room overrides.
+- **Windows & doors** edits multiple openings on the selected wall: type, center offset, width, height, and sill. Offsets run east on north/south walls and south on east/west walls. **Apply openings** submits the complete standalone set; connected room passages are displayed separately and preserved. Shared openings appear consistently on both wall faces. Windows do not create walking routes.
 - Undo/redo use buttons or Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z. Save named alternatives and compare them using the same camera. Restoring an alternative is undoable.
-- Export/import the active project as JSON or save a PNG of the 3D view. Imports replace the active house’s design while preserving its local project identity. The optional sample never loads by default.
+- Export/import the active project as JSON or save a PNG of the 3D view. Imports replace the active house’s design while preserving its local project identity. The optional hillside example has an upper kitchen overlooking a double-height living room, a central chimney, attached symmetric bedroom wings, lower guest suites, courtyards, and linked stairs. It never loads by default.
 
 ## Cost and privacy
 
 - No background model calls. A design run can make **up to twelve model calls**, with up to two repair opportunities and thirty-two tool calls. Local geometry operations and image rendering do not make provider calls. Sending rendered evidence to the model uses image tokens and another model round. Provider failures and truncated responses are not automatically retried; geometry repair does involve additional paid model calls.
 - The model receives its remaining budget each round and instructions to finish during its last three rounds. Three consecutive rounds without a new draft state, fewer blocking errors, a successful capture, or new image review stop the run before another model call. Repeated inspections and unchanged edits do not count as progress; stopping leaves the saved house unchanged.
-- Generated alternatives run this bounded loop for each of two or three options, up to twenty-four or thirty-six model calls in total. Each model response is capped at 6,000 output tokens. The initial request contains the current house/brief and ten recent messages; subsequent rounds include tool results from that run.
+- Generated alternatives run this bounded loop for each of two or three options, up to twenty-four or thirty-six model calls in total. Each model response is capped at 6,000 output tokens. The working house and brief are refreshed each round; older duplicate scene payloads are omitted while operation results and errors remain. Reviewed image pixels are omitted from later calls. Repeating an identical view of an unchanged draft reuses its local capture, although resending the image to the model still uses input tokens.
 - The default daily cap is **60 cloud requests**, shared across every design round, transcription, and speech. It persists across restarts and resets at UTC midnight. A spoken exchange uses a variable number of requests. This is a request cap, not a dollar budget.
-- Displayed costs include only reported design charges. Audio charges and unreported design charges are excluded; check Vercel AI Gateway for complete spending. A run with any unknown model charge reports its total as unknown.
+- Daily usage includes reported design and audio charges. Unreported charges are excluded; check Vercel AI Gateway for complete spending. Each design run reports only its own model cost; a run with any unknown model charge reports its total as unknown.
 - Recordings are capped at 60 seconds and sent after release. Audio is processed in memory, not stored as a project asset.
 - Prompts, geometry, brief/context, requested review images when enabled, recorded speech, and spoken-reply text go through Vercel AI Gateway to the selected providers. Rendering, saved projects, history, alternative thumbnails, and exports stay local.
 - Local run summaries retain stages, issues, changes, model name, and available usage for diagnosis. They omit keys, viewport images, raw audio, and private model reasoning. There are no remote fonts, telemetry, rendering services, or cloud project storage.
@@ -90,15 +92,15 @@ Generated thumbnails stay local. If visual review is enabled, the agent can sepa
 
 Project saves carry both a project ID and revision. A stale tab receives a conflict instead of overwriting a newer revision or a different active house. Use one editing tab at a time; this is conflict protection, not collaborative editing. Draft proposals and unchosen generated choice sets live in server memory for 30 minutes and disappear on server restart. Committed edits remain in project history.
 
-An existing `.data/project.json` is read as the original house when no workspace library exists. Migration is lazy: reading changes neither file; the first save, project creation, or switch writes `workspace.json` and leaves `project.json` untouched as a legacy backup. Once the workspace exists, it is authoritative. Older version-1 project documents remain readable: missing revisions default to zero, missing relationship metadata means an empty brief/graph, and rooms inherit the house palette unless overridden. Existing centered door flags remain usable. Old disconnected rooms or unlinked stairs can appear as warnings; the agent does not silently invent missing relationships or redesign unrelated spaces. New draft edits must preserve existing routes and connect new interior rooms, unless an explicit confirmed requirement permits a real courtyard route.
+An existing `.data/project.json` is read as the original house when no workspace library exists. Migration is lazy: reading changes neither file; the first save, project creation, or switch writes `workspace.json` and leaves `project.json` untouched as a legacy backup. Once the workspace exists, it is authoritative. Older version-1 project documents remain readable: missing revisions default to zero, missing relationship metadata means an empty brief/graph, and rooms inherit the house palette unless overridden. Existing centered door flags remain usable. Unconfigured `pitched` roofs retain their original gable rise and orientation; they are not converted to single-pitch roofs. Old disconnected rooms or unlinked stairs can appear as warnings; the agent does not silently invent missing relationships or redesign unrelated spaces. New draft edits must preserve existing routes and connect new interior rooms, unless an explicit confirmed requirement permits a real courtyard route.
 
 ## Scope
 
-Terrain is an architectural concept editor. It supports rectangular room volumes, aligned openings, groups, linked straight stairs, flat/pitched roofs, terrain, and a fireplace. Validation checks overlaps, connections, stair landing references, circulation changes, and supported requirements. Spatial inspection also reports advisory furniture fit and aisle checks, doorway approaches and assumed swing obstructions, and approximate stair headroom and landing clearance. Furniture and planting remain schematic.
+Terrain is an architectural concept editor. It supports rectangular room volumes, multiple dimensioned windows and doors, groups, linked straight stairs, flat/gable/single-pitch roofs, terrain, and a fireplace. Validation checks overlaps, aperture dimensions and shared-wall conflicts, connections, stair landing references and portal widths/headroom, circulation changes, and supported requirements. Spatial inspection also reports advisory furniture fit and aisle checks, doorway approaches and assumed swing obstructions, and sampled stair headroom and landing clearance. Furniture and planting remain schematic.
 
 These spatial checks state their assumptions: 0.6 m furniture circulation, 0.9 m around kitchen work areas, 0.9 m door approaches and stair landings, and 2 m stair headroom. Swing checks assume one inward leaf as wide as the opening; handing and leaf count are not modeled. These warnings invite design review and do not certify building-code or accessibility compliance.
 
-This is not a CAD/BIM or construction-document system. It does not solve general floor-plan constraints, arbitrary wall shapes, structural engineering, accessibility, building codes, or comprehensive stair safety. Each room owns its inward half of a shared wall, allowing different finishes on opposite faces. Linked stairs cut upper slabs; legacy unlinked stairs have no inferred openings. Partially covered pitched roofs use flat exposed patches to avoid intruding into upper rooms. Floor plans are concept views, and realistic assets/joins need further refinement.
+This is not a CAD/BIM or construction-document system. It does not solve general floor-plan constraints, arbitrary wall shapes, structural engineering, accessibility, building codes, or comprehensive stair safety. Each room owns its inward half of a shared wall, allowing different finishes on opposite faces. Linked stairs cut upper slabs; legacy unlinked stairs have no inferred openings. Partially covered sloping roofs use flat exposed patches to avoid intruding into upper rooms. Sloped wall caps support clerestory apertures, but roof joins, foundations, terrain interaction, and floor plans remain concept geometry.
 
 ## Checks
 
@@ -108,6 +110,22 @@ npm run build
 ```
 
 Tests exercise semantic geometry and surface selection, persistent requirements, advisory spatial checks, legacy migration and project isolation, fresh render evidence and broker ownership, alternative selection/preferences, bounded repair, cancellation, confirmation, atomic persistence, revision conflicts, idempotent commits, rendering geometry, and the actual HTTP adapter. Provider responses are injected mocks; these tests spend no API credits.
+
+For an isolated browser session with explicitly injected model and audio responses:
+
+```sh
+SCENARIO_RUN=manual-check SCENARIO_PORT=5186 npx tsx scripts/scenario-server.ts
+```
+
+This separate entry point uses `.data/verification/manual-check`, never loads `.env`, and has no cloud model/audio adapter. The application, geometry, saves, and browser renderer are real. Its `/__verification/turns`, `/__verification/reset`, and `/__verification/render` endpoints queue simulated responses, install a fixture, or request a local capture. These endpoints exist only on this test server. Simulated speech uses silence and does not measure voice quality.
+
+For a numerical benchmark of the local engine:
+
+```sh
+npx tsx scripts/benchmark.ts
+```
+
+It reports median and p95 times for inspection, a local material edit, and scene fingerprinting on the scenario fixtures. It makes no model calls and does not measure browser rendering or end-to-end voice latency. Successful agent responses also contain timing/context metrics; measurements and verification outcomes belong in the work log, not these capability descriptions.
 
 With the server running and a Gateway key configured, opt into paid verification:
 
@@ -124,19 +142,20 @@ Both scripts use preview-only fixtures, report actual usage, and verify that the
 
 The geometry engine, draft lifecycle, model adapter, and HTTP server are separate. [`docs/architecture.md`](docs/architecture.md) describes the contracts, validation policy, control API, and extension points. The same commands and application service can support a future MCP adapter. **No MCP server is implemented or exposed.**
 
-| Component                                                                                        | Responsibility                                                                   |
-| ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------- |
-| `shared/model.ts`, `shared/geometry.ts`                                                          | Project documents, history, dimensions, adjacency, circulation helpers           |
-| `shared/design.ts`, `shared/spatial.ts`                                                          | Semantic operations, requirements, measured spatial advisories                   |
-| `shared/selection.ts`, `shared/render.ts`                                                        | Surface identity, material precedence, render requests and deterministic cameras |
-| `shared/draft.ts`, `shared/harness.ts`, `shared/alternatives.ts`                                 | Drafts, confirmation, agent context/progress, choice contracts                   |
-| `server/agent.ts`                                                                                | Tool-using model loop, visual review, repair limits, Gateway adapter             |
-| `server/design-service.ts`, `server/storage.ts`                                                  | Draft commits and atomic multi-house persistence                                 |
-| `server/render-service.ts`, `server/alternative-service.ts`                                      | Render-provider broker and visual choice generation/acceptance                   |
-| `server/app.ts`, `server/index.ts`                                                               | HTTP controls, runs, usage, voice, Vite/static hosting                           |
-| `server/gateway.ts`, `server/connections.ts`                                                     | Audio transports, credentials, settings, provider errors                         |
-| `src/SceneView.tsx`, `src/renderGeometry.ts`, `src/RenderCapture.tsx`                            | Shared interactive/offscreen rendering, surfaces, openings, slab cutouts         |
-| `src/App.tsx`, `src/ProjectChooser.tsx`, `src/VisualAlternatives.tsx`                            | Editor, project library, proposals, brief, visual choices                        |
-| `src/useProject.ts`, `src/useRenderBridge.ts`, `src/useVisualAlternatives.ts`, `src/useVoice.ts` | Revisioned saves, local capture transport, alternatives, push-to-talk            |
+| Component                                                                                             | Responsibility                                                                     |
+| ----------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `shared/model.ts`, `shared/geometry.ts`                                                               | Project documents, history, dimensions, adjacency, circulation helpers             |
+| `shared/design.ts`, `shared/spatial.ts`, `shared/architecture.ts`, `shared/openings.ts`               | Semantic operations, roof/aperture geometry, requirements, spatial advisories      |
+| `shared/assessment.ts`, `shared/examples.ts`                                                          | Request assertions and a coherent hillside example                                 |
+| `shared/selection.ts`, `shared/render.ts`                                                             | Surface identity, material precedence, render requests and deterministic cameras   |
+| `shared/draft.ts`, `shared/harness.ts`, `shared/alternatives.ts`                                      | Drafts, confirmation, agent context/progress, choice contracts                     |
+| `server/agent.ts`, `server/agent-context.ts`                                                          | Model loop, request assessment, context compaction, capture reuse, Gateway adapter |
+| `server/design-service.ts`, `server/storage.ts`                                                       | Draft commits and atomic multi-house persistence                                   |
+| `server/render-service.ts`, `server/alternative-service.ts`                                           | Render-provider broker and visual choice generation/acceptance                     |
+| `server/app.ts`, `server/index.ts`                                                                    | HTTP controls, runs, usage, voice, Vite/static hosting                             |
+| `server/gateway.ts`, `server/connections.ts`                                                          | Audio transports, credentials, settings, provider errors                           |
+| `src/SceneView.tsx`, `src/renderGeometry.ts`, `src/RenderCapture.tsx`                                 | Shared interactive/offscreen rendering, surfaces, openings, slab cutouts           |
+| `src/App.tsx`, `src/ArchitectureControls.tsx`, `src/ProjectChooser.tsx`, `src/VisualAlternatives.tsx` | Editor, roof/opening controls, project library, proposals, brief, visual choices   |
+| `src/useProject.ts`, `src/useRenderBridge.ts`, `src/useVisualAlternatives.ts`, `src/useVoice.ts`      | Revisioned saves, local capture transport, alternatives, push-to-talk              |
 
 Integration references: [Vercel Gateway Chat Completions](https://vercel.com/docs/ai-gateway/sdks-and-apis/openai-chat-completions), [Gateway transcription](https://vercel.com/docs/ai-gateway/modalities/speech-to-text), [Gateway speech](https://vercel.com/docs/ai-gateway/modalities/text-to-speech), [Three GPU PathTracer](https://github.com/gkjohnson/three-gpu-pathtracer).

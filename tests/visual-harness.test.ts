@@ -218,7 +218,8 @@ test('a custom render provider cannot substitute the wrong camera even with a ma
 });
 
 test('visual captures are bounded and disabled review never invokes a renderer', async () => {
-  let captures = 0;
+  let captures = 0,
+    requested = 0;
   await assert.rejects(
     runAgent({
       scene,
@@ -230,7 +231,11 @@ test('visual captures are bounded and disabled review never invokes a renderer',
       },
       client: {
         async complete() {
-          return render();
+          return turn('render_view', {
+            view: 'interior',
+            roomId: 'living',
+            angle: ['northeast', 'northwest', 'southeast', 'southwest'][requested++],
+          });
         },
       },
     }),

@@ -10,8 +10,18 @@ import {
   wallAxis,
   wallPanels,
   planWallHitTarget,
+  roofPatches,
+  wallTopProfile,
+  terrainHeight,
   type Rect,
 } from './renderGeometry';
+import { RetainedResource } from './retainedResource';
+import { GpuSchedule } from './gpuSchedule';
+import { renderingBudget, visualSceneKey } from './renderPerformance';
+import { physicalUvs, slabGeometry, wallCapGeometry } from './renderMeshes';
+import { effectiveRoof, roofHeightAt } from '../shared/architecture';
+import { roomOpenings } from '../shared/openings';
+import { renderCamera, renderRequestSchema } from '../shared/render';
 import { surfacePalette, type DesignSelection, type DesignSurface } from '../shared/selection';
 
 export type Quality = 'live' | 'refined' | 'clay' | 'wireframe';
@@ -46,7 +56,7 @@ function makeTexture(kind: 'stone' | 'wood' | 'ground') {
     seed = (seed * 16807) % 2147483647;
     return seed / 2147483647;
   };
-  ctx.fillStyle = kind === 'wood' ? '#cfc4b2' : kind === 'ground' ? '#aeae97' : '#dbd7cc';
+  ctx.fillStyle = kind === 'wood' ? '#e7e0d5' : kind === 'ground' ? '#aeae97' : '#dbd7cc';
   ctx.fillRect(0, 0, 256, 256);
   for (let i = 0; i < 10000; i++) {
     const v = Math.floor(100 + random() * 140);
@@ -57,6 +67,18 @@ function makeTexture(kind: 'stone' | 'wood' | 'ground') {
       kind === 'wood' ? 1 : 2,
       kind === 'wood' ? 20 + random() * 90 : 2,
     );
+  }
+  if (kind === 'wood') {
+    ctx.strokeStyle = 'rgba(70,55,35,.22)';
+    ctx.lineWidth = 1;
+    for (let x = 0; x < 256; x += 32) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, 256);
+      ctx.stroke();
+      ctx.fillStyle = `rgba(255,255,255,${0.01 + random() * 0.05})`;
+      ctx.fillRect(x + 1, 0, 30, 256);
+    }
   }
   if (kind === 'stone') {
     ctx.strokeStyle = '#aaa69e';
@@ -70,7 +92,7 @@ function makeTexture(kind: 'stone' | 'wood' | 'ground') {
   }
   const texture = new THREE.CanvasTexture(canvas);
   texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(kind === 'ground' ? 30 : 2, kind === 'ground' ? 30 : 2);
+  texture.repeat.set(kind === 'ground' ? 30 : 1, kind === 'ground' ? 30 : 1);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.anisotropy = 8;
   return texture;
@@ -92,8 +114,14 @@ function Box({
   onSelect?: () => void;
   highlight?: boolean;
 }) {
+  const geometry = useMemo(
+    () => physicalUvs(new THREE.BoxGeometry(...size)),
+    [size[0], size[1], size[2]],
+  );
+  useEffect(() => () => geometry.dispose(), [geometry]);
   return (
     <mesh
+      geometry={geometry}
       position={position}
       rotation={[0, rotation, 0]}
       material={material}
@@ -108,7 +136,6 @@ function Box({
           : undefined
       }
     >
-      <boxGeometry args={size} />
       {highlight && (
         <mesh>
           <boxGeometry args={[size[0] + 0.012, size[1] + 0.012, size[2] + 0.012]} />
@@ -131,7 +158,6 @@ function RoomMesh({
   materialSets,
   selection,
   onSelectSurface,
-  roof,
   cutaway,
   cutawaySides = ['south', 'east'],
   selected,
@@ -144,7 +170,6 @@ function RoomMesh({
   materialSets: Record<string, Record<string, THREE.Material>>;
   selection?: DesignSelection | null;
   onSelectSurface?: (selection: DesignSelection) => void;
-  roof: Scene['roof'];
   cutaway: boolean;
   cutawaySides?: Side[];
   selected: boolean;
@@ -157,7 +182,7 @@ function RoomMesh({
   const pick = (surface: DesignSurface) =>
     onSelectSurface ? onSelectSurface({ roomId: r.id, surface }) : onSelect();
   const isSelected = (surface: DesignSurface) =>
-    selection?.roomId === r.id && selection.surface === surface;
+    quality !== 'refined' && selection?.roomId === r.id && selection.surface === surface;
   const slabs = useMemo(() => roomSlabs(house, r), [house, r]);
   const slab = (
     rect: Rect,
@@ -176,16 +201,120 @@ function RoomMesh({
       highlight={surface ? isSelected(surface) : false}
     />
   );
-  const wall = (side: 'north' | 'south' | 'east' | 'west') => {
+  const generated = useMemo(() => {
+    const origin: [number, number, number] = [r.x, r.elevation, r.z];
+    const roofY = (x: number, z: number) =>
+      slabs.roofClipped ? r.elevation + r.height : roofHeightAt(house, r, x, z);
+    return {
+      roofs: roofPatches(house, r).map((rect) =>
+        slabGeometry(rect, origin, (x, z) => roofY(x, z) + 0.18, roofY),
+      ),
+      soffits: roofPatches(house, r).map((rect) =>
+        slabGeometry(
+          rect,
+          origin,
+          (x, z) => roofY(x, z) + 0.025,
+          (x, z) => roofY(x, z) - 0.035,
+        ),
+      ),
+      foundations: slabs.foundation.map((rect) =>
+        slabGeometry(
+          rect,
+          origin,
+          () => r.elevation - 0.18,
+          (x, z) => Math.min(r.elevation - 0.32, terrainHeight(house, x, z) - 0.12),
+        ),
+      ),
+      caps: Object.fromEntries(
+        (['north', 'south', 'east', 'west'] as const).map((side) => [
+          side,
+          wallCapGeometry(
+            wallTopProfile(house, r, side),
+            r.height,
+            roomOpenings(house, r.id, side),
+          ),
+        ]),
+      ),
+    };
+  }, [house, r, slabs]);
+  useEffect(
+    () => () => {
+      [
+        ...generated.roofs,
+        ...generated.soffits,
+        ...generated.foundations,
+        ...Object.values(generated.caps),
+      ].forEach((geometry) => geometry?.dispose());
+    },
+    [generated],
+  );
+  const generatedMesh = (
+    geometry: THREE.BufferGeometry,
+    material: THREE.Material,
+    key: number | string,
+    surface?: DesignSurface,
+  ) => (
+    <mesh
+      key={key}
+      geometry={geometry}
+      material={material}
+      castShadow
+      receiveShadow
+      onClick={
+        surface
+          ? (event) => {
+              event.stopPropagation();
+              pick(surface);
+            }
+          : undefined
+      }
+    >
+      {surface && isSelected(surface) && (
+        <mesh geometry={geometry} scale={1.001}>
+          <meshBasicMaterial color="#e3a44f" wireframe toneMapped={false} />
+        </mesh>
+      )}
+    </mesh>
+  );
+  const wall = (side: Side) => {
     if (cutaway && cutawaySides.includes(side)) return null;
     const { horizontal } = wallAxis(r, side);
     const sm = surfaceMaterial(side);
     const position: [number, number, number] = horizontal
       ? [0, 0, (side === 'north' ? -1 : 1) * (r.depth / 2 - 0.05)]
       : [(side === 'west' ? -1 : 1) * (r.width / 2 - 0.05), 0, 0];
-    // Each room owns its inward half of a shared wall, so opposite faces may
-    // have different finishes and can be selected independently.
     const panels = wallPanels(house, r, side, false);
+    const openings = roomOpenings(house, r.id, side);
+    const glazing = (offset: number, bottom: number, width: number, height: number, id: string) => (
+      <group key={id} position={[offset, bottom, 0]}>
+        <Box
+          position={[0, height / 2, 0]}
+          size={[width, height, 0.024]}
+          material={sm.glass}
+          cast={false}
+          highlight={isSelected(side)}
+        />
+        {[0, height].map((y) => (
+          <Box
+            key={y}
+            position={[0, y, 0]}
+            size={[width + 0.07, 0.055, 0.12]}
+            material={sm.frame}
+          />
+        ))}
+        {Array.from(
+          { length: Math.ceil(width / 1.7) + 1 },
+          (_, i) => -width / 2 + (i * width) / Math.ceil(width / 1.7),
+        ).map((x) => (
+          <Box
+            key={x}
+            position={[x, height / 2, 0]}
+            size={[0.045, height, 0.12]}
+            material={sm.frame}
+          />
+        ))}
+      </group>
+    );
     return (
       <group
         key={side}
@@ -197,35 +326,8 @@ function RoomMesh({
         }}
       >
         {panels.map((panel, index) =>
-          r[side] === 'glass' ? (
-            <group key={index} position={[panel.offset, panel.bottom, 0]}>
-              <Box
-                position={[0, panel.height / 2, 0]}
-                size={[panel.width, panel.height, 0.04]}
-                material={sm.glass}
-                highlight={isSelected(side)}
-                cast={false}
-              />
-              {[0, panel.height].map((y) => (
-                <Box
-                  key={y}
-                  position={[0, y, 0]}
-                  size={[panel.width, 0.09, 0.12]}
-                  material={sm.frame}
-                />
-              ))}
-              {Array.from(
-                { length: Math.ceil(panel.width / 2.2) + 1 },
-                (_, i) => -panel.width / 2 + (i * panel.width) / Math.ceil(panel.width / 2.2),
-              ).map((x) => (
-                <Box
-                  key={x}
-                  position={[x, panel.height / 2, 0]}
-                  size={[0.06, panel.height, 0.12]}
-                  material={sm.frame}
-                />
-              ))}
-            </group>
+          r[side] === 'glass' && !openings.length ? (
+            glazing(panel.offset, panel.bottom, panel.width, panel.height, `wall-${index}`)
           ) : (
             <Box
               key={index}
@@ -236,18 +338,44 @@ function RoomMesh({
             />
           ),
         )}
+        {generated.caps[side] &&
+          generatedMesh(
+            generated.caps[side]!,
+            r[side] === 'glass' && !openings.length ? sm.glass : sm.wall,
+            `cap-${side}`,
+            side,
+          )}
+        {openings.map((opening) =>
+          opening.kind === 'window' ? (
+            <group key={opening.id}>
+              {glazing(opening.offset, opening.sill, opening.width, opening.height, opening.id)}
+              <Box
+                position={[opening.offset, opening.sill - 0.035, 0]}
+                size={[opening.width + 0.12, 0.06, 0.24]}
+                material={sm.wood}
+              />
+            </group>
+          ) : opening.kind === 'door' ? (
+            <group key={opening.id} position={[opening.offset, opening.sill, 0]}>
+              {[-1, 1].map((sign) => (
+                <Box
+                  key={sign}
+                  position={[sign * (opening.width / 2 - 0.025), opening.height / 2, 0]}
+                  size={[0.05, opening.height, 0.15]}
+                  material={sm.frame}
+                />
+              ))}
+              <Box
+                position={[0, opening.height - 0.025, 0]}
+                size={[opening.width, 0.05, 0.15]}
+                material={sm.frame}
+              />
+            </group>
+          ) : null,
+        )}
       </group>
     );
   };
-  const roofGeometry = useMemo(() => {
-    const shape = new THREE.Shape();
-    shape.moveTo(-r.width / 2 - 0.3, 0);
-    shape.lineTo(0, Math.min(2.5, r.width * 0.22));
-    shape.lineTo(r.width / 2 + 0.3, 0);
-    shape.closePath();
-    return new THREE.ExtrudeGeometry(shape, { depth: r.depth + 0.6, bevelEnabled: false });
-  }, [r.width, r.depth]);
-  useEffect(() => () => roofGeometry.dispose(), [roofGeometry]);
   return (
     <group
       position={[r.x, r.elevation, r.z]}
@@ -259,8 +387,8 @@ function RoomMesh({
       {slabs.floor.map((rect, index) =>
         slab(
           rect,
-          -0.15,
-          0.3,
+          -0.11,
+          0.22,
           outdoor && !r.palette && !r.surfacePalettes?.floor
             ? m.deck
             : surfaceMaterial('floor').floor,
@@ -268,41 +396,39 @@ function RoomMesh({
           'floor',
         ),
       )}
-      {slabs.foundation.map((rect, index) => slab(rect, -0.5, 0.4, m.foundation, index))}
+      {generated.foundations.map((geometry, index) => generatedMesh(geometry, m.foundation, index))}
       {!outdoor && (
         <>
           {(['north', 'south', 'east', 'west'] as const).map(wall)}
-          {!cutaway &&
-            (roof === 'flat' || slabs.roofClipped ? (
-              <>
-                {slabs.roof.map((rect, index) =>
-                  slab(rect, r.height + 0.1, 0.22, surfaceMaterial('roof').roof, index, 'roof'),
-                )}
-                {slabs.roof.map((rect, index) =>
-                  slab(rect, r.height - 0.06, 0.1, surfaceMaterial('roof').wood, index, 'roof'),
-                )}
-              </>
-            ) : (
-              <mesh
-                position={[0, r.height, -r.depth / 2 - 0.3]}
-                geometry={roofGeometry}
-                material={surfaceMaterial('roof').roof}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  pick('roof');
-                }}
-                castShadow
-                receiveShadow
-              >
-                {isSelected('roof') && (
-                  <mesh geometry={roofGeometry} scale={[1.002, 1.002, 1.002]}>
-                    <meshBasicMaterial color="#e3a44f" wireframe toneMapped={false} />
-                  </mesh>
-                )}
-              </mesh>
-            ))}
+          {!cutaway && (
+            <>
+              {generated.roofs.map((geometry, index) =>
+                generatedMesh(geometry, surfaceMaterial('roof').roof, index, 'roof'),
+              )}
+              {generated.soffits.map((geometry, index) =>
+                generatedMesh(geometry, surfaceMaterial('roof').wood, `soffit-${index}`, 'roof'),
+              )}
+            </>
+          )}
           {r.kind === 'living' && (
             <>
+              {[-1, 0, 1].map((i) => (
+                <Box
+                  key={`seat-${i}`}
+                  position={[-r.width * 0.22 + i * 1.04, 0.56, r.depth * 0.13]}
+                  size={[1.01, 0.12, 0.94]}
+                  material={m.fabric}
+                />
+              ))}
+              {[-1, 1].map((sign) => (
+                <Box
+                  key={`arm-${sign}`}
+                  position={[-r.width * 0.22 + sign * 1.53, 0.61, r.depth * 0.13]}
+                  size={[0.22, 0.38, 1.15]}
+                  material={m.fabric}
+                />
+              ))}
+
               <Box
                 position={[-r.width * 0.22, 0.28, r.depth * 0.13]}
                 size={[3.3, 0.5, 1.15]}
@@ -327,6 +453,24 @@ function RoomMesh({
           )}
           {r.kind === 'kitchen' && (
             <>
+              {Array.from({ length: Math.max(1, Math.floor((r.width - 1.2) / 0.7)) }, (_, i) => {
+                const count = Math.max(1, Math.floor((r.width - 1.2) / 0.7));
+                const x = -(r.width - 1.2) / 2 + ((i + 0.5) * (r.width - 1.2)) / count;
+                return (
+                  <Box
+                    key={`drawer-${i}`}
+                    position={[x, 0.65, -r.depth / 2 + 1.105]}
+                    size={[Math.min(0.25, ((r.width - 1.2) / count) * 0.5), 0.018, 0.022]}
+                    material={m.frame}
+                  />
+                );
+              })}
+              <Box
+                position={[Math.min(0.7, r.width * 0.15), 1.09, 0]}
+                size={[0.72, 0.018, 0.52]}
+                material={m.frame}
+              />
+
               <Box
                 position={[0, 0.45, -r.depth / 2 + 0.6]}
                 size={[r.width - 1.2, 0.9, 1]}
@@ -369,7 +513,17 @@ function RoomMesh({
             </>
           )}
           {r.kind === 'bathroom' && (
-            <Box position={[0, 0.35, 0]} size={[1.8, 0.65, 0.8]} material={m.fabric} />
+            <>
+              <Box position={[0, 0.32, 0]} size={[1.8, 0.6, 0.8]} material={m.fabric} />
+              <Box
+                position={[0, 0.626, 0]}
+                size={[1.48, 0.018, 0.52]}
+                material={m.glass}
+                cast={false}
+              />
+              <Box position={[0.75, 0.72, 0]} size={[0.04, 0.2, 0.04]} material={m.frame} />
+              <Box position={[0.64, 0.8, 0]} size={[0.24, 0.04, 0.04]} material={m.frame} />
+            </>
           )}
         </>
       )}
@@ -403,9 +557,6 @@ function RoomMesh({
     </group>
   );
 }
-function groundHeight(x: number, z: number, slope: number) {
-  return -0.7 - slope * (z + 12) + Math.sin(x * 0.07) * Math.cos(z * 0.07) * 1.1;
-}
 function Tree({ x, z, y = 0, scale = 1 }: { x: number; z: number; y?: number; scale?: number }) {
   return (
     <group position={[x, y, z]} scale={scale}>
@@ -430,8 +581,22 @@ function Tree({ x, z, y = 0, scale = 1 }: { x: number; z: number; y?: number; sc
     </group>
   );
 }
-export function Environment({ light }: { light: Light }) {
+export function Environment({ light, house }: { light: Light; house?: Scene }) {
   const { scene } = useThree();
+  const lighting = useMemo(() => {
+    const rooms = house?.rooms ?? [];
+    const minX = Math.min(0, ...rooms.map((room) => room.x - room.width / 2));
+    const maxX = Math.max(0, ...rooms.map((room) => room.x + room.width / 2));
+    const minZ = Math.min(0, ...rooms.map((room) => room.z - room.depth / 2));
+    const maxZ = Math.max(0, ...rooms.map((room) => room.z + room.depth / 2));
+    const target = new THREE.Object3D();
+    target.position.set((minX + maxX) / 2, 0, (minZ + maxZ) / 2);
+    target.updateMatrixWorld(true);
+    return {
+      target,
+      extent: Math.min(75, Math.max(12, (maxX - minX) / 2 + 5, (maxZ - minZ) / 2 + 5)),
+    };
+  }, [house?.rooms]);
   useEffect(() => {
     const canvas = document.createElement('canvas');
     canvas.width = 512;
@@ -477,21 +642,26 @@ export function Environment({ light }: { light: Light }) {
   }, [scene, light]);
   return (
     <>
-      <ambientLight intensity={light === 'evening' ? 0.18 : 0.35} />
-      <hemisphereLight args={['#e7eff4', '#7a7954', 1.15]} />
+      <ambientLight intensity={light === 'evening' ? 0.12 : 0.22} />
+      <hemisphereLight args={['#e7eff4', '#766d56', 0.85]} />
       <directionalLight
-        position={light === 'golden' ? [-30, 20, 20] : [-18, 40, 10]}
+        position={[
+          lighting.target.position.x - 30,
+          light === 'golden' ? 24 : 48,
+          lighting.target.position.z + 20,
+        ]}
+        target={lighting.target}
         intensity={light === 'evening' ? 0.4 : 3}
         color={light === 'golden' ? '#ffe1aa' : '#fff3db'}
         castShadow
         shadow-mapSize={[2048, 2048]}
-        shadow-camera-left={-48}
-        shadow-camera-right={48}
-        shadow-camera-top={48}
-        shadow-camera-bottom={-48}
+        shadow-camera-left={-lighting.extent}
+        shadow-camera-right={lighting.extent}
+        shadow-camera-top={lighting.extent}
+        shadow-camera-bottom={-lighting.extent}
         shadow-camera-far={150}
         shadow-bias={-0.0002}
-        shadow-normalBias={0.03}
+        shadow-normalBias={0.015}
       />
     </>
   );
@@ -499,13 +669,13 @@ export function Environment({ light }: { light: Light }) {
 export function Site({ house, quality }: { house: Scene; quality: Quality }) {
   const texture = useMemo(() => makeTexture('ground'), []);
   const geometry = useMemo(() => {
-    const geo = new THREE.PlaneGeometry(230, 230, 100, 100);
+    const geo = new THREE.PlaneGeometry(180, 180, 180, 180);
     geo.rotateX(-Math.PI / 2);
     const p = geo.attributes.position;
-    for (let i = 0; i < p.count; i++) p.setY(i, groundHeight(p.getX(i), p.getZ(i), house.slope));
+    for (let i = 0; i < p.count; i++) p.setY(i, terrainHeight(house, p.getX(i), p.getZ(i)));
     geo.computeVertexNormals();
     return geo;
-  }, [house.slope]);
+  }, [house.slope, house.rooms]);
   useEffect(() => () => geometry.dispose(), [geometry]);
   useEffect(() => () => texture.dispose(), [texture]);
   const positions = [
@@ -534,9 +704,18 @@ export function Site({ house, quality }: { house: Scene; quality: Quality }) {
           wireframe={quality === 'wireframe'}
         />
       </mesh>
-      {positions.map(([x, z, s], i) => (
-        <Tree key={i} x={x} z={z} y={groundHeight(x, z, house.slope)} scale={s} />
-      ))}
+      {positions
+        .filter(
+          ([x, z]) =>
+            !house.rooms.some(
+              (room) =>
+                Math.abs(x - room.x) < room.width / 2 + 3 &&
+                Math.abs(z - room.z) < room.depth / 2 + 3,
+            ),
+        )
+        .map(([x, z, s], i) => (
+          <Tree key={i} x={x} z={z} y={terrainHeight(house, x, z)} scale={s} />
+        ))}
       {!house.rooms.length && (
         <group position={[0, 0.02, 0]}>
           <mesh rotation={[-Math.PI / 2, 0, 0]}>
@@ -584,6 +763,8 @@ export function Architecture({
               roughness,
               wireframe,
               map: clay ? null : map,
+              bumpMap: clay || wireframe ? null : map,
+              bumpScale: map === textures.wood ? 0.018 : 0.012,
             });
           return [
             palette,
@@ -595,7 +776,12 @@ export function Architecture({
               ),
               wood: mat(p.wood, 0.65, textures.wood),
               floor: mat(p.floor, 0.7, textures.wood),
-              roof: mat(p.roof),
+              roof: new THREE.MeshStandardMaterial({
+                color: clay ? '#e0dcd1' : p.roof,
+                roughness: 0.55,
+                metalness: clay ? 0 : 0.25,
+                wireframe,
+              }),
               frame: mat(p.accent, 0.3),
               foundation: mat('#a19d8f', 1, textures.stone),
               deck: mat('#bcbaa7', 0.9, textures.stone),
@@ -605,14 +791,16 @@ export function Architecture({
                 clay || wireframe
                   ? mat('#cad8d3', 0.2)
                   : new THREE.MeshPhysicalMaterial({
-                      color: '#d2e5df',
+                      color: '#edf6f5',
                       roughness: 0.08,
-                      metalness: 0.05,
+                      metalness: 0,
                       transparent: true,
-                      opacity: quality === 'refined' ? 1 : 0.26,
+                      opacity: quality === 'refined' ? 1 : 0.22,
                       transmission: quality === 'refined' ? 0.94 : 0,
-                      thickness: 0.04,
-                      ior: 1.45,
+                      thickness: 0.02,
+                      ior: 1.5,
+                      depthWrite: false,
+                      envMapIntensity: 1.2,
                       side: THREE.DoubleSide,
                     }),
             },
@@ -640,7 +828,6 @@ export function Architecture({
           materialSets={materialSets}
           selection={selection}
           onSelectSurface={onSelectSurface}
-          roof={house.roof}
           cutaway={cutaway}
           cutawaySides={cutawaySides}
           selected={selected === r.id}
@@ -707,11 +894,17 @@ function CameraRig({
       camera.position.set(room?.x || 0, (room?.elevation || 0) + 1.7, (room?.z || 0) + 2);
       camera.lookAt(room?.x || 0, (room?.elevation || 0) + 1.7, (room?.z || 0) - 5);
     } else {
-      camera.position.set(34, 26, 38);
-      controls.current?.target.set(0, 1, 0);
+      const framing = renderCamera(
+        house,
+        renderRequestSchema.parse({ view: 'exterior' }),
+        gl.domElement.clientWidth / Math.max(1, gl.domElement.clientHeight),
+      );
+      camera.position.set(...framing.position);
+      controls.current?.target.set(...framing.target);
+      camera.lookAt(...framing.target);
       controls.current?.update();
     }
-  }, [view, resetKey, camera]);
+  }, [view, resetKey, camera, house.rooms.length === 0]);
   useEffect(() => {
     if (view !== 'walk') return;
     const canvas = gl.domElement;
@@ -796,89 +989,274 @@ function CameraRig({
 function ProgressiveRenderer({
   enabled,
   sceneKey,
+  light,
   onStatus,
 }: {
   enabled: boolean;
   sceneKey: string;
+  light: Light;
   onStatus: (text: string) => void;
 }) {
   const { gl, scene, camera, size } = useThree();
-  const tracer = useRef<import('three-gpu-pathtracer').WebGLPathTracer | null>(null);
+  // Installed 0.0.24 exposes this getter but omits it from its declaration.
+  type Tracer = import('three-gpu-pathtracer').WebGLPathTracer & { readonly isCompiling: boolean };
+  const state = useRef<{
+    pt: Tracer;
+    worker: import('./pathTraceWorker').PathTraceWorker;
+    busy: boolean;
+    key: string | null;
+    light: Light;
+    builds: number;
+    scale: number;
+    started: number;
+    preparingSince: number;
+  } | null>(null);
+  const resources = useRef<RetainedResource<NonNullable<typeof state.current>> | null>(null);
+  const materialRevision = useRef(0);
+  const current = useRef({ sceneKey, light, onStatus, enabled });
+  current.current = { sceneKey, light, onStatus, enabled };
   const lastMatrix = useRef<number[]>([]);
   const lastStatus = useRef('');
+  const rendererName = useMemo(() => {
+    const context = gl.getContext();
+    const extension = context.getExtension('WEBGL_debug_renderer_info');
+    return extension ? String(context.getParameter(extension.UNMASKED_RENDERER_WEBGL)) : '';
+  }, [gl]);
+  const gpu = useMemo(
+    () =>
+      new GpuSchedule(
+        gl.getContext() as WebGL2RenderingContext,
+        /intel|swiftshader|llvmpipe/i.test(rendererName) ? 24 : 12,
+      ),
+    [gl, rendererName],
+  );
+  const contextLost = useRef(false);
+  const disabledAfterError = useRef(false);
+  const report = (status: string) => {
+    if (status !== lastStatus.current) {
+      lastStatus.current = status;
+      current.current.onStatus(status);
+    }
+  };
+  const abandon = (message: string) => {
+    state.current = null;
+    disabledAfterError.current = true;
+    resources.current?.clear();
+    gpu.dispose();
+    if (!gl.getContext().isContextLost()) {
+      gl.setRenderTarget(null);
+      gl.setScissorTest(false);
+      const viewport = gl.getSize(new THREE.Vector2());
+      gl.setViewport(0, 0, viewport.x, viewport.y);
+      gl.autoClear = true;
+    }
+    gl.domElement.dataset.renderError = message;
+    report(message);
+  };
+  useEffect(() => {
+    const owner = new RetainedResource<NonNullable<typeof state.current>>((active) => {
+      active.worker.dispose();
+      active.pt.dispose();
+    });
+    resources.current = owner;
+    const lost = (event: Event) => {
+      event.preventDefault();
+      contextLost.current = true;
+      abandon('Graphics context lost · waiting to restore the live view');
+    };
+    const restored = () => {
+      contextLost.current = false;
+      report('Graphics restored · live rendering');
+    };
+    gl.domElement.addEventListener('webglcontextlost', lost);
+    gl.domElement.addEventListener('webglcontextrestored', restored);
+    return () => {
+      if (resources.current === owner) {
+        resources.current = null;
+        state.current = null;
+      }
+      owner.dispose();
+      gpu.dispose();
+      gl.domElement.removeEventListener('webglcontextlost', lost);
+      gl.domElement.removeEventListener('webglcontextrestored', restored);
+    };
+  }, [gl, gpu]);
   useEffect(() => {
     let cancelled = false;
-    onStatus(enabled ? 'Preparing path tracer' : 'Live rendering');
-    if (enabled) {
-      import('three-gpu-pathtracer')
-        .then(({ WebGLPathTracer }) => {
-          if (cancelled) return;
-          onStatus('Building path-traced scene');
-          const pt = new WebGLPathTracer(gl);
+    disabledAfterError.current = false;
+    delete gl.domElement.dataset.renderError;
+    delete gl.domElement.dataset.renderFirstSampleMs;
+    report(enabled ? 'Preparing path tracer' : 'Live rendering');
+    const owner = resources.current;
+    if (enabled && owner) {
+      // Quality changes replace raster materials; reuse the tracer but refresh
+      // its scene references before showing its next accumulated image.
+      materialRevision.current++;
+      void owner
+        .acquire(async () => {
+          const [{ WebGLPathTracer }, { PathTraceWorker }] = await Promise.all([
+            import('three-gpu-pathtracer'),
+            import('./pathTraceWorker'),
+          ]);
+          if (owner.closed || resources.current !== owner || contextLost.current)
+            throw new Error('The render canvas is no longer available.');
+          const pt = new WebGLPathTracer(gl) as Tracer;
+          let worker: import('./pathTraceWorker').PathTraceWorker;
+          try {
+            worker = new PathTraceWorker();
+          } catch (error) {
+            pt.dispose();
+            throw error;
+          }
+          pt.setBVHWorker(worker);
           pt.textureSize.set(256, 256);
           pt.bounces = 4;
-          pt.renderDelay = 650;
-          pt.minSamples = 2;
-          pt.fadeDuration = 300;
-          const debugInfo = gl.getContext().getExtension('WEBGL_debug_renderer_info');
-          const rendererName = debugInfo
-            ? String(gl.getContext().getParameter(debugInfo.UNMASKED_RENDERER_WEBGL))
-            : '';
-          pt.renderScale = /intel|swiftshader|llvmpipe/i.test(rendererName) ? 0.5 : 0.8;
-          pt.tiles.set(2, 2);
-          tracer.current = pt;
-          scene.updateMatrixWorld(true);
-          pt.setScene(scene, camera);
-          onStatus('Path tracer ready');
+          pt.transmissiveBounces = 6;
+          pt.filterGlossyFactor = 0.5;
+          pt.renderDelay = 180;
+          pt.minSamples = 1;
+          pt.fadeDuration = 180;
+          return {
+            pt,
+            worker,
+            busy: false,
+            key: null,
+            light: current.current.light,
+            builds: 0,
+            scale: 0,
+            started: performance.now(),
+            preparingSince: performance.now(),
+          };
+        })
+        .then((active) => {
+          if (cancelled || !active || resources.current !== owner || contextLost.current) return;
+          state.current = active;
+          lastMatrix.current = [];
         })
         .catch((error) => {
+          if (cancelled || resources.current !== owner) return;
           console.error('Path tracer initialization failed', error);
-          tracer.current?.dispose();
-          tracer.current = null;
-          onStatus('Refinement unavailable · live rendering');
+          abandon('Refinement unavailable · live rendering');
         });
     }
+    // Keep initialized resources paused while another rendering mode is shown.
+    // Their canvas owns final cleanup, including its underlying GL context.
     return () => {
       cancelled = true;
-      tracer.current?.dispose();
-      tracer.current = null;
     };
-  }, [enabled, sceneKey, gl, scene, camera, onStatus, size.width, size.height]);
+  }, [enabled, gl]);
   useFrame(() => {
-    const pt = tracer.current;
-    gl.domElement.dataset.renderSamples = String(pt?.samples ?? 'live');
-    if (!enabled || !pt) {
+    if (contextLost.current || gl.getContext().isContextLost()) return;
+    const now = performance.now();
+    const active = state.current;
+    if (enabled && !disabledAfterError.current) {
+      try {
+        // A driver's initial program compilation can hold its command queue.
+        // Give it the same startup budget as the asynchronous shader compiler.
+        if (!gpu.ready(now, active?.pt.isCompiling ? 45_000 : 12_000)) return;
+      } catch (error) {
+        abandon('Refinement paused · live rendering');
+        console.error(error);
+        return;
+      }
+    }
+    const raster = () => {
       gl.render(scene, camera);
+      if (enabled && !disabledAfterError.current) gpu.submittedFrame(now);
+    };
+    if (!enabled || !active) {
+      raster();
       return;
     }
-    const matrix = camera.matrixWorld.elements;
-    // Orbit damping can produce sub-pixel floating point changes forever.
-    // Ignore those so an otherwise stationary view can accumulate samples.
+    const { pt } = active;
+    const requestedKey = `${current.current.sceneKey}|materials:${materialRevision.current}`;
     if (
-      matrix.some(
-        (value, index) => Math.abs(value - (lastMatrix.current[index] ?? Infinity)) > 1e-5,
-      )
+      (active.busy && now - active.preparingSince > 30_000) ||
+      (pt.isCompiling && now - active.started > 45_000)
     ) {
-      pt.updateCamera();
-      lastMatrix.current = [...matrix];
+      abandon('Refinement took too long · live rendering');
+      raster();
+      return;
+    }
+    if (!active.busy && active.key !== requestedKey) {
+      active.busy = true;
+      const key = requestedKey;
+      const began = performance.now();
+      active.preparingSince = began;
+      report('Preparing light · live view available');
+      scene.updateMatrixWorld(true);
+      void pt
+        .setSceneAsync(scene, camera)
+        .then(() => {
+          if (state.current !== active) return;
+          active.busy = false;
+          active.key = key;
+          active.light = current.current.light;
+          active.started = performance.now();
+          active.builds += 1;
+          gl.domElement.dataset.renderBuildMs = String(Math.round(performance.now() - began));
+          gl.domElement.dataset.renderBuilds = String(active.builds);
+          lastMatrix.current = [];
+        })
+        .catch((error) => {
+          if (state.current !== active) return;
+          console.error('Path tracer preparation failed', error);
+          abandon('Refinement unavailable · live rendering');
+        });
+    }
+    if (active.busy || active.key !== requestedKey) {
+      raster();
+      return;
     }
     try {
-      if (pt.samples < 128) pt.renderSample();
-      const status =
-        pt.samples >= 128
-          ? 'Path traced · 128 samples'
+      const budget = renderingBudget(rendererName, size.width, size.height, gl.getPixelRatio());
+      if (Math.abs(active.scale - budget.scale) > 0.0001) {
+        active.scale = budget.scale;
+        pt.renderScale = budget.scale;
+        pt.tiles.set(budget.tiles, budget.tiles);
+        pt.reset();
+      }
+      if (active.light !== current.current.light) {
+        active.light = current.current.light;
+        pt.updateEnvironment();
+        pt.updateLights();
+      }
+      const matrix = [...camera.matrixWorld.elements, ...camera.projectionMatrix.elements];
+      if (
+        matrix.some(
+          (value, index) => Math.abs(value - (lastMatrix.current[index] ?? Infinity)) > 1e-5,
+        )
+      ) {
+        pt.updateCamera();
+        lastMatrix.current = [...matrix];
+        active.started = performance.now();
+      }
+      if (pt.samples < budget.maxSamples) {
+        pt.renderSample();
+        gpu.submittedFrame(now);
+      }
+      gl.domElement.dataset.renderCompiling = String(pt.isCompiling);
+      gl.domElement.dataset.renderSamples = String(pt.samples);
+      gl.domElement.dataset.renderScale = String(budget.scale.toFixed(3));
+      gl.domElement.dataset.renderElapsedMs = String(
+        Math.round(performance.now() - active.started),
+      );
+      if (pt.samples >= 1 && !gl.domElement.dataset.renderFirstSampleMs)
+        gl.domElement.dataset.renderFirstSampleMs = String(
+          Math.round(performance.now() - active.started),
+        );
+      report(
+        pt.samples >= budget.maxSamples
+          ? `Path traced · ${budget.maxSamples} samples`
           : pt.samples < 1
             ? 'Settling light…'
-            : `Refining · ${Math.floor(pt.samples)} / 128 samples`;
-      if (status !== lastStatus.current) {
-        lastStatus.current = status;
-        onStatus(status);
-      }
+            : `Refining · ${Math.floor(pt.samples)} / ${budget.maxSamples} samples`,
+      );
     } catch (error) {
       console.error('Path tracer render failed', error);
-      pt.dispose();
-      tracer.current = null;
-      onStatus('Refinement unavailable · live rendering');
+      abandon('Refinement unavailable · live rendering');
+      gl.setRenderTarget(null);
+      gl.setScissorTest(false);
       gl.render(scene, camera);
     }
   }, 1);
@@ -1011,7 +1389,10 @@ export function FloorPlanSvg({
               const panels = wallPanels(house, room, side, false).filter(
                 (panel) => panel.bottom < 1 && panel.bottom + panel.height > 1,
               );
-              if (!panels.length) return [];
+              const apertures = roomOpenings(house, room.id, side).filter(
+                (opening) => opening.kind === 'window' || opening.sill < 1,
+              );
+              if (!panels.length && !apertures.length) return [];
               const hit = planWallHitTarget(room, side);
               return [
                 <g
@@ -1060,19 +1441,92 @@ export function FloorPlanSvg({
                         stroke={
                           selection?.roomId === room.id && selection.surface === side
                             ? '#c98a36'
-                            : room[side] === 'glass'
+                            : room[side] === 'glass' && !apertures.length
                               ? '#779faa'
                               : palettes[surfacePalette(house, room, side)].accent
                         }
                         strokeWidth={
                           selection?.roomId === room.id && selection.surface === side
                             ? 0.3
-                            : room[side] === 'glass'
+                            : room[side] === 'glass' && !apertures.length
                               ? 0.12
                               : 0.2
                         }
                         strokeLinecap="butt"
                       />
+                    );
+                  })}
+                  {apertures.map((opening) => {
+                    const center = axis.center + opening.offset;
+                    const start = center - opening.width / 2,
+                      end = center + opening.width / 2;
+                    const color =
+                      selection?.roomId === room.id && selection.surface === side
+                        ? '#c98a36'
+                        : '#658f9a';
+                    return (
+                      <g
+                        key={`opening-${opening.id}`}
+                        data-opening-kind={opening.kind}
+                        pointerEvents="none"
+                        transform={
+                          axis.horizontal
+                            ? `translate(${start} ${axis.boundary})`
+                            : `translate(${axis.boundary} ${start}) rotate(90)`
+                        }
+                      >
+                        {opening.kind === 'window' ? (
+                          <>
+                            <rect
+                              x={0}
+                              y={-0.11}
+                              width={end - start}
+                              height={0.22}
+                              fill="#dce8e7"
+                            />
+                            {[-0.065, 0.065].map((y) => (
+                              <line
+                                key={y}
+                                x1={0}
+                                x2={end - start}
+                                y1={y}
+                                y2={y}
+                                stroke={color}
+                                strokeWidth={0.025}
+                              />
+                            ))}
+                            {[0, end - start].map((x) => (
+                              <line
+                                key={x}
+                                x1={x}
+                                x2={x}
+                                y1={-0.12}
+                                y2={0.12}
+                                stroke={color}
+                                strokeWidth={0.05}
+                              />
+                            ))}
+                          </>
+                        ) : opening.kind === 'door' ? (
+                          <>
+                            <path
+                              d={`M 0 0 V ${opening.width} A ${opening.width} ${opening.width} 0 0 0 ${opening.width} 0`}
+                              fill="none"
+                              stroke="#697c71"
+                              strokeWidth={0.04}
+                              strokeDasharray=".12 .08"
+                            />
+                            <line
+                              x1={0}
+                              x2={0}
+                              y1={0}
+                              y2={opening.width}
+                              stroke="#697c71"
+                              strokeWidth={0.065}
+                            />
+                          </>
+                        ) : null}
+                      </g>
                     );
                   })}
                 </g>,
@@ -1136,7 +1590,7 @@ function FloorPlan({
     <div className="floor-plan">
       <div className="plan-heading">
         <h2>Floor plan</h2>
-        <p>Dimensions in meters · gaps show openings · select a space to inspect it</p>
+        <p>Dimensions in meters · blue lines are windows · arcs are doors</p>
       </div>
       <div className="plan-levels">
         {(levels.length ? levels : [0]).map((level) => (
@@ -1174,13 +1628,13 @@ class CanvasError extends Component<{ children: ReactNode }, { error: boolean }>
   }
 }
 export default function SceneView(props: Props) {
-  const sceneKey = JSON.stringify([props.house, props.light, props.cutaway]);
+  const sceneKey = visualSceneKey(props.house, props.cutaway, props.cutawaySides);
   if (props.view === 'plan') return <FloorPlan {...props} />;
   return (
     <CanvasError>
       <Canvas
         shadows
-        dpr={[1, 1.7]}
+        dpr={[1, 1.5]}
         camera={{ position: [34, 26, 38], fov: 43, near: 0.1, far: 500 }}
         gl={{
           antialias: true,
@@ -1191,13 +1645,14 @@ export default function SceneView(props: Props) {
         onPointerMissed={() => props.onSelect(null)}
       >
         <Suspense fallback={null}>
-          <Environment light={props.light} />
+          <Environment light={props.light} house={props.house} />
           <Site house={props.house} quality={props.quality} />
           <Architecture {...props} />
           <CameraRig {...props} />
           <ProgressiveRenderer
             enabled={props.quality === 'refined'}
             sceneKey={sceneKey}
+            light={props.light}
             onStatus={props.onRenderStatus}
           />
         </Suspense>

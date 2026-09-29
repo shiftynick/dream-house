@@ -1,16 +1,27 @@
-function settle(delay: number, signal: AbortSignal): Promise<void> {
+function settle(signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     signal.throwIfAborted();
-    const abort = () => {
-      clearTimeout(timer);
+    const channel = typeof MessageChannel === 'undefined' ? null : new MessageChannel();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const cleanup = () => {
+      channel?.port1.close();
+      channel?.port2.close();
+      if (timer !== undefined) clearTimeout(timer);
       signal.removeEventListener('abort', abort);
+    };
+    const abort = () => {
+      cleanup();
       reject(signal.reason);
     };
-    const timer = setTimeout(() => {
-      signal.removeEventListener('abort', abort);
+    const finish = () => {
+      cleanup();
       resolve();
-    }, delay);
+    };
     signal.addEventListener('abort', abort, { once: true });
+    if (channel) {
+      channel.port1.onmessage = finish;
+      channel.port2.postMessage(null);
+    } else timer = setTimeout(finish, 0);
     if (signal.aborted) abort();
   });
 }
@@ -22,10 +33,10 @@ export async function captureAfterRender<T>(options: {
   render: () => void;
   capture: () => T;
 }): Promise<T> {
-  // The first timer runs after the committed scene's effects installed lighting.
-  // A second draw settles lazy material/environment and shadow-map resources.
-  for (const delay of [0, 25]) {
-    await settle(delay, options.signal);
+  // Tasks run after committed effects and avoid background timer clamping.
+  // A second draw settles lazy environment and shadow-map resources.
+  for (let pass = 0; pass < 2; pass++) {
+    await settle(options.signal);
     options.signal.throwIfAborted();
     options.render();
   }

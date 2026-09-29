@@ -1944,3 +1944,62 @@ kbd {
     flex-wrap: wrap;
   }
 }
+/* Dimensioned architecture controls share the room inspector's compact layout. */
+.architecture-controls {
+  padding-top: 16px;
+  margin-top: 14px;
+  border-top: 1px solid var(--line, #dfe2d8);
+}
+.control-actions,
+.opening-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.opening-heading .field-label {
+  flex: 1;
+  margin-bottom: 8px;
+}
+.opening-editor {
+  border: 1px solid var(--line, #dfe2d8);
+  border-radius: 8px;
+  padding: 10px;
+  margin: 10px 0;
+}
+.opening-editor .dimensions {
+  gap: 8px;
+}
+.opening-editor .field-label {
+  font-size: 11px;
+  text-transform: capitalize;
+}
+.opening-editor input {
+  width: 100%;
+  min-width: 0;
+}
+.opening-passage,
+.run-metrics {
+  font-size: 11px;
+  color: #6e7b69;
+  line-height: 1.5;
+}
+.request-assessment {
+  padding: 9px 0;
+  border-top: 1px solid var(--line, #dfe2d8);
+}
+.request-assessment strong,
+.request-assessment span {
+  display: block;
+}
+.request-assessment span {
+  font-size: 11px;
+  margin-top: 3px;
+}
+.assessment-met {
+  color: #58724a;
+}
+.assessment-unmet {
+  color: #996b31;
+}

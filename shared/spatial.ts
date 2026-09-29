@@ -1,5 +1,7 @@
 import type { DesignIssue } from './design.ts';
 import type { Room, Scene, Side, Stair } from './model.ts';
+import { roomOpenings } from './openings.ts';
+import { roofHeightAt } from './architecture.ts';
 import {
   bounds,
   close,
@@ -147,19 +149,15 @@ function roomObstacles(scene: Scene, room: Room) {
 
 function doors(scene: Scene, room: Room) {
   return sides.flatMap((side) => {
-    const declared = (scene.design?.connections ?? []).filter(
-      (connection) =>
-        (connection.roomAId === room.id && connection.sideA === side) ||
-        (connection.roomBId === room.id && oppositeSide(connection.sideA) === side),
-    );
+    const declared = roomOpenings(scene, room.id, side);
     if (declared.length)
       return declared
-        .filter((connection) => connection.kind === 'door')
-        .map((connection) => ({
-          id: connection.id,
+        .filter((opening) => opening.kind === 'door' && opening.sill <= 0.03)
+        .map((opening) => ({
+          id: opening.id,
           side,
-          center: connection.center,
-          width: connection.width,
+          center: (horizontalSide(side) ? room.x : room.z) + opening.offset,
+          width: opening.width,
         }));
     return room[side] === 'door'
       ? [
@@ -392,7 +390,9 @@ function stairIssues(scene: Scene): DesignIssue[] {
         );
         const planes = [
           ...(!upperHole ? [room.elevation - 0.3] : []),
-          ...(!ceilingHole && !roofCovered ? [top - 0.11] : []),
+          ...(!ceilingHole && !roofCovered
+            ? [roofHeightAt(scene, room, point.x, point.z) - 0.11]
+            : []),
         ];
         for (const plane of planes) {
           const clearance = plane - tread;

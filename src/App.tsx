@@ -40,6 +40,7 @@ import {
 import { api, ApiError, type Status } from './api';
 import { useProject } from './useProject';
 import Modal from './Modal';
+import { OpeningControls, RoofControls } from './ArchitectureControls';
 import ProjectChooser from './ProjectChooser';
 import { useRenderBridge } from './useRenderBridge';
 import RenderCapture from './RenderCapture';
@@ -54,8 +55,14 @@ import {
 import { useVoice } from './useVoice';
 import SceneView, { type CameraContext, type Light, type Quality, type View } from './SceneView';
 import { DEFAULT_MODELS, DEFAULT_SPEECH_VOICE } from '../shared/connections';
+import { hillsideHouse } from '../shared/examples';
 import type { DraftCommitResult, HarnessResult, RunStatus } from '../shared/harness';
-import { executeCommands, validateDesign } from '../shared/design';
+import {
+  executeCommands,
+  roomOpenings,
+  validateDesign,
+  type DesignCommand,
+} from '../shared/design';
 import {
   area,
   documentSchema,
@@ -63,13 +70,13 @@ import {
   makeRoom,
   palettes,
   redo,
-  sampleScene,
   undo,
   validateScene,
   type DesignRequirement,
   type Project,
   type Room,
   type Scene,
+  type Side,
 } from '../shared/model';
 
 const uid = () => crypto.randomUUID();
@@ -264,7 +271,7 @@ export default function App() {
   );
   const [quality, setQuality] = useState<Quality>('live'),
     [view, setView] = useState<View>('orbit'),
-    [light, setLight] = useState<Light>('golden'),
+    [light, setLight] = useState<Light>('day'),
     [cutaway, setCutaway] = useState(false),
     [resetKey, setResetKey] = useState(0);
   const [modal, setModal] = useState<'connections' | 'versions' | 'projects' | 'help' | null>(null),
@@ -284,6 +291,7 @@ export default function App() {
     audio = useRef<HTMLAudioElement | null>(null),
     audioUrl = useRef<string | null>(null),
     speechRun = useRef(0),
+    speechRequest = useRef<AbortController | null>(null),
     busyRef = useRef(false),
     lockedRef = useRef(true),
     runIdRef = useRef<string | null>(null),
@@ -340,6 +348,8 @@ export default function App() {
   }, [project, selection]);
   const stopSpeech = useCallback(() => {
     speechRun.current++;
+    speechRequest.current?.abort();
+    speechRequest.current = null;
     window.speechSynthesis?.cancel();
     audio.current?.pause();
     if (audioUrl.current) {
@@ -353,6 +363,13 @@ export default function App() {
       stopSpeech();
       const run = speechRun.current;
       if (speech === 'off') return;
+      // Detailed geometry disclosures stay visible in chat; keep speech within
+      // the provider route's limit without another model call to summarize it.
+      if (text.length > 1500) {
+        const excerpt = text.slice(0, 1380);
+        const sentence = Math.max(excerpt.lastIndexOf('. '), excerpt.lastIndexOf('\n'));
+        text = `${excerpt.slice(0, sentence > 800 ? sentence + 1 : excerpt.lastIndexOf(' '))} Read the full design check in chat for the remaining details.`;
+      }
       if (speech === 'browser') {
         if (!window.speechSynthesis || !window.speechSynthesis.getVoices().length) {
           notify(
@@ -366,8 +383,11 @@ export default function App() {
         return;
       }
       try {
+        const controller = new AbortController();
+        speechRequest.current = controller;
         const response = await fetch('/api/speak', {
           method: 'POST',
+          signal: controller.signal,
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ text }),
         });
@@ -379,6 +399,7 @@ export default function App() {
         await audio.current.play();
         refreshStatus();
       } catch (e) {
+        if (run !== speechRun.current) return;
         notify(
           `${designApplied ? 'Design applied' : 'Your design response is ready'}, but the spoken reply failed: ${(e as Error).message}`,
         );
@@ -737,6 +758,7 @@ export default function App() {
     ],
   );
   const voice = useVoice({
+    scopeKey: project?.projectId,
     onText: send,
     onError: notify,
     enabled: !!status?.voiceConnected,
@@ -891,6 +913,17 @@ export default function App() {
       </div>
     );
   const house = project.scene;
+  const applyArchitecture = (commands: DesignCommand[]) => {
+    if (lockedRef.current) return false;
+    const result = executeCommands(house, commands);
+    const errors = result.issues.filter((issue) => issue.severity === 'error');
+    if (!result.applied || errors.length) {
+      notify((errors.length ? errors : result.issues).map((issue) => issue.message).join(' '));
+      return false;
+    }
+    commit(result.scene);
+    return true;
+  };
   const requirements = house.design?.requirements || [];
   const updateRequirements = (next: DesignRequirement[]) => {
     commit({
@@ -1150,7 +1183,19 @@ export default function App() {
                         <label className="field-label" key={key}>
                           {key}
                           <select
-                            disabled={locked}
+                            disabled={
+                              locked ||
+                              roomOpenings(house, selectedRoom.id, key).some(
+                                (opening) => opening.source === 'explicit',
+                              )
+                            }
+                            title={
+                              roomOpenings(house, selectedRoom.id, key).some(
+                                (opening) => opening.source === 'explicit',
+                              )
+                                ? 'Edit individual windows and doors below. Remove them before replacing the whole wall.'
+                                : undefined
+                            }
                             value={selectedRoom[key]}
                             onChange={(e) => mutateRoom({ [key]: e.target.value })}
                           >
@@ -1195,6 +1240,30 @@ export default function App() {
                         ))}
                       </select>
                     </label>
+                    {!['courtyard', 'terrace'].includes(selectedRoom.kind) && (
+                      <>
+                        <RoofControls
+                          key={`${project.projectId}-${selectedRoom.id}-roof`}
+                          scene={house}
+                          room={selectedRoom}
+                          disabled={locked}
+                          onApply={applyArchitecture}
+                        />
+                        <OpeningControls
+                          key={`${project.projectId}-${selectedRoom.id}-openings`}
+                          scene={house}
+                          room={selectedRoom}
+                          selectedSide={
+                            selection &&
+                            ['north', 'south', 'east', 'west'].includes(selection.surface)
+                              ? (selection.surface as Side)
+                              : undefined
+                          }
+                          disabled={locked}
+                          onApply={applyArchitecture}
+                        />
+                      </>
+                    )}
                     <button
                       className="text-button danger"
                       disabled={locked}
@@ -1395,25 +1464,12 @@ export default function App() {
                     </button>
                   ))}
                 </div>
-                <div className="section-title">
-                  <span>ROOF PROFILE</span>
-                </div>
-                <div className="segmented">
-                  <button
-                    disabled={locked}
-                    className={house.roof === 'flat' ? 'active' : ''}
-                    onClick={() => commit({ ...house, roof: 'flat' })}
-                  >
-                    Flat
-                  </button>
-                  <button
-                    disabled={locked}
-                    className={house.roof === 'pitched' ? 'active' : ''}
-                    onClick={() => commit({ ...house, roof: 'pitched' })}
-                  >
-                    Pitched
-                  </button>
-                </div>
+                <RoofControls
+                  key={project.projectId}
+                  scene={house}
+                  disabled={locked}
+                  onApply={applyArchitecture}
+                />
               </>
             )}
           </div>
@@ -1500,7 +1556,7 @@ export default function App() {
                   className="sample-button"
                   disabled={locked}
                   onClick={() => {
-                    commit(sampleScene());
+                    commit(hillsideHouse());
                     setResetKey((k) => k + 1);
                   }}
                 >
@@ -1767,6 +1823,39 @@ export default function App() {
                 (lastResult.changes.length > 0 || lastResult.issues.length > 0) && (
                   <details className="design-summary">
                     <summary>{pending ? 'Proposal details' : 'Latest design check'}</summary>
+                    {lastResult.metrics && (
+                      <p className="run-metrics">
+                        {(lastResult.metrics.elapsedMs / 1000).toFixed(1)} s ·{' '}
+                        {lastResult.usage.calls} model calls ·{' '}
+                        {lastResult.usage.cost === null
+                          ? 'Cost unavailable'
+                          : `$${lastResult.usage.cost.toFixed(3)}`}
+                      </p>
+                    )}
+                    {lastResult.assessment?.requirements.map((requirement) => (
+                      <div className="request-assessment" key={requirement.id}>
+                        <strong>{requirement.request}</strong>
+                        <span
+                          className={
+                            requirement.status === 'fulfilled'
+                              ? 'assessment-met'
+                              : 'assessment-unmet'
+                          }
+                        >
+                          {requirement.status} ·{' '}
+                          {requirement.verification === 'geometry'
+                            ? 'geometry checked'
+                            : 'agent assessed'}
+                        </span>
+                        <p>{requirement.evidence}</p>
+                        {requirement.limitation && (
+                          <p className="design-warning">{requirement.limitation}</p>
+                        )}
+                      </div>
+                    ))}
+                    {lastResult.assessment?.assumptions.map((assumption, index) => (
+                      <p key={`assumption-${index}`}>Assumption: {assumption.description}</p>
+                    ))}
                     {lastResult.changes.map((change, i) => (
                       <p key={`change-${i}`}>{change}</p>
                     ))}

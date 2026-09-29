@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { Scene, Project } from './model.ts';
 import type { DesignIssue } from './design.ts';
 import { designSelectionSchema } from './selection.ts';
+import type { EvaluatedAssessment } from './assessment.ts';
 
 const vector = z.tuple([z.number().finite(), z.number().finite(), z.number().finite()]);
 export const agentContextSchema = z.object({
@@ -46,6 +47,18 @@ export type AgentUsage = {
   cost: number | null;
   calls: number;
 };
+export type RunMetrics = {
+  elapsedMs: number;
+  modelMs: number;
+  toolMs: number;
+  renderMs: number;
+  toolCalls: number;
+  captures: number;
+  reusedCaptures: number;
+  contextCharacters: number;
+  compactedCharacters: number;
+  imageBytesSent: number;
+};
 export type HarnessResult = {
   runId: string;
   baseRevision: number;
@@ -57,6 +70,8 @@ export type HarnessResult = {
   changes: string[];
   events: RunEvent[];
   usage: AgentUsage;
+  metrics?: RunMetrics;
+  assessment?: EvaluatedAssessment;
 };
 export type RunStatus = {
   id: string;

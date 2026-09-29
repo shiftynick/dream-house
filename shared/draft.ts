@@ -31,6 +31,8 @@ export function describeChanges(before: Scene, after: Scene): string[] {
   if (before.palette !== after.palette)
     changes.push(`Changed the house palette to ${after.palette}.`);
   if (before.roof !== after.roof) changes.push(`Changed the roof to ${after.roof}.`);
+  if (before.roofPitch !== after.roofPitch || before.roofDirection !== after.roofDirection)
+    changes.push(`Updated the house roof pitch and direction.`);
   if (before.slope !== after.slope)
     changes.push(`Changed the site slope to ${Math.round(after.slope * 100)}%.`);
   for (const room of after.rooms) {
@@ -52,6 +54,14 @@ export function describeChanges(before: Scene, after: Scene): string[] {
     )
       changes.push(`Updated the walls and openings of ${room.name}.`);
     if (old.palette !== room.palette) changes.push(`Changed the materials of ${room.name}.`);
+    if (canonical(old.roof) !== canonical(room.roof))
+      changes.push(
+        room.roof
+          ? `Updated the roof of ${room.name}.`
+          : `Restored the house roof default for ${room.name}.`,
+      );
+    if (canonical(old.wallOpenings || []) !== canonical(room.wallOpenings || []))
+      changes.push(`Updated the positioned windows and doors of ${room.name}.`);
     for (const surface of ['north', 'south', 'east', 'west', 'floor', 'roof'] as const) {
       if (old.surfacePalettes?.[surface] !== room.surfacePalettes?.[surface])
         changes.push(

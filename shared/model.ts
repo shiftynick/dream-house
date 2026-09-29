@@ -2,6 +2,26 @@ import { z } from 'zod';
 
 export const wallSchema = z.enum(['solid', 'glass', 'door', 'open']);
 export const sideSchema = z.enum(['north', 'south', 'east', 'west']);
+export const roofStyleSchema = z.enum(['flat', 'pitched', 'single-pitch']);
+export const roofPitchSchema = z.number().min(1).max(60);
+export const roofSchema = z.object({
+  style: roofStyleSchema,
+  pitch: roofPitchSchema.optional(),
+  // High edge for a single-pitch roof; slope axis for a symmetric gable.
+  direction: sideSchema.optional(),
+});
+export const wallOpeningSchema = z.object({
+  id: z.string().min(1).max(60),
+  side: sideSchema,
+  kind: z.enum(['window', 'door', 'open']),
+  // Center relative to the room center, along world +x (N/S) or +z (E/W).
+  offset: z.number().min(-30).max(30),
+  width: z.number().min(0.2).max(30),
+  height: z.number().min(0.2).max(10),
+  sill: z.number().min(0).max(10),
+});
+export type Roof = z.infer<typeof roofSchema>;
+export type WallOpening = z.infer<typeof wallOpeningSchema>;
 export const paletteSchema = z.enum(['limestone', 'cedar', 'charcoal', 'chalk']);
 export const surfaceSchema = z.enum(['north', 'south', 'east', 'west', 'floor', 'roof']);
 export const surfacePalettesSchema = z.object({
@@ -39,6 +59,8 @@ export const roomSchema = z.object({
   west: wallSchema,
   palette: paletteSchema.optional(),
   surfacePalettes: surfacePalettesSchema.optional(),
+  roof: roofSchema.optional(),
+  wallOpenings: z.array(wallOpeningSchema).max(64).optional(),
 });
 export const stairSchema = z.object({
   id: z.string().min(1).max(60),
@@ -86,6 +108,11 @@ export const lockSnapshotSchema = z.object({
   height: z.number(),
   palette: paletteSchema,
   surfacePalettes: surfacePalettesSchema.optional(),
+  roof: roofSchema.optional(),
+  wallOpenings: z.array(wallOpeningSchema).max(256).optional(),
+  walls: z
+    .object({ north: wallSchema, south: wallSchema, east: wallSchema, west: wallSchema })
+    .optional(),
 });
 export const requirementSchema = z.discriminatedUnion('kind', [
   z.object({
@@ -110,9 +137,9 @@ export const requirementSchema = z.discriminatedUnion('kind', [
     kind: z.literal('locked'),
     roomId: idSchema,
     properties: z
-      .array(z.enum(['position', 'size', 'height', 'material']))
+      .array(z.enum(['position', 'size', 'height', 'material', 'roof', 'openings']))
       .min(1)
-      .max(4),
+      .max(6),
     snapshot: lockSnapshotSchema.optional(),
   }),
   z.object({
@@ -136,7 +163,9 @@ export type DesignMetadata = z.infer<typeof designSchema>;
 export const sceneSchema = z.object({
   name: z.string().min(1).max(100),
   palette: paletteSchema,
-  roof: z.enum(['flat', 'pitched']),
+  roof: roofStyleSchema,
+  roofPitch: roofPitchSchema.optional(),
+  roofDirection: sideSchema.optional(),
   slope: z.number().min(0).max(0.35),
   rooms: z.array(roomSchema).max(32),
   stairs: z.array(stairSchema).max(12),

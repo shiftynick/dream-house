@@ -1,3 +1,44 @@
+# Geometry, harness and rendering upgrade — September 28, 2026
+
+**192 automated tests, TypeScript and the production build passed.** Browser scenarios used isolated storage and injected model/audio responses except for two explicitly evaluated Sonnet design requests. The production workspace remained byte-identical through verification and restart. Source and bundle credential scans passed. Existing non-blocking Vite bundle-size and upstream Zod annotation warnings remain.
+
+## Verified behavior
+
+- True single-pitch roofs have controlled pitch/high edge, room overrides, thin roof shells, sloped wall heads and clerestory openings. Legacy gables retain their effective geometry. Manual roof/opening edits, undo and redo were checked in the browser.
+- Windows and doors coexist on one wall. Tests cover shared-wall ownership, raised stair doorways, resizing, opening collisions and preservation of legacy doorways when adding a window. The hillside example has 13 spaces, four linked stairs and one circulation component containing all 11 indoor rooms, with no blocking geometry errors.
+- Simulated browser chat exercised creation with a matching local render, a visible failure with unchanged saved geometry, successful retry, cancellation, partial-request review, acceptance/undo, and an empty new project followed by reopening the prior project. The intentionally wrong roof response claimed 25° after applying 14°; local assertions disclosed the actual angle and required confirmation.
+- Synthetic push-to-talk exercised recording, track release, transcription, agent response and the speech-response path. HTTP tests additionally cover provider cancellation and reported audio charges, including a provider that finishes after cancellation. Microphone permission, real recording quality and noisy-room recognition were not evaluated.
+- Exterior, interior, cutaway and plan images were inspected for the cabin; exterior, cutaway and plan images were also inspected for the hillside and 24-room scenes. Captures work without animation-frame scheduling. The capture broker now delivers jobs through long polling with ownership, cancellation and stale-result checks.
+- Path tracing accumulated samples on both Intel ARL and AMD Vega 20 browser renderers. The final Intel check prepared geometry in 464 ms, reached its first sample after about 34.7 seconds of cold shader setup, and reached four samples in 36.1 seconds. A light change reused the existing geometry build. Refined → Live → Refined retained the renderer/worker, prepared refreshed material references in 62 ms, reached the first sample in 410 ms and eight samples in 2.7 seconds. Forced WebGL context loss recovered to the live raster view. These are individual checks, not frame-rate guarantees.
+
+## Real model checks and spending
+
+Vercel AI Gateway / `anthropic/claude-sonnet-5.5` created a connected cedar cabin with an open living/kitchen connection, bedroom, bathroom, south deck, north-rising 12° roofs, south-facing glazing and a separate deck door. It requested and reviewed an exterior image, and its typed geometry assertions passed. This took four model calls, approximately 39.7 seconds and **$0.269348 reported design cost**. The layout includes an en-suite bathroom, which the reply identifies as an assumption; advisory furnishing warnings remain.
+
+A second request widened only the living room's existing south window from 2.3 m to exactly 2.5 m. Comparing the saved scene against a copy with only that width changed matched exactly. The agent reviewed a matching image and finished in two calls, approximately 9.7 seconds and **$0.115868 reported design cost**.
+
+Combined reported design cost was **$0.385216 for six calls**. Two automatic speech outputs also ran; their costs were not recorded by the earlier server instance used for these checks, so this is not a complete total. The updated server now records provider-reported audio costs. Eight paid request counts and the known charges were merged into local usage once. All scripted scenarios used zero-cost injected responses. Private credentials, projects, captures and diagnostic evidence remain excluded from Git.
+
+## Measurements and limits
+
+On this computer's Intel ARL browser renderer, old capture checks took approximately 1.5–2.18 seconds. New cabin captures took 419 ms exterior, 484 ms interior, 445 ms cutaway and 111 ms plan; hillside captures took 510/376/76 ms and the 24-room scene 420/397/115 ms for exterior/cutaway/plan. Geometry changed between these capture fixtures, so these measurements demonstrate the delivery-path improvement rather than a universal rendering speedup.
+
+A separate controlled comparison used identical legacy fixture JSON, camera, lighting, 768 × 576 pixels and DPR 1, with five warmups and 40 completed `gl.render` + `gl.finish` draws. Both versions used the same Intel GPU. These are completed draw timings, **not interactive FPS**.
+
+| Scene                  | Old median / p95 | New median / p95 | Draw calls, old → new | Triangles, old → new |
+| ---------------------- | ---------------- | ---------------- | --------------------- | -------------------- |
+| Cabin, 4 rooms         | 0.6 / 0.7 ms     | 0.5 / 0.7 ms     | 93 → 135              | 26,228 → 72,024      |
+| Hillside, 12 rooms     | 1.5 / 1.9 ms     | 1.2 / 1.6 ms     | 295 → 336             | 30,188 → 75,816      |
+| Larger scene, 24 rooms | 4.0 / 51.5 ms    | 3.7 / 43.1 ms    | 607 → 700             | 32,408 → 78,828      |
+
+The extra geometry adds frames, roof details, furnishings and terrain shaping. Shared-system noise dominates the larger scene's tail latency; the small median differences do not establish a reliable viewport speedup. `npx tsx scripts/benchmark.ts` measured local inspection medians of 0.14/0.92/2.29 ms and material-edit medians of 0.13/0.61/1.29 ms for the cabin/new hillside/24-room fixtures.
+
+The collaborative preview moved between Linux and Mac clients during this work. Hardware was identified for each measurement; cross-machine timings were not combined into a before/after claim. Remote HTTP test tabs used a test-only secure-random UUID shim, while the production app was verified at secure-context localhost. No production origins or system/browser configuration were changed.
+
+The renderer remains an architectural concept viewer: general boolean roof joins, arbitrary wall shapes, construction details and engineering/code compliance are outside the model. Cold Intel shader setup is still slow; live rendering remains available during preparation. Agent images use fast local rendering, not converged path tracing. The reusable design/render services and schemas can support a future MCP adapter; no MCP server is exposed.
+
+---
+
 # Model-budget and background-capture follow-up — September 28, 2026
 
 The reported cabin request exhausted the former six-call budget while refining and reviewing a valid draft. The harness now allows at most 12 model calls and 32 tool calls, supplies the remaining budget before every round, reserves time for final visual review, and stops repeated rounds that make no progress. Advisory furniture warnings no longer invite unnecessary layout changes in the system instructions.

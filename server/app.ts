@@ -88,6 +88,24 @@ export async function createApplication(options: {
     usage.requests++;
     await persistUsage();
   }
+  async function recordAudioCost(cost: number | null) {
+    if (cost === null) return;
+    resetDay();
+    usage.modelCost += cost;
+    await persistUsage();
+  }
+  function audioLifetime(res: express.Response) {
+    const disconnected = new AbortController();
+    const close = () => {
+      if (!res.writableEnded) disconnected.abort();
+    };
+    res.on('close', close);
+    return {
+      signal: AbortSignal.any([disconnected.signal, AbortSignal.timeout(60_000)]),
+      disconnected: () => disconnected.signal.aborted,
+      cleanup: () => res.off('close', close),
+    };
+  }
   const app = express();
   app.disable('x-powered-by');
   app.use('/api', (req, res, next) => {
@@ -181,9 +199,19 @@ export async function createApplication(options: {
     renders.disconnect(req.params.id);
     res.json({ ok: true });
   });
-  app.get('/api/render/jobs', (req, res) =>
-    res.json(renders.poll(runIdSchema.parse(req.query.clientId))),
-  );
+  app.get('/api/render/jobs', async (req, res) => {
+    const clientId = runIdSchema.parse(req.query.clientId);
+    if (req.query.wait !== '1') return res.json(renders.poll(clientId));
+    const afterId = runIdSchema.optional().parse(req.query.afterId);
+    const controller = new AbortController();
+    res.on('close', () => controller.abort());
+    try {
+      const result = await renders.waitForJob(clientId, afterId, controller.signal);
+      if (!controller.signal.aborted) res.json(result);
+    } catch (error) {
+      if (!controller.signal.aborted) throw error;
+    }
+  });
   app.post('/api/render/jobs/:id/result', (req, res) => {
     const input = z
       .object({
@@ -530,16 +558,26 @@ export async function createApplication(options: {
           .status(400)
           .json({ error: 'No audio captured. Hold the microphone button while speaking.' });
       const mediaType = normalizeAudioMediaType(req.headers['content-type'] || '');
-      await chargeRequest();
-      const result = await transcribeAudio({
-        key: config.key,
-        model: config.transcriptionModel,
-        audio: req.body,
-        mediaType,
-        signal: AbortSignal.timeout(60000),
-        fetcher: options.audioFetcher,
-      });
-      res.json({ text: result.text });
+      const lifetime = audioLifetime(res);
+      try {
+        await chargeRequest();
+        lifetime.signal.throwIfAborted();
+        const result = await transcribeAudio({
+          key: config.key,
+          model: config.transcriptionModel,
+          audio: req.body,
+          mediaType,
+          signal: lifetime.signal,
+          fetcher: options.audioFetcher,
+        });
+        // A provider may finish despite cancellation; retain its reported charge.
+        await recordAudioCost(result.cost);
+        if (!lifetime.disconnected()) res.json({ text: result.text });
+      } catch (error) {
+        if (!lifetime.disconnected()) throw error;
+      } finally {
+        lifetime.cleanup();
+      }
     },
   );
   app.post('/api/speak', async (req, res) => {
@@ -549,16 +587,25 @@ export async function createApplication(options: {
         .status(428)
         .json({ error: 'Add a Vercel AI Gateway key in Connections for cloud speech.' });
     const { text } = z.object({ text: z.string().min(1).max(1500) }).parse(req.body);
-    await chargeRequest();
-    const result = await synthesizeSpeech({
-      key: config.key,
-      model: config.speechModel,
-      voice: config.speechVoice,
-      text,
-      signal: AbortSignal.timeout(60000),
-      fetcher: options.audioFetcher,
-    });
-    res.type(result.mediaType).send(result.audio);
+    const lifetime = audioLifetime(res);
+    try {
+      await chargeRequest();
+      lifetime.signal.throwIfAborted();
+      const result = await synthesizeSpeech({
+        key: config.key,
+        model: config.speechModel,
+        voice: config.speechVoice,
+        text,
+        signal: lifetime.signal,
+        fetcher: options.audioFetcher,
+      });
+      await recordAudioCost(result.cost);
+      if (!lifetime.disconnected()) res.type(result.mediaType).send(result.audio);
+    } catch (error) {
+      if (!lifetime.disconnected()) throw error;
+    } finally {
+      lifetime.cleanup();
+    }
   });
   app.use('/api', (_req, res) => res.status(404).json({ error: 'Unknown API route.' }));
   app.use(

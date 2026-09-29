@@ -74,6 +74,7 @@ type Pending = {
 export class RenderBroker {
   private clients = new Map<string, Client>();
   private pending = new Map<string, Pending>();
+  private waiters = new Map<string, () => void>();
   constructor(
     private timeoutMs = 60_000,
     private now: () => number = Date.now,
@@ -92,6 +93,7 @@ export class RenderBroker {
   }
   disconnect(clientId: string) {
     this.clients.delete(clientId);
+    this.waiters.get(clientId)?.();
     for (const pending of [...this.pending.values()])
       if (pending.clientId === clientId)
         this.fail(
@@ -105,6 +107,38 @@ export class RenderBroker {
     if (!client) throw new RenderUnavailable();
     client.lastSeen = this.now();
     return { job: [...this.pending.values()].find((p) => p.clientId === clientId)?.job || null };
+  }
+  /** Wait for a queue change instead of relying on throttled browser timers.
+   * The bounded wait refreshes the client lease even while a capture is running. */
+  async waitForJob(clientId: string, afterId?: string, signal?: AbortSignal, waitMs = 10_000) {
+    signal?.throwIfAborted();
+    const current = this.poll(clientId);
+    if (current.job?.id !== afterId && (current.job || afterId)) return current;
+    if (this.waiters.has(clientId))
+      throw new RenderUnavailable('This renderer already has an active job wait.');
+    return new Promise<{ job: RenderJob | null }>((resolve, reject) => {
+      const cleanup = () => {
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', abort);
+        if (this.waiters.get(clientId) === wake) this.waiters.delete(clientId);
+      };
+      const wake = () => {
+        cleanup();
+        try {
+          resolve(this.poll(clientId));
+        } catch (error) {
+          reject(error);
+        }
+      };
+      const abort = () => {
+        cleanup();
+        reject(signal?.reason || new Error('Render wait cancelled.'));
+      };
+      const timer = setTimeout(wake, Math.min(10_000, Math.max(1, waitMs)));
+      this.waiters.set(clientId, wake);
+      signal?.addEventListener('abort', abort, { once: true });
+      if (signal?.aborted) abort();
+    });
   }
   provider(clientId: string): RenderProvider {
     return (scene, request, signal) => this.render(clientId, scene, request, signal);
@@ -156,6 +190,7 @@ export class RenderBroker {
         },
       };
       this.pending.set(job.id, pending);
+      this.waiters.get(clientId)?.();
       signal?.addEventListener('abort', abort, { once: true });
       if (signal?.aborted) abort();
     });
@@ -171,11 +206,13 @@ export class RenderBroker {
     }
     const capture = validateCapture(pending.job.scene, pending.job.request, result);
     this.pending.delete(jobId);
+    this.waiters.get(clientId)?.();
     pending.cleanup();
     pending.resolve(capture);
   }
   private fail(pending: Pending, error: Error) {
     if (!this.pending.delete(pending.job.id)) return;
+    this.waiters.get(pending.clientId)?.();
     pending.cleanup();
     pending.reject(error);
   }

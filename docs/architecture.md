@@ -15,7 +15,8 @@ flowchart LR
   Check -->|Valid draft| Render[Requested local render]
   Render --> Review[Image in a later model round]
   Review --> Agent
-  Agent --> Finish[Finish: apply, propose, or question]
+  Agent --> Assessment[Request checklist + local assertions]
+  Assessment --> Finish[Finish: apply, propose, or question]
   Finish --> Confirm[Application confirmation rules]
   Confirm --> Commit[Project ID + revision + starting-scene check]
   Commit --> Store[Atomic save + one undo entry]
@@ -29,7 +30,7 @@ Visual review is enabled by default in the browser and stored as a browser prefe
 
 ## Architectural model and selection
 
-`shared/model.ts` keeps version-1 project compatibility. A project has its own identity/name, revision, scene, conversation, alternatives, and undo/redo history. Rooms have stable IDs, purpose, center, elevation, dimensions, four wall types, and optional room/surface palettes. Units are meters: x points east, z south, elevation up.
+`shared/model.ts` keeps version-1 project compatibility. A project has its own identity/name, revision, scene, conversation, alternatives, and undo/redo history. Rooms have stable IDs, purpose, center, elevation, dimensions, four base wall types, optional room/surface palettes, optional roof configuration, and optional dimensioned wall openings. Units are meters: x points east, z south, elevation up.
 
 `DesignSelection` in `shared/selection.ts` is `{ roomId, surface }`, where surface is `room`, `north`, `south`, `east`, `west`, `floor`, or `roof`. Three-dimensional picking, floor-plan controls, and the inspector use this same identity. The harness rejects missing rooms, invalid surfaces, and disagreement between `selection.roomId` and the legacy `selectedRoomId` field. Material precedence is surface → room → house. A whole-room or whole-house palette command clears applicable surface overrides.
 
@@ -40,28 +41,48 @@ Optional `scene.design` metadata contains:
 - **Stair links:** stair ID plus lower and upper landing room IDs.
 - **Requirements:** ID, description, source (`confirmed`, `assumption`, `preference`), and typed rule.
 
-Requirements support connectivity (including whether outdoor routes count), symmetry, locked position/size/height/material, overlook, and freeform intent. Locks record reference geometry/materials. Confirmed geometric violations are errors; assumptions/preferences produce warnings. Intent text informs the model but is not machine-checked. Removing or changing an existing confirmed/assumed requirement in an agent draft requires review, including requirements recorded before rooms exist.
+Requirements support connectivity (including whether outdoor routes count), symmetry, locked position/size/height/material/roof/openings, overlook, and freeform intent. Lock snapshots are engine-owned: roof locks capture resolved defaults/overrides, and opening locks capture resolved apertures and base wall flags, including the opposite face of a shared aperture. Resubmitting a lock cannot rebase its protected snapshot. Confirmed geometric violations are errors; assumptions/preferences produce warnings. Intent text informs the model but is not machine-checked. Removing or changing an existing confirmed/assumed requirement in an agent draft requires review, including requirements recorded before rooms exist.
 
 Missing legacy revisions default to zero; missing `design` means empty metadata. Empty and absent metadata compare equal for no-op detection. Legacy door flags retain centered openings, and aligned legacy passages can contribute to circulation. Explicit commands introduce metadata; room names are not used to guess relationships.
+
+### Roofs
+
+Scene defaults are `roof: 'flat' | 'pitched' | 'single-pitch'`, optional `roofPitch` in degrees, and optional `roofDirection`. A room can override them with `roof: { style, pitch?, direction? }`. `pitched` remains a symmetric gable. For `single-pitch`, direction names the **high edge**, not the downhill edge; for a gable it identifies the slope axis. `Room.height` is the minimum eave above the room floor. Roof rise is additional, and pitch is bounded to 1–60 degrees.
+
+`shared/architecture.ts` provides `effectiveRoof`, `roofRise`, `roofHeightAt`, and `roofMaximumHeight`. The height function accepts world x/z and returns nominal world roof elevation, extending the same plane outside the footprint for overhangs. Render thickness is separate. New configured house roofs default to 20 degrees and north. An old unconfigured `pitched` scene retains its original z-running ridge and rise `min(2.5, width × 0.22)`; loading it does not rewrite its geometry.
+
+`set_roof { style, pitch?, direction?, roomIds? }` edits house defaults when room IDs are omitted, preserving room overrides. With IDs it sets those room roofs. `reset_roof { roomIds }` removes the overrides and restores inheritance. The UI's **House roof default**, **Room roof**, **Apply roof**, and **Use house default** controls use these same commands.
+
+### Dimensioned apertures
+
+`Room.wallOpenings` stores `{ id, side, kind, offset, width, height, sill }` records. Kind is `window`, `door`, or `open`; offset is the center relative to the room center, along world +x for north/south walls and +z for east/west walls. Dimensions and sill are meters above the room floor. Doors/open passages must have sill zero, width at least 0.75 m, and height at least 2 m. Windows never create a circulation edge. Validation checks wall extent, the roof profile at the aperture head, overlapping rectangles, distinct IDs, and shared-wall conflicts. A high wall can support a clerestory that would not fit below the minimum eave on the low wall.
+
+`set_wall_openings { roomId, side, openings }` takes the complete desired standalone set for that side; entries omit `side`. It replaces existing standalone apertures on that physical wall portion, including apertures viewed from their opposite face. It preserves `design.connections` passage doors. An empty list clears standalone apertures and restores a solid base unless a semantic connection remains. `update_room` with a wall flag also replaces that wall's standalone apertures. The UI displays explicit openings in **Windows & doors**, while semantic connected passages are shown separately.
+
+`shared/openings.ts` provides `roomOpenings(scene, roomId, side)`, which returns dimensions plus `source: 'explicit' | 'connection'` and `sourceRoomId`. Each standalone aperture has one stored owner; a matching opposite-face aperture is derived at the adjacent room's local offset/sill. This avoids duplicate geometry records that can drift apart. Openings move with their owning room; anchored resizing preserves their along-wall world center and reports an error if they no longer fit. It does not silently shrink or delete them. Split-level windows can mirror when the complete aperture fits both wall faces; a raised opposite-face doorway also requires a stair relationship.
+
+Legacy whole-wall flags remain the fallback when there are no resolved apertures on that side: `glass` spans the wall, `door` is centered, and `open` removes the wall. Legacy semantic `connection.kind: 'open'` remains full-height per room, regardless of its stored height. An explicit standalone `kind: 'open'` respects its supplied height. Supplying an optional `connectionId` to `connect_rooms` creates or updates that particular passage, allowing multiple distinct doors between the same pair; omitting it retains the original pair-update behavior.
 
 ## Commands and validation
 
 `shared/design.ts` exports Zod schemas, `executeCommands`, `inspectDesign`, `validateDesign`, and `validateDesignChange`. These have no HTTP, provider, browser, or filesystem dependencies. Model tools and the control API generate JSON Schema from the same definitions.
 
-| Operation family         | Commands                                                                   |
-| ------------------------ | -------------------------------------------------------------------------- |
-| Rooms                    | `add_rooms`, `update_room`, `remove_objects`                               |
-| Assemblies and placement | `define_group`, `remove_group`, `move_group`, `attach_room`, `attach_wing` |
-| Dimensions and openings  | `resize_room`, `move_wall`, `connect_rooms`, `disconnect_rooms`            |
-| Appearance and site      | `set_material`, `set_surface_material`, `update_site`, `set_fireplace`     |
-| Levels                   | `add_stairs`, `link_stairs`, `connect_levels`                              |
-| Brief                    | `set_requirement`, `remove_requirement`                                    |
+| Operation family         | Commands                                                                                         |
+| ------------------------ | ------------------------------------------------------------------------------------------------ |
+| Rooms                    | `add_rooms`, `update_room`, `remove_objects`                                                     |
+| Assemblies and placement | `define_group`, `remove_group`, `move_group`, `attach_room`, `attach_wing`                       |
+| Dimensions and openings  | `resize_room`, `move_wall`, `connect_rooms`, `disconnect_rooms`, `set_wall_openings`             |
+| Appearance and site      | `set_roof`, `reset_roof`, `set_material`, `set_surface_material`, `update_site`, `set_fireplace` |
+| Levels                   | `add_stairs`, `link_stairs`, `connect_levels`                                                    |
+| Brief                    | `set_requirement`, `remove_requirement`                                                          |
 
-Attachment aligns a room with a target edge and optionally creates a shared opening. Anchored resizing keeps the requested edge fixed and can move connected assemblies. `move_wall` takes a room ID, wall side, and signed delta: positive moves outward, negative inward, with the opposite wall fixed. Movement preserves groups and updates relevant relationships. These are deterministic editing algorithms, not a general constraint solver. An impossible placement returns a conflict rather than searching arbitrary layouts.
+Attachment aligns a room with a target edge and optionally creates a shared opening. `elevationOffset` is relative to the target floor and defaults to zero; a deliberate split-level attachment uses `connect: false` followed by linked stairs. Anchored resizing keeps the requested edge fixed and can move connected assemblies. `move_wall` takes a room ID, wall side, and signed delta: positive moves outward, negative inward, with the opposite wall fixed. Movement preserves groups and updates relevant relationships. These are deterministic editing algorithms, not a general constraint solver. An impossible placement returns a conflict rather than searching arbitrary layouts.
 
 A batch is atomic on schema, lookup, or command failure: earlier operations from that batch roll back. A syntactically valid batch with geometric conflicts remains in the temporary draft for repair. Validation returns issue codes, severity, affected IDs, and measurements/details. Only valid changed states become previews; unresolved errors prevent commit.
 
-Checks include dimensions, unique IDs, enclosed-volume overlap, opening alignment/extent, room/group references, stair endpoints and landing widths, circulation, and typed requirements. Change validation also rejects broken existing indoor routes, new disconnected interior rooms, and introduced unlinked stairs/misaligned doors. Existing unresolved legacy warnings can remain during unrelated edits. Confirmed outdoor-access requirements may permit actual courtyard routes for named rooms; an intent note alone cannot establish a connection.
+Checks include dimensions, unique IDs, enclosed-volume overlap, opening alignment/extent, room/group references, stair endpoints and landing widths, circulation, and typed requirements. A stair crossing an adjacent wall must have a real aperture at its crossing position, with the flight's full width and 2 m of headroom above the upper landing. A doorway elsewhere on that wall does not satisfy the check. Automatic stairs use the actual sloping roof height at their landing. Change validation also rejects broken existing indoor routes, new disconnected interior rooms, and introduced unlinked stairs/misaligned doors. Existing unresolved legacy warnings can remain during unrelated edits. Confirmed outdoor-access requirements may permit actual courtyard routes for named rooms; an intent note alone cannot establish a connection.
+
+`shared/examples.ts` exports `hillsideHouse()`, used by **Load sample house**. It builds the original brief through the same commands: a double-height living space and central chimney, an upper kitchen platform, a room below the kitchen, symmetric attached upper/lower bedroom and bathroom wings, two courtyards, and four linked flights. Confirmed connectivity, symmetry, and overlook requirements accompany the fixture. Schematic furnishing advisories remain visible. The older `sampleScene()` remains a legacy fixture for compatibility tests.
 
 ### Spatial advisories
 
@@ -77,7 +98,7 @@ Checks include dimensions, unique IDs, enclosed-volume overlap, opening alignmen
 
 These are concept checks, not building-code or accessibility certification. Actual door handing/leaf count, detailed furnishings, structure, irregular walls, and a complete pedestrian path planner are not represented. Advisory warnings do not become hard failures merely because a new design creates them.
 
-The renderer uses explicit opening intervals on both walls and in the floor plan. Each room owns the inward half of its shared wall so opposite faces can have different finishes and be selected independently. Stair links determine slab holes; stacked rooms suppress covered roofs/foundations. Rectangular volumes, conservative stair cutouts, and simplified roof patches remain concept geometry.
+The renderer subtracts explicit aperture rectangles on both walls and in the floor plan. Roof caps are clipped around high apertures too; only `window` apertures receive glass. Each room owns the inward half of its shared wall so opposite faces can have different finishes and be selected independently. Stair links determine slab holes; stacked rooms suppress covered roofs/foundations. Partially covered sloping roofs use flat exposed patches. Rectangular volumes, conservative stair cutouts, roof joins, and terrain/foundation interaction remain concept geometry.
 
 ## Agent tools and bounds
 
@@ -87,7 +108,8 @@ The renderer uses explicit opening intervals on both walls and in the floor plan
 | `apply_operations` | Up to 40 semantic commands in an unsaved draft; exact changes and validation feedback          |
 | `render_view`      | A fresh image of the valid draft, using the connected local render provider                    |
 | `reset_draft`      | Restore the starting scene and clear draft errors/previews                                     |
-| `finish_design`    | Concise reply with `apply`, `propose`, or `question` intent                                    |
+| `review_design`    | Evaluate a request checklist and typed assertions against the current draft                    |
+| `finish_design`    | Concise reply, request assessment, and `apply`, `propose`, or `question` intent                |
 
 `apply` and `propose` require real changes and a valid draft. `question` requires an unchanged draft. Saying “done” without edits cannot bypass these rules. Application confirmation is independent of model intent: removing any room, changing area by more than 35% in an existing house, or changing protected existing requirements triggers review. The model can request review for smaller edits too.
 
@@ -95,11 +117,21 @@ The renderer uses explicit opening intervals on both walls and in the floor plan
 
 The prompt prioritizes confirmed intent, stable IDs, small related edits, geometry inspection, accurate claims, and selection-grounded language. It distinguishes screen-relative directions from world axes. Names, notes, images, and tool content are treated as data.
 
-Default bounds are twelve model calls, thirty-two tool calls, two repair opportunities, three review captures, 6,000 output tokens per response, and a five-minute server timeout. Provider failures, truncation, and responses without tool calls terminate the attempt. Geometry repair and visual review can require extra paid model calls. Local operations and rendering have no provider cost; images sent to the model consume image input tokens. Daily accounting charges every model round, transcription, and speech request. Any unknown model charge makes the reported run total unknown.
+### Request assessment and efficient context
+
+The provider-facing `finish_design` schema requires an assessment: stable request IDs, required/preference priority, fulfilled/partial/unmet/unverified status, evidence, limitations, assumptions, and optional typed checks. `shared/assessment.ts` evaluates room existence/dimensions, resolved roof shape/pitch/direction, wall opening side/count/minimum dimensions, materials, and indoor routes. A failed check cannot remain fulfilled merely because the model says so. Unfulfilled required items or consequential assumptions force confirmation, and the application appends an explicit disclosure to the reply.
+
+`review_design` can evaluate a checklist before finishing. Once reviewed, required priorities, checks, IDs, and consequential assumptions cannot be dropped to manufacture success; they must be repaired or disclosed. Legacy injected in-process model adapters may still omit an assessment when no checklist has been reviewed. Checklist completeness still depends on the model's interpretation of the request: this is not a deterministic natural-language requirements parser, and an unchecked aesthetic claim is labeled a model judgment.
+
+`server/agent-context.ts` removes repeated `scene`/`inspection` payloads from older tool results while retaining call/result pairings, changes, failures, and other evidence. A current authoritative house/brief/validation snapshot replaces the original snapshot before each model call. Image pixels are sent for their review round and then retired from history, retaining hash/view provenance. An exact scene fingerprint plus canonical render request keys a per-run capture cache; a repeated identical view can reuse that local image. Changed geometry or camera/request creates a different key. Reuse does not bypass the later-round visual-review requirement or make image input tokens free.
+
+Successful results include `RunMetrics`: harness elapsed time, model time, tool time, render time, tool/capture/reuse counts, message-context characters, removed duplicate characters, and approximate decoded image bytes sent. Render time is a subset of tool time, so those durations must not be added together. Context counts cover messages, not tool schemas; bytes/characters are not provider token counts. Provider-reported tokens/costs remain in the separate usage object.
+
+Default bounds are twelve model calls, thirty-two tool calls, two repair opportunities, three review captures, 6,000 output tokens per response, and a five-minute server timeout. Provider failures, truncation, and responses without tool calls terminate the attempt. Geometry repair and visual review can require extra paid model calls. Local operations and rendering have no provider cost; images sent to the model consume image input tokens. Daily accounting counts every model round, transcription, and speech request; its `modelCost` field aggregates known design and audio charges. Unknown charges are omitted from that daily sum. Any unknown model charge makes the reported design-run total unknown. Disconnecting an audio request aborts its provider request; a provider that finishes despite cancellation still has its reported cost recorded.
 
 Before every model call, a system message refreshes the remaining model/tool/capture/repair budget, draft status, blocking errors, and visual-review state. In the final three calls it explicitly prioritizes essential repairs, a fresh final capture when needed, then review and finish; optional polishing should stop. This is model guidance, while the call limits and finish validation remain enforced in code. Explicit `maxCalls` overrides remain strict.
 
-A separate guard stops a run before another paid call after three consecutive rounds without progress. Progress means reaching a previously unseen scene fingerprint, reducing the blocking-error count, completing a capture, or receiving a newly captured scene image for review. Repeated inspections, unchanged edits, and revisiting an earlier draft do not reset the counter by themselves. A valid finish returns immediately, including a clarification with an unchanged empty draft; it does not trigger the stall guard. A stalled or exhausted run leaves saved geometry unchanged.
+A separate guard stops a run before another paid call after three consecutive rounds without progress. Progress means reaching a previously unseen scene fingerprint, reducing the blocking-error count, completing a new capture, or receiving a new scene image for review. Repeated inspections, unchanged edits, repeated cached captures of an already reviewed scene, and revisiting an earlier draft do not reset the counter by themselves. A valid finish returns immediately, including a clarification with an unchanged empty draft; it does not trigger the stall guard. A stalled or exhausted run leaves saved geometry unchanged.
 
 One agent run or alternative-generation request is active per server. Duplicate run IDs are rejected. The UI polls progress and can cancel through an abort signal; disconnecting a request also cancels it. Failure/cancellation discards its draft without changing saved geometry. Messages and usage accounting may still be saved.
 
@@ -115,9 +147,11 @@ type RenderProvider = (
 ) => Promise<RenderCaptureResult>;
 ```
 
-`RenderBroker` in `server/render-service.ts` implements this through a connected browser. `src/useRenderBridge.ts` registers a client and polls jobs, maintaining a 15-second lease. `src/RenderCapture.tsx` renders separately from the user viewport: 3D captures reuse `SceneView` architecture/environment in an offscreen 768×576 canvas; plan captures rasterize the shared floor-plan SVG. Captures do not move the user's camera or edit the project.
+`RenderBroker` in `server/render-service.ts` implements this through a connected browser. `src/useRenderBridge.ts` registers a client and maintains a 15-second lease through bounded long polling. `GET /api/render/jobs?clientId=…&wait=1&afterId=…` waits up to ten seconds or returns immediately when the pending job changes; the browser immediately starts the next wait. `afterId` prevents redelivering the currently running capture as a new job. Disconnect/cancellation releases the wait, and one active wait is permitted per client. This avoids relying on a browser interval to notice new work in a background tab. Plain polling remains available without `wait=1`.
 
-The offscreen 3D canvas uses a fixed-size React Three Fiber root with automatic frames disabled. Two timer-driven renders prepare and capture the image without waiting for `requestAnimationFrame` or `ResizeObserver`; each capture releases its root when finished.
+`src/RenderCapture.tsx` renders separately from the user viewport: 3D captures reuse `SceneView` architecture/environment in an offscreen 768×576 canvas; plan captures rasterize the shared floor-plan SVG. Captures do not move the user's camera or edit the project.
+
+The offscreen 3D canvas uses a fixed-size React Three Fiber root with automatic frames disabled. `captureAfterRender` schedules two explicit draws through `MessageChannel` tasks (a zero-delay timer is the fallback), then captures pixels without waiting for `requestAnimationFrame` or `ResizeObserver`. Context loss, no draw calls, and transparent/empty image data fail the capture. Each capture releases its root when finished; the browser must still be running and able to execute tasks.
 
 A `RenderJob` contains `id`, immutable `scene`, `sceneHash`, and `request`. The result contains a PNG/JPEG data URL, dimensions, camera position/target, scene hash, and view. The broker checks job ownership and validates the returned metadata against the requested scene, view, and deterministic camera. Expired, disconnected, or cancelled jobs cannot satisfy a later request. The broker timeout is 60 seconds; the browser capture has its own shorter timeout. Render data is transient unless it becomes a saved alternative thumbnail.
 
@@ -167,12 +201,12 @@ Other local files hold connections, daily usage, and diagnostic run summaries. S
 
 Normal `POST /api/agent` requests require `projectId`, `baseRevision`, `scene`, and `messages`; a UUID `runId` and `context` are optional. Context accepts selection, view/camera, and `{renderClientId, allowVisualReview}`. Compatibility fields `selectedRoomId` and an initial image remain accepted, but the current UI sends no initial screenshot. `previewOnly: true` permits a supplied synthetic scene without project identity or a committable draft. `GET /api/agent/runs/:id` exposes progress; `POST /api/agent/runs/:id/cancel` aborts an active run.
 
-| Rendering endpoint                 | Input / result                                 |
-| ---------------------------------- | ---------------------------------------------- |
-| `POST /api/render/clients`         | `{clientId}` registration                      |
-| `GET /api/render/jobs?clientId=…`  | Lease heartbeat and `{job: RenderJob \| null}` |
-| `POST /api/render/jobs/:id/result` | `{clientId, result}` or `{clientId, error}`    |
-| `DELETE /api/render/clients/:id`   | Disconnect and cancel outstanding captures     |
+| Rendering endpoint                                 | Input / result                                                                         |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `POST /api/render/clients`                         | `{clientId}` registration                                                              |
+| `GET /api/render/jobs?clientId=…&wait=1&afterId=…` | Bounded job wait/lease heartbeat and `{job: RenderJob \| null}`; optional wait/afterId |
+| `POST /api/render/jobs/:id/result`                 | `{clientId, result}` or `{clientId, error}`                                            |
+| `DELETE /api/render/clients/:id`                   | Disconnect and cancel outstanding captures                                             |
 
 | Alternatives endpoint             | Input / result                                                                                     |
 | --------------------------------- | -------------------------------------------------------------------------------------------------- |
@@ -186,5 +220,9 @@ A future MCP adapter can expose project discovery/opening, inspection, semantic 
 ## Verification
 
 Unit and mocked integration tests cover semantic edits, selection/surface materials, spatial assumptions, visual evidence freshness, broker ownership/cancellation, alternative distinctness and acceptance, project migration/isolation, save races, and rendering geometry. HTTP tests run an isolated loopback application with injected models and temporary storage. They make no paid provider requests.
+
+`scripts/scenario-server.ts` is an explicit no-cloud entry point for browser scenarios. Run `SCENARIO_RUN=manual-check SCENARIO_PORT=5186 npx tsx scripts/scenario-server.ts`; it binds to loopback and uses `.data/verification/manual-check`. It does not load `.env`. Model turns and audio adapters are injected, while the application, storage, geometry, validation, renderer, and HTTP lifecycle remain real. Its verification-only endpoints queue scripted turns (`POST /__verification/turns`), reset the isolated active fixture (`POST /__verification/reset`), or request a capture (`POST /__verification/render`). Unqueued model calls fail; the audio adapter returns configured text and silent WAV data, so it does not test voice quality. These endpoints are absent from the production entry point.
+
+`npx tsx scripts/benchmark.ts` warms the local engine and reports median/p95 inspection, material-edit, and scene-fingerprint times for the cabin, hillside, and stress fixtures in `scripts/scenarios.ts`. It uses no cloud calls or browser/GPU rendering. These numerical measurements do not describe complete model, capture, speech, or user-interaction latency. Verification outcomes and measured results are recorded separately from this contract documentation.
 
 `npm run verify:gateway -- --live` exercises Gateway audio and preview-only design. `npm run verify:design -- --live --case selected` checks selected-room material editing; `attach`, `empty`, `resize`, and `all` cover additional synthetic scenarios. These paid scripts use numerical-only previews, report request usage, and verify that the saved project stays unchanged. Live editing, visual-review, and alternative-selection checks should use a separate `TERRAIN_DATA_DIR` and an attached browser to preserve the user's working library.

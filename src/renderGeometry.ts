@@ -1,5 +1,7 @@
 import type { Room, Scene, Side, Stair } from '../shared/model';
 import { getDesign, oppositeSide, roomOpenings } from '../shared/design';
+import { sharedBoundary } from '../shared/geometry';
+import { effectiveRoof, roofHeightAt } from '../shared/architecture';
 import { stairPlanFootprint } from '../shared/spatial';
 
 export type Rect = { minX: number; minZ: number; maxX: number; maxZ: number };
@@ -74,7 +76,14 @@ function rawWallRects(scene: Scene, room: Room, side: Side): Rect[] {
   const openings = explicit.length
     ? explicit
     : room[side] === 'door'
-      ? [{ offset: 0, width: Math.min(1.3, axis.length), height: Math.min(2.4, room.height) }]
+      ? [
+          {
+            offset: 0,
+            width: Math.min(1.3, axis.length),
+            height: Math.min(2.4, room.height),
+            sill: 0,
+          },
+        ]
       : [];
   return subtractRectangles(
     {
@@ -86,8 +95,8 @@ function rawWallRects(scene: Scene, room: Room, side: Side): Rect[] {
     openings.map((opening) => ({
       minX: axis.center + opening.offset - opening.width / 2,
       maxX: axis.center + opening.offset + opening.width / 2,
-      minZ: room.elevation,
-      maxZ: room.elevation + opening.height,
+      minZ: room.elevation + opening.sill,
+      maxZ: room.elevation + opening.sill + opening.height,
     })),
   );
 }
@@ -115,7 +124,25 @@ export function wallPanels(scene: Scene, room: Room, side: Side, deduplicate = t
 }
 
 export function roomSlabs(scene: Scene, room: Room) {
-  const roofBounds = roomFootprint(room, 0.325);
+  const roofBounds = roomFootprint(room, 0.3);
+  const seamCuts = scene.rooms.flatMap((other) => {
+    if (other.id === room.id || ['terrace', 'courtyard'].includes(other.kind)) return [];
+    const shared = sharedBoundary(room, other);
+    if (!shared) return [];
+    const axis = wallAxis(room, shared.sideA);
+    const joins = [shared.start, shared.center, shared.end].every((coordinate) => {
+      const x = axis.horizontal ? coordinate : axis.boundary;
+      const z = axis.horizontal ? axis.boundary : coordinate;
+      return Math.abs(roofHeightAt(scene, room, x, z) - roofHeightAt(scene, other, x, z)) < 0.04;
+    });
+    if (!joins) return [];
+    const cut = roomFootprint(other, 0.3);
+    if (shared.sideA === 'north') cut.maxZ = axis.boundary;
+    if (shared.sideA === 'south') cut.minZ = axis.boundary;
+    if (shared.sideA === 'east') cut.minX = axis.boundary;
+    if (shared.sideA === 'west') cut.maxX = axis.boundary;
+    return [cut];
+  });
   const links = getDesign(scene).stairLinks;
   const holes = scene.stairs
     .filter((stair) =>
@@ -143,7 +170,7 @@ export function roomSlabs(scene: Scene, room: Room) {
   return {
     floor: subtractRectangles(roomFootprint(room, 0.08), holes),
     foundation: subtractRectangles(roomFootprint(room), [...holes, ...lowerRooms]),
-    roof: subtractRectangles(roofBounds, [...upperRooms, ...ceilingHoles]),
+    roof: subtractRectangles(roofBounds, [...upperRooms, ...ceilingHoles, ...seamCuts]),
     // A pitched prism cannot represent partial shared roofs. Use flat exposed
     // patches for stacked rooms rather than placing a roof inside the room above.
     roofClipped: [...upperRooms, ...ceilingHoles].some(
@@ -152,4 +179,71 @@ export function roomSlabs(scene: Scene, room: Room) {
         Math.min(roofBounds.maxZ, cut.maxZ) - Math.max(roofBounds.minZ, cut.minZ) > EPSILON,
     ),
   };
+}
+
+/** Roof patches are split on the ridge. Their four corners therefore always
+ * lie on one plane, including mono-pitch eaves and overhangs. */
+export function roofPatches(scene: Scene, room: Room): Rect[] {
+  const slabs = roomSlabs(scene, room);
+  if (slabs.roofClipped || effectiveRoof(scene, room).style !== 'pitched') return slabs.roof;
+  const northSouth = ['north', 'south'].includes(effectiveRoof(scene, room).direction);
+  return slabs.roof.flatMap((rect) =>
+    northSouth
+      ? room.z > rect.minZ && room.z < rect.maxZ
+        ? [
+            { ...rect, maxZ: room.z },
+            { ...rect, minZ: room.z },
+          ]
+        : [rect]
+      : room.x > rect.minX && room.x < rect.maxX
+        ? [
+            { ...rect, maxX: room.x },
+            { ...rect, minX: room.x },
+          ]
+        : [rect],
+  );
+}
+
+/** Wall-space upper profile; the minimum eave remains the room's usable height. */
+export function wallTopProfile(scene: Scene, room: Room, side: Side): [number, number][] {
+  if (
+    roomSlabs(scene, room).roofClipped ||
+    (room[side] === 'open' && !roomOpenings(scene, room.id, side).length)
+  )
+    return [];
+  const axis = wallAxis(room, side);
+  const roof = effectiveRoof(scene, room);
+  if (roof.style === 'flat') return [];
+  const offsets = [-axis.length / 2, axis.length / 2];
+  if (roof.style === 'pitched' && axis.horizontal !== ['north', 'south'].includes(roof.direction))
+    offsets.splice(1, 0, 0);
+  return offsets.map((offset) => [
+    offset,
+    roofHeightAt(
+      scene,
+      room,
+      axis.horizontal ? room.x + offset : axis.boundary,
+      axis.horizontal ? axis.boundary : room.z + offset,
+    ) - room.elevation,
+  ]);
+}
+
+export function naturalGroundHeight(x: number, z: number, slope: number) {
+  return -0.38 - slope * z + Math.sin(x * 0.065) * Math.cos(z * 0.06) * 0.45;
+}
+
+/** Cut into the hill beneath occupied footprints, with a soft excavation apron.
+ * Never raise terrain through lower rooms or their floor slabs. */
+export function terrainHeight(scene: Scene, x: number, z: number) {
+  let height = naturalGroundHeight(x, z, scene.slope);
+  for (const room of scene.rooms) {
+    const dx = Math.max(0, Math.abs(x - room.x) - room.width / 2);
+    const dz = Math.max(0, Math.abs(z - room.z) - room.depth / 2);
+    const distance = Math.hypot(dx, dz);
+    if (distance >= 2) continue;
+    const mix = 1 - Math.min(1, distance / 2);
+    const smooth = mix * mix * (3 - 2 * mix);
+    height = Math.min(height, height + (room.elevation - 0.3 - height) * smooth);
+  }
+  return height;
 }
