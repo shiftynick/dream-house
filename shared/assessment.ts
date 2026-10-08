@@ -7,11 +7,17 @@ import { roomFurniture } from './furniture.ts';
 import { furnitureBlockingCodes } from './furniture-layout.ts';
 import { inspectRoomFurniture } from './spatial.ts';
 import { preservationAssertionSchemas, evaluatePreservation } from './preservation.ts';
+import {
+  qualityAssertionSchemas,
+  isQualityAssertion,
+  evaluateQualityAssertion,
+} from './design-quality.ts';
 
 const id = z.string().min(1).max(60);
 const tolerance = z.number().finite().min(0).max(0.5).default(0.01);
 export const designAssertionSchema = z.discriminatedUnion('kind', [
   ...preservationAssertionSchemas,
+  ...qualityAssertionSchemas,
   z
     .object({
       kind: z.literal('opening_item'),
@@ -148,6 +154,7 @@ export function evaluateDesignAssessment(
 ): EvaluatedAssessment {
   const inspection = inspectDesign(scene);
   const check = (assertion: z.infer<typeof designAssertionSchema>): AssertionResult => {
+    if (isQualityAssertion(assertion)) return evaluateQualityAssertion(scene, assertion);
     if (
       assertion.kind === 'unchanged_room' ||
       assertion.kind === 'unchanged_surface' ||
@@ -303,7 +310,10 @@ export function evaluateDesignAssessment(
         status:
           failed.length && requirement.status === 'fulfilled' ? 'partial' : requirement.status,
         limitation: failed.length
-          ? failed.map((result) => result.reason).join(' ')
+          ? failed
+              .map((result) => result.reason)
+              .join(' ')
+              .slice(0, 360)
           : requirement.limitation,
         verification: results.length ? 'geometry' : 'model',
         results,

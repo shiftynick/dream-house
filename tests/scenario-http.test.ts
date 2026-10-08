@@ -7,8 +7,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { createApplication } from '../server/app.ts';
 import type { AgentModel, ModelTurn } from '../server/agent.ts';
+import { designPlanSchema, planAssessment } from '../server/design-planning.ts';
 import { ProjectStore } from '../server/storage.ts';
-import { newProject, redo, undo, type Project } from '../shared/model.ts';
+import { newProject, makeRoom, redo, undo, type Project } from '../shared/model.ts';
 import { renderCamera, type RenderJob } from '../shared/render.ts';
 import { executeCommands } from '../shared/design.ts';
 import { cabinOperations } from '../scripts/scenarios.ts';
@@ -64,6 +65,49 @@ const assessment = {
     },
   ],
 };
+const cabinPlan = designPlanSchema.parse({
+  intent: 'Complete the requested connected cabin with a coherent cedar scheme and real windows.',
+  roomProgram: [
+    {
+      roomId: 'living',
+      name: 'Living and kitchen',
+      kind: 'living',
+      purpose: 'Gathering and cooking',
+    },
+    { roomId: 'bedroom', name: 'Bedroom', kind: 'bedroom', purpose: 'Sleeping' },
+    { roomId: 'bathroom', name: 'Bathroom', kind: 'bathroom', purpose: 'Bathing' },
+    { roomId: 'deck', name: 'South deck', kind: 'terrace', purpose: 'Outdoor gathering' },
+  ],
+  materialStrategy: {
+    description: 'Coordinated cedar walls and roof.',
+    checks: [
+      {
+        kind: 'material_composition',
+        surfaces: ['exterior-walls', 'roof'],
+        allowedPalettes: ['cedar'],
+        maxDistinct: 1,
+      },
+    ],
+  },
+  fenestration: {
+    description: 'Real occupied-room exterior windows.',
+    roomIds: ['living', 'bedroom'],
+  },
+  features: assessment.requirements.map((item) => ({
+    id: item.id,
+    request: item.request,
+    checks: item.checks,
+  })),
+  reviewViews: ['exterior', 'plan'],
+});
+const cabinAssessment = {
+  ...planAssessment(cabinPlan),
+  requirements: planAssessment(cabinPlan).requirements.map((item) => ({
+    ...item,
+    status: 'fulfilled',
+    evidence: 'Checked.',
+  })),
+};
 let sequence = 0;
 function turn(calls: Array<[string, unknown]>): ModelTurn {
   return {
@@ -86,15 +130,54 @@ function deferred<T>() {
 }
 async function fixture(
   t: TestContext,
-  options: { modelClient?: AgentModel; audioFetcher?: typeof fetch } = {},
+  options: { modelClient?: AgentModel; audioFetcher?: typeof fetch; seedLiving?: boolean } = {},
 ) {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'terrain-scenario-http-'));
+  const { seedLiving, ...applicationOptions } = options;
+  // These existing-house lifecycle cases remain focused edits; the empty-site
+  // creation case below exercises the mandatory plan and separate critic.
+  const modelClient = applicationOptions.modelClient;
   const application = await createApplication({
     directory,
     env: { AI_GATEWAY_API_KEY: 'synthetic-test-only' },
-    ...options,
+    ...applicationOptions,
+    ...(seedLiving && modelClient
+      ? {
+          modelClient: {
+            async complete(...args: Parameters<AgentModel['complete']>) {
+              const response = await modelClient.complete(...args);
+              for (const call of response.calls) {
+                if (call.function.name !== 'apply_operations') continue;
+                const input = JSON.parse(call.function.arguments);
+                input.operations = input.operations.map((operation: any) =>
+                  operation.type === 'add_rooms'
+                    ? {
+                        ...operation,
+                        rooms: operation.rooms.filter((room: any) => room.id !== 'living'),
+                      }
+                    : operation,
+                );
+                call.function.arguments = JSON.stringify(input);
+              }
+              return response;
+            },
+          },
+        }
+      : {}),
   });
-  const project = await application.store.save(newProject());
+  const initial = newProject();
+  if (seedLiving)
+    initial.scene.rooms = [
+      makeRoom({
+        id: 'living',
+        name: 'Living and kitchen',
+        kind: 'living',
+        width: 8,
+        depth: 6,
+        height: 3.1,
+      }),
+    ];
+  const project = await application.store.save(initial);
   const server = application.app.listen(0, '127.0.0.1');
   await new Promise<void>((resolve) => server.once('listening', resolve));
   const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -132,14 +215,37 @@ test(
     let round = 0;
     const app = await fixture(t, {
       modelClient: {
-        async complete(history) {
-          round++;
-          if (round === 1) return turn([['apply_operations', { operations: cabinOperations() }]]);
-          if (round === 2)
+        async complete(history, _signal, tools) {
+          if (tools?.includes('submit_design_critique'))
             return turn([
-              ['review_design', assessment],
-              ['render_view', { view: 'exterior', angle: 'southeast' }],
+              [
+                'submit_design_critique',
+                {
+                  intentReview: {
+                    status: 'adequate',
+                    evidence: 'The requested cabin program, roof and glazing are complete.',
+                    missingObjectives: [],
+                  },
+                  captureIds: ['capture-1', 'capture-2'],
+                  observations: cabinAssessment.requirements.map((item) => ({
+                    objectiveId: item.id,
+                    status: 'satisfactory',
+                    evidence: 'Checked against current geometry and views.',
+                  })),
+                  limitations: [],
+                },
+              ],
             ]);
+          round++;
+          if (round === 1) return turn([['plan_design', cabinPlan]]);
+          if (round === 2) return turn([['apply_operations', { operations: cabinOperations() }]]);
+          if (round === 3)
+            return turn([
+              ['review_design', cabinAssessment],
+              ['render_view', { view: 'exterior', angle: 'southeast' }],
+              ['render_view', { view: 'plan' }],
+            ]);
+          if (round === 4) return turn([['critique_design', {}]]);
           assert.ok(
             history.some(
               (message) =>
@@ -155,10 +261,10 @@ test(
                 mode: 'apply',
                 reply:
                   'The cabin has a single-pitch roof, south-facing windows, and connected sleeping and bathroom spaces.',
-                assessment,
+                assessment: cabinAssessment,
                 visualReview: {
                   status: 'passed',
-                  captureIds: ['capture-1'],
+                  captureIds: ['capture-1', 'capture-2'],
                   observations: [
                     'The supplied exterior color view shows the cabin roof and coordinated wall materials.',
                   ],
@@ -177,26 +283,30 @@ test(
       'POST',
       app.agentInput({ context: { allowVisualReview: true, renderClientId: clientId } }),
     );
-    const job = (await listening).body.job as RenderJob;
-    assert.equal(job.scene.roof, 'single-pitch');
-    const { position, target } = renderCamera(job.scene, job.request);
-    const submitted = await app.http(`/api/render/jobs/${job.id}/result`, 'POST', {
-      clientId,
-      result: {
-        image: 'data:image/png;base64,YWJj',
-        width: 768,
-        height: 576,
-        view: job.request.view,
-        sceneHash: job.sceneHash,
-        camera: { position, target },
-      },
-    });
-    assert.equal(submitted.status, 200);
+    let nextJob = listening;
+    for (let index = 0; index < 2; index++) {
+      const job = (await nextJob).body.job as RenderJob;
+      assert.equal(job.scene.roof, 'single-pitch');
+      const { position, target } = renderCamera(job.scene, job.request);
+      const submitted = await app.http(`/api/render/jobs/${job.id}/result`, 'POST', {
+        clientId,
+        result: {
+          image: 'data:image/png;base64,YWJj',
+          width: 768,
+          height: 576,
+          view: job.request.view,
+          sceneHash: job.sceneHash,
+          camera: { position, target },
+        },
+      });
+      assert.equal(submitted.status, 200);
+      if (index === 0) nextJob = app.http(`/api/render/jobs?clientId=${clientId}&wait=1`);
+    }
     const result = await run;
     assert.equal(result.status, 200);
     assert.equal(result.body.needsConfirmation, false);
     assert.equal(result.body.usage.cost, 0);
-    assert.equal(result.body.metrics.captures, 1);
+    assert.equal(result.body.metrics.captures, 2);
     assert.ok(
       result.body.assessment.requirements.every(
         (item: { status: string }) => item.status === 'fulfilled',
@@ -231,8 +341,8 @@ test(
     const status = await app.http('/api/status');
     assert.equal(
       status.body.usage.requests,
-      3,
-      'only the three simulated model turns consume request slots',
+      6,
+      'five builder turns and the separate critic consume request slots',
     );
     assert.equal(status.body.usage.modelCost, 0);
   },
@@ -244,6 +354,7 @@ test(
   async (t) => {
     let round = 0;
     const app = await fixture(t, {
+      seedLiving: true,
       modelClient: {
         async complete() {
           if (++round === 1)
@@ -284,6 +395,7 @@ test(
   async (t) => {
     let round = 0;
     const app = await fixture(t, {
+      seedLiving: true,
       modelClient: {
         async complete() {
           if (++round === 1) return turn([['apply_operations', { operations: cabinOperations() }]]);
@@ -463,6 +575,7 @@ test(
   async (t) => {
     let round = 0;
     const app = await fixture(t, {
+      seedLiving: true,
       modelClient: {
         async complete() {
           round++;
@@ -535,6 +648,7 @@ test(
   async (t) => {
     let round = 0;
     const app = await fixture(t, {
+      seedLiving: true,
       modelClient: {
         async complete(history) {
           round++;

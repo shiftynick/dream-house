@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { gatewayAgentModel, runAgent, type ModelTurn, type ModelMessage } from '../server/agent.ts';
 import { DesignDraft } from '../shared/draft.ts';
 import { emptyScene, makeRoom } from '../shared/model.ts';
+import { designPlanSchema } from '../server/design-planning.ts';
 
 const prompt =
   'I would like you to build a grand lodge demonstrating the maximum awesomeness of your capabilities.';
@@ -30,6 +31,50 @@ const finish = () =>
   turn('finish_design', { mode: 'propose', reply: 'The grand lodge core is ready.' });
 const cedar = () =>
   turn('apply_operations', { operations: [{ type: 'set_material', palette: 'cedar' }] });
+const singleRoomPlan = (room: (typeof house.rooms)[number]) =>
+  designPlanSchema.parse({
+    intent: 'Create the initial requested space.',
+    scope: 'focused',
+    roomProgram: [
+      { roomId: room.id, name: room.name, kind: room.kind, purpose: 'Initial core space' },
+    ],
+    reviewViews: ['exterior'],
+  });
+function criticTurn(history: ModelMessage[]) {
+  const input = JSON.parse(String(history[1].content));
+  return turn('submit_design_critique', {
+    intentReview: {
+      status: 'unverified',
+      evidence: 'Geometry is checked, visual intent remains unverified with images disabled.',
+    },
+    captureIds: [],
+    observations: input.objectives.requirements.map((item: any) => ({
+      objectiveId: item.id,
+      status: item.id === 'plan-intent' ? 'unverified' : 'satisfactory',
+      evidence: 'Checked the current geometry.',
+      ...(item.id === 'plan-intent'
+        ? { constraint: 'visibility', limitation: 'No images were supplied for visual judgment.' }
+        : {}),
+    })),
+  });
+}
+function plannedFinish(history: ModelMessage[]) {
+  const assessment = history
+    .filter((message) => message.role === 'tool')
+    .map((message) => JSON.parse(String(message.content)))
+    .reverse()
+    .find((result) => result.critique)?.critique.assessment;
+  return turn('finish_design', {
+    mode: 'propose',
+    reply: 'The core is ready for review.',
+    assessment: {
+      requirements: assessment.requirements.map(
+        ({ verification: _v, results: _r, ...item }: any) => item,
+      ),
+      assumptions: assessment.assumptions,
+    },
+  });
+}
 
 test('truncation discards complete-looking calls and prose, preserves the original request, then builds a fresh core', async () => {
   const discarded = turn(
@@ -44,6 +89,7 @@ test('truncation discards complete-looking calls and prose, preserves the origin
   const result = await runAgent({
     scene: emptyScene,
     messages,
+    maxCalls: 6,
     beforeModelCall: async () => {
       admitted++;
     },
@@ -51,8 +97,9 @@ test('truncation discards complete-looking calls and prose, preserves the origin
       accounted++;
     },
     client: {
-      async complete(history) {
+      async complete(history, _signal, tools) {
         calls++;
+        if (tools?.includes('submit_design_critique')) return criticTurn(history);
         if (calls === 1) return discarded;
         if (calls === 2) {
           assert.ok(history.some((message) => message.content === prompt));
@@ -65,11 +112,14 @@ test('truncation discards complete-looking calls and prose, preserves the origin
             ),
           );
           assert.ok(history.every((message) => message.tool_call_id !== discarded.calls[0].id));
+          return turn('plan_design', singleRoomPlan(house.rooms[0]));
+        }
+        if (calls === 3)
           return turn('apply_operations', {
             operations: [{ type: 'add_rooms', rooms: house.rooms }],
           });
-        }
-        return finish();
+        if (calls === 4) return turn('critique_design', {});
+        return plannedFinish(history);
       },
     },
   });
@@ -77,13 +127,13 @@ test('truncation discards complete-looking calls and prose, preserves the origin
     result.scene?.rooms.map((room) => room.id),
     ['hall'],
   );
-  assert.equal(result.usage.calls, 3);
-  assert.equal(result.usage.outputTokens, 6040);
-  assert.equal(result.usage.inputTokens, 300);
-  assert.equal(result.usage.cost, 0.03);
-  assert.equal(admitted, 3);
-  assert.equal(accounted, 3);
-  assert.equal(result.metrics?.toolCalls, 2);
+  assert.equal(result.usage.calls, 6);
+  assert.equal(result.usage.outputTokens, 6100);
+  assert.equal(result.usage.inputTokens, 600);
+  assert.ok(Math.abs(result.usage.cost! - 0.06) < 1e-8);
+  assert.equal(admitted, 6);
+  assert.equal(accounted, 6);
+  assert.equal(result.metrics?.toolCalls, 5);
   assert.equal(emptyScene.rooms.length, 0);
 });
 
@@ -266,13 +316,23 @@ test('immutable starting-room summary survives creation, inspection and truncati
       roomCount: startingScene.rooms.length,
       rooms: startingScene.rooms.map(({ id, name }) => ({ id, name })),
     };
+    const newRoom = makeRoom({
+      id: 'annex',
+      name: 'New dining wing',
+      x: expected.roomCount ? 8 : 0,
+      width: 6,
+      depth: 8,
+    });
     let calls = 0;
     const result = await runAgent({
       scene: startingScene,
       messages,
+      maxCalls: expected.roomCount ? 12 : 7,
       client: {
-        async complete(history) {
+        async complete(history, _signal, tools) {
           calls++;
+          if (tools?.includes('submit_design_critique')) return criticTurn(history);
+          const stage = calls - (expected.roomCount ? 0 : 1);
           const snapshot = String(history[1].content);
           const baseline = snapshot.match(
             /Request starting-room summary \(immutable baseline\):\n([^\n]+)/,
@@ -281,19 +341,13 @@ test('immutable starting-room summary survives creation, inspection and truncati
           assert.deepEqual(JSON.parse(baseline[1]), expected);
           if (!expected.roomCount)
             assert.match(snapshot, /began on an empty site.*newly created during this run/);
-          if (calls === 1) {
+          if (!expected.roomCount && calls === 1)
+            return turn('plan_design', singleRoomPlan(newRoom));
+          if (stage === 1) {
             const operations: unknown[] = [
               {
                 type: 'add_rooms',
-                rooms: [
-                  makeRoom({
-                    id: 'annex',
-                    name: 'New dining wing',
-                    x: expected.roomCount ? 8 : 0,
-                    width: 6,
-                    depth: 8,
-                  }),
-                ],
+                rooms: [newRoom],
               },
             ];
             if (expected.roomCount)
@@ -310,13 +364,14 @@ test('immutable starting-room summary survives creation, inspection and truncati
           const currentSnapshot = snapshot.split('\n')[1];
           assert.match(currentSnapshot, /"id":"annex"/);
           if (expected.roomCount) assert.match(currentSnapshot, /Renamed grand hall/);
-          if (calls === 2) return turn('inspect_design', {});
-          if (calls === 3) return { ...finish(), truncated: true };
-          return finish();
+          if (stage === 2) return turn('inspect_design', {});
+          if (stage === 3) return { ...finish(), truncated: true };
+          if (!expected.roomCount && stage === 4) return turn('critique_design', {});
+          return expected.roomCount ? finish() : plannedFinish(history);
         },
       },
     });
-    assert.equal(calls, 4);
+    assert.equal(calls, expected.roomCount ? 4 : 7);
     assert.equal(result.scene?.rooms.length, expected.roomCount + 1);
     assert.deepEqual(
       startingScene.rooms.map(({ id, name }) => ({ id, name })),

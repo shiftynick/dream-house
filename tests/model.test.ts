@@ -102,8 +102,10 @@ test('agent gateway adapter sends documented tool contracts and preserves usage'
       body.tools.map((tool: { function: { name: string } }) => tool.function.name).sort(),
       [
         'apply_operations',
+        'critique_design',
         'finish_design',
         'inspect_design',
+        'plan_design',
         'render_view',
         'reset_draft',
         'review_design',

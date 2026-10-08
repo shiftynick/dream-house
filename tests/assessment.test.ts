@@ -185,3 +185,22 @@ test('assessment rejects duplicate IDs and unbounded numerical tolerances', () =
     ]),
   );
 });
+
+test('many failed checks bound the generated limitation while retaining every complete reason', () => {
+  const checks = Array.from({ length: 8 }, (_, index) => ({
+    kind: 'opening_item',
+    roomId: `missing-${index}-${'x'.repeat(45)}`,
+    side: 'north',
+    openingId: 'window',
+  }));
+  const result = evaluateDesignAssessment(scene, assessment(checks));
+  const requirement = result.requirements[0];
+  assert.equal(requirement.status, 'partial');
+  assert.equal(requirement.results.length, 8);
+  assert.ok(requirement.results.every((item) => !item.passed));
+  const completeReasons = requirement.results.map((item) => item.reason).join(' ');
+  assert.ok(completeReasons.length > 360);
+  assert.equal(requirement.limitation, completeReasons.slice(0, 360));
+  const { verification: _verification, results: _results, ...summary } = requirement;
+  assert.ok(designAssessmentSchema.safeParse({ requirements: [summary], assumptions: [] }).success);
+});
