@@ -14,7 +14,7 @@ import {
   naturalGroundHeight,
 } from '../src/renderGeometry';
 import { slabGeometry, wallCapGeometry } from '../src/renderMeshes';
-import { renderingBudget, visualSceneKey } from '../src/renderPerformance';
+import { rasterBudget, RenderActivity, visualSceneKey } from '../src/renderPerformance';
 import { FloorPlanSvg } from '../src/SceneView';
 
 test('multiple raised windows retain sills and a separate door stays open at floor level', () => {
@@ -235,12 +235,12 @@ test('hillside excavation stays below floor slabs without raising distant terrai
   );
 });
 
-test('refinement pixel budget bounds high-DPI work and ignores nonvisual conversation changes', () => {
+test('raster pixel budget bounds high-DPI work and ignores nonvisual conversation changes', () => {
   for (const gpu of ['Intel Graphics', 'NVIDIA RTX 5070', 'llvmpipe'])
     for (const dpr of [1, 1.5, 2]) {
-      const budget = renderingBudget(gpu, 3840, 2160, dpr);
-      assert.ok(3840 * 2160 * dpr * dpr * budget.scale * budget.scale <= budget.maximumPixels + 1);
-      assert.ok(budget.scale > 0 && budget.scale <= 1);
+      const budget = rasterBudget(gpu, 3840, 2160, dpr, true);
+      assert.ok(3840 * 2160 * budget.dpr * budget.dpr <= budget.maximumPixels + 1);
+      assert.ok(budget.dpr > 0 && budget.dpr <= 2);
     }
   const scene = { ...emptyScene, rooms: [makeRoom({ id: 'r', name: 'Old name' })] };
   const renamed = structuredClone(scene);
@@ -248,4 +248,16 @@ test('refinement pixel budget bounds high-DPI work and ignores nonvisual convers
   assert.equal(visualSceneKey(scene, false), visualSceneKey(renamed, false));
   renamed.rooms[0].roof = { style: 'single-pitch', pitch: 15, direction: 'north' };
   assert.notEqual(visualSceneKey(scene, false), visualSceneKey(renamed, false));
+});
+
+test('demand-render activity shades first paint, suspends contact on movement and settles once', () => {
+  const activity = new RenderActivity();
+  assert.equal(activity.observe([0, 1, 0], 0), false);
+  assert.equal(activity.moving(0), false);
+  assert.equal(activity.observe([0.1, 1, 0], 10), true);
+  assert.equal(activity.moving(100), true);
+  assert.equal(activity.observe([0.1, 1, 0], 110), false);
+  assert.equal(activity.moving(131), false);
+  assert.equal(activity.observe([0.2, 1, 0], 150), true);
+  assert.equal(activity.moving(151), true);
 });

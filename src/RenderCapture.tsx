@@ -1,6 +1,8 @@
 import { Component, Suspense, useEffect, useRef, useState, type ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createRoot, extend, useThree } from '@react-three/fiber';
+import { RasterRenderer } from './rasterRenderer';
+import { interiorExposure } from './renderLighting';
 import { captureAfterRender } from './captureSchedule';
 import * as THREE from 'three';
 import { Architecture, Environment, FloorPlanSvg, Site } from './SceneView';
@@ -50,6 +52,10 @@ function CaptureFrames({
   const { gl, scene, camera } = useThree();
   useEffect(() => {
     const controller = new AbortController();
+    const raster = new RasterRenderer(gl, scene, camera);
+    const previousShadowUpdates = gl.shadowMap.autoUpdate;
+    gl.shadowMap.autoUpdate = false;
+    gl.shadowMap.needsUpdate = true;
     const lost = (event: Event) => {
       event.preventDefault();
       controller.abort();
@@ -63,7 +69,8 @@ function CaptureFrames({
           throw new Error('The local render context is unavailable.');
         scene.updateMatrixWorld(true);
         camera.updateMatrixWorld(true);
-        gl.render(scene, camera);
+        gl.toneMappingExposure = interiorExposure(job.scene, camera.position);
+        raster.render(job.request.quality !== 'wireframe');
       },
       capture: () => {
         const context = gl.getContext();
@@ -102,6 +109,8 @@ function CaptureFrames({
     return () => {
       controller.abort();
       gl.domElement.removeEventListener('webglcontextlost', lost);
+      raster.dispose();
+      gl.shadowMap.autoUpdate = previousShadowUpdates;
     };
   }, [job, gl, scene, camera, complete, fail]);
   return null;
@@ -178,6 +187,7 @@ function OffscreenScene({
               <Site house={job.scene} quality={job.request.quality} />
               <Architecture
                 house={job.scene}
+                light={job.request.light}
                 quality={job.request.quality}
                 cutaway={job.request.view === 'cutaway'}
                 cutawaySides={[
@@ -198,8 +208,11 @@ function OffscreenScene({
       });
     return () => {
       cancelled = true;
-      root.unmount();
-      canvas.remove();
+      // This is a separate React root: unmount after the parent commit finishes.
+      queueMicrotask(() => {
+        root.unmount();
+        canvas.remove();
+      });
     };
   }, [job, complete, fail]);
   return <div ref={host} style={{ width: WIDTH, height: HEIGHT }} />;

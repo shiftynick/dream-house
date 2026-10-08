@@ -121,3 +121,23 @@ export function wallCapGeometry(
   pieces.forEach((piece) => piece.dispose());
   return physicalUvs(geometry);
 }
+
+/** Two draw groups separate an outward wall face from its room-facing finish.
+ * Reorder triangle indices only: positions, dimensions, UVs and picking survive. */
+export function interiorFaceGroups(geometry: THREE.BufferGeometry, positive: boolean) {
+  const normal = geometry.getAttribute('normal');
+  const count = geometry.index?.count ?? normal.count;
+  const outside: number[] = [],
+    inside: number[] = [];
+  for (let index = 0; index < count; index += 3) {
+    const a = geometry.index?.getX(index) ?? index;
+    const destination = normal.getZ(a) * (positive ? 1 : -1) < -0.5 ? outside : inside;
+    for (let corner = 0; corner < 3; corner++)
+      destination.push(geometry.index?.getX(index + corner) ?? index + corner);
+  }
+  geometry.setIndex([...outside, ...inside]);
+  geometry.clearGroups();
+  if (outside.length) geometry.addGroup(0, outside.length, 0);
+  if (inside.length) geometry.addGroup(outside.length, inside.length, 1);
+  return geometry;
+}

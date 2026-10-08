@@ -70,7 +70,7 @@ Generated thumbnails stay local. If visual review is enabled, the agent can sepa
 ## Editor and rendering
 
 - Orbit and pan, inspect a floor plan with wall openings and stairs, or enter the walkthrough. Walkthrough: click the view, WASD to move, Q/E down/up, Shift to move faster, Escape to release the mouse. Movement has no collision or gravity simulation.
-- Choose Live, Clay, Wireframe, or Path traced. Path traced mode progressively path-traces the same geometry, resets on camera changes, and accumulates up to 128 samples. Shader compilation can be slow on integrated GPUs; the browser/OS chooses the GPU.
+- Choose Live, Clay, Wireframe, or Presentation. Every mode renders immediately with local WebGL2 materials and lighting. Presentation allows a larger image/contact-shading budget; it does not progressively accumulate samples. Drawing stops when the view is still, shadows refresh after relevant edits, and contact shading returns after movement settles. Local material maps and detailed furniture also appear in agent captures. The browser/OS chooses the GPU.
 - Select a space to edit its name, dimensions, position, use, walls, and material. Point to a particular surface or choose **Selected part** to edit its material independently. Surface palettes override room palettes, which override the house palette. Whole-house material choices reset room and surface overrides.
 - **House roof default** and **Room roof** support Flat, Gable, and Single pitch, with pitch in degrees. For a single-pitch roof, **High edge** names the elevated side; room height sets the lowest eave. **Use house default** removes a room override. Changing the house default preserves room overrides.
 - **Windows & doors** edits multiple openings on the selected wall: type, center offset, width, height, and sill. Offsets run east on north/south walls and south on east/west walls. **Apply openings** submits the complete standalone set; connected room passages are displayed separately and preserved. Shared openings appear consistently on both wall faces. Windows do not create walking routes.
@@ -108,6 +108,8 @@ These spatial checks state their assumptions: 0.6 m furniture circulation, 0.9 m
 This is not a CAD/BIM or construction-document system. It does not solve general floor-plan constraints, arbitrary wall shapes, structural engineering, accessibility, building codes, or comprehensive stair safety. Each room owns its inward half of a shared wall, allowing different finishes on opposite faces. Linked stairs cut upper slabs; legacy unlinked stairs have no inferred openings. Partially covered sloping roofs use flat exposed patches to avoid intruding into upper rooms. Sloped wall caps support clerestory apertures, but roof joins, foundations, terrain interaction, and floor plans remain concept geometry.
 
 ## Checks
+
+For repeatable local browser images and actual draw/frame diagnostics, see [capture tooling](docs/render-fidelity-capture.md) and [performance evidence](docs/render-performance.md). These use an isolated synthetic project and no cloud adapters.
 
 ```sh
 npm test
@@ -159,8 +161,8 @@ The geometry engine, draft lifecycle, model adapter, and HTTP server are separat
 | `server/render-service.ts`, `server/alternative-service.ts`                                           | Render-provider broker and visual choice generation/acceptance                     |
 | `server/app.ts`, `server/index.ts`                                                                    | HTTP controls, runs, usage, voice, Vite/static hosting                             |
 | `server/gateway.ts`, `server/connections.ts`                                                          | Audio transports, credentials, settings, provider errors                           |
-| `src/SceneView.tsx`, `src/renderGeometry.ts`, `src/RenderCapture.tsx`                                 | Shared interactive/offscreen rendering, surfaces, openings, slab cutouts           |
+| `src/SceneView.tsx`, `src/renderGeometry.ts`, `src/RenderCapture.tsx`, `src/rasterRenderer.ts`        | Shared interactive/offscreen rendering, surfaces, openings, slab cutouts           |
 | `src/App.tsx`, `src/ArchitectureControls.tsx`, `src/ProjectChooser.tsx`, `src/VisualAlternatives.tsx` | Editor, roof/opening controls, project library, proposals, brief, visual choices   |
 | `src/useProject.ts`, `src/useRenderBridge.ts`, `src/useVisualAlternatives.ts`, `src/useVoice.ts`      | Revisioned saves, local capture transport, alternatives, push-to-talk              |
 
-Integration references: [Vercel Gateway Chat Completions](https://vercel.com/docs/ai-gateway/sdks-and-apis/openai-chat-completions), [Gateway transcription](https://vercel.com/docs/ai-gateway/modalities/speech-to-text), [Gateway speech](https://vercel.com/docs/ai-gateway/modalities/text-to-speech), [Three GPU PathTracer](https://github.com/gkjohnson/three-gpu-pathtracer).
+Integration references: [Vercel Gateway Chat Completions](https://vercel.com/docs/ai-gateway/sdks-and-apis/openai-chat-completions), [Gateway transcription](https://vercel.com/docs/ai-gateway/modalities/speech-to-text), [Gateway speech](https://vercel.com/docs/ai-gateway/modalities/text-to-speech).

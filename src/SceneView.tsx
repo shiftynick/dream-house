@@ -1,6 +1,6 @@
 import { Component, Suspense, useEffect, useMemo, useRef, type ReactNode } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { OrbitControls, Html } from '@react-three/drei';
+import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import { palettes, type Palette, type Room, type Scene, type Side } from '../shared/model';
@@ -15,16 +15,27 @@ import {
   terrainHeight,
   type Rect,
 } from './renderGeometry';
-import { RetainedResource } from './retainedResource';
-import { GpuSchedule } from './gpuSchedule';
-import { renderingBudget, visualSceneKey } from './renderPerformance';
-import { physicalUvs, slabGeometry, wallCapGeometry } from './renderMeshes';
+import { rasterBudget, RenderActivity, visualSceneKey } from './renderPerformance';
+import { physicalUvs, slabGeometry, wallCapGeometry, interiorFaceGroups } from './renderMeshes';
 import { effectiveRoof, roofHeightAt } from '../shared/architecture';
 import { roomOpenings } from '../shared/openings';
 import { renderCamera, renderRequestSchema } from '../shared/render';
 import { surfacePalette, type DesignSelection, type DesignSurface } from '../shared/selection';
 import { roomFurniture } from '../shared/furniture';
-import type { Furniture } from '../shared/model';
+import { daylightSkyPixels, interiorExposure } from './renderLighting';
+import { RasterRenderer } from './rasterRenderer';
+import { FurnitureMesh } from './renderFurniture';
+import { wallFinishGeometry, wallSurfaceGeometry } from './architecturalFinish';
+import { makeSurfaceTextures, type SurfaceKind } from './renderMaterials';
+import {
+  ROOM_MAP_LIMIT,
+  roomDaylightField,
+  roomDaylightFallback,
+  cachedRoomDaylightPixels,
+  roomIrradiance,
+  applyRoomIrradiance,
+  roomEnvironmentTexture,
+} from './roomDaylight';
 
 export type Quality = 'live' | 'refined' | 'clay' | 'wireframe';
 export type View = 'orbit' | 'walk' | 'plan';
@@ -49,56 +60,6 @@ type Props = {
   onCameraChange?: (camera: CameraContext) => void;
 };
 
-function makeTexture(kind: 'stone' | 'wood' | 'ground') {
-  const canvas = document.createElement('canvas');
-  canvas.width = canvas.height = 256;
-  const ctx = canvas.getContext('2d')!;
-  let seed = 17;
-  const random = () => {
-    seed = (seed * 16807) % 2147483647;
-    return seed / 2147483647;
-  };
-  ctx.fillStyle = kind === 'wood' ? '#e7e0d5' : kind === 'ground' ? '#aeae97' : '#dbd7cc';
-  ctx.fillRect(0, 0, 256, 256);
-  for (let i = 0; i < 10000; i++) {
-    const v = Math.floor(100 + random() * 140);
-    ctx.fillStyle = `rgba(${v},${v},${v},${kind === 'ground' ? 0.23 : 0.1})`;
-    ctx.fillRect(
-      random() * 256,
-      random() * 256,
-      kind === 'wood' ? 1 : 2,
-      kind === 'wood' ? 20 + random() * 90 : 2,
-    );
-  }
-  if (kind === 'wood') {
-    ctx.strokeStyle = 'rgba(70,55,35,.22)';
-    ctx.lineWidth = 1;
-    for (let x = 0; x < 256; x += 32) {
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, 256);
-      ctx.stroke();
-      ctx.fillStyle = `rgba(255,255,255,${0.01 + random() * 0.05})`;
-      ctx.fillRect(x + 1, 0, 30, 256);
-    }
-  }
-  if (kind === 'stone') {
-    ctx.strokeStyle = '#aaa69e';
-    ctx.globalAlpha = 0.22;
-    for (let y = 0; y < 256; y += 64) {
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(256, y);
-      ctx.stroke();
-    }
-  }
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(kind === 'ground' ? 30 : 1, kind === 'ground' ? 30 : 1);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.anisotropy = 8;
-  return texture;
-}
 function Box({
   position,
   size,
@@ -107,19 +68,36 @@ function Box({
   cast = true,
   onSelect,
   highlight = false,
+  textureOrigin,
+  insidePositive,
 }: {
   position: [number, number, number];
   size: [number, number, number];
-  material: THREE.Material;
+  material: THREE.Material | THREE.Material[];
   rotation?: number;
   cast?: boolean;
   onSelect?: () => void;
   highlight?: boolean;
+  textureOrigin?: [number, number, number];
+  insidePositive?: boolean;
 }) {
-  const geometry = useMemo(
-    () => physicalUvs(new THREE.BoxGeometry(...size)),
-    [size[0], size[1], size[2]],
-  );
+  const geometry = useMemo(() => {
+    const geometry = new THREE.BoxGeometry(...size);
+    // UV projection uses room/wall coordinates, not the center of each panel.
+    if (textureOrigin) geometry.translate(...textureOrigin);
+    physicalUvs(geometry);
+    if (textureOrigin)
+      geometry.translate(...(textureOrigin.map((value) => -value) as [number, number, number]));
+    return insidePositive === undefined ? geometry : interiorFaceGroups(geometry, insidePositive);
+  }, [
+    size[0],
+    size[1],
+    size[2],
+    textureOrigin?.[0],
+    textureOrigin?.[1],
+    textureOrigin?.[2],
+    insidePositive,
+  ]);
   useEffect(() => () => geometry.dispose(), [geometry]);
   return (
     <mesh
@@ -153,102 +131,6 @@ function Box({
     </mesh>
   );
 }
-function FurnitureMesh({
-  item,
-  materials: m,
-  selected,
-  onSelect,
-}: {
-  item: Furniture;
-  materials: Record<string, THREE.Material>;
-  selected: boolean;
-  onSelect: () => void;
-}) {
-  const box = (
-    key: string,
-    x: number,
-    y: number,
-    z: number,
-    w: number,
-    h: number,
-    d: number,
-    material: THREE.Material,
-  ) => <Box key={key} position={[x, y, z]} size={[w, h, d]} material={material} />;
-  const seating = ['sofa', 'armchair', 'chair'].includes(item.kind);
-  const table = ['coffee-table', 'dining-table', 'nightstand'].includes(item.kind);
-  return (
-    <group
-      position={[item.x, 0, item.z]}
-      rotation={[0, (item.rotation * Math.PI) / 180, 0]}
-      scale={[item.width, item.height, item.depth]}
-      userData={{ furnitureId: item.id }}
-      onClick={(e) => {
-        e.stopPropagation();
-        onSelect();
-      }}
-    >
-      {seating ? (
-        <>
-          {box('base', 0, 0.3, 0, 1, 0.35, 1, m.fabric)}
-          {box('back', 0, 0.72, -0.41, 1, 0.56, 0.18, m.fabric)}
-          {item.kind !== 'chair' &&
-            [-1, 1].map((sign) => box(`arm${sign}`, sign * 0.45, 0.53, 0, 0.1, 0.36, 1, m.fabric))}
-          {[-1, 1].flatMap((x) =>
-            [-1, 1].map((z) =>
-              box(`leg${x}${z}`, x * 0.38, 0.09, z * 0.34, 0.08, 0.18, 0.08, m.wood),
-            ),
-          )}
-        </>
-      ) : item.kind === 'bed' ? (
-        <>
-          {box('base', 0, 0.16, 0, 0.92, 0.3, 1, m.wood)}
-          {box('mattress', 0, 0.36, 0.02, 0.9, 0.2, 0.94, m.fabric)}
-          {box('headboard', 0, 0.5, -0.46, 1, 1, 0.08, m.wood)}
-          {[-1, 1].map((sign) =>
-            box(`pillow${sign}`, sign * 0.23, 0.49, -0.27, 0.34, 0.09, 0.2, m.rug),
-          )}
-        </>
-      ) : table ? (
-        <>
-          {box('top', 0, 0.93, 0, 1, 0.14, 1, m.wood)}
-          {[-1, 1].flatMap((x) =>
-            [-1, 1].map((z) =>
-              box(`leg${x}${z}`, x * 0.4, 0.43, z * 0.36, 0.07, 0.86, 0.08, m.frame),
-            ),
-          )}
-        </>
-      ) : item.kind === 'rug' ? (
-        box('rug', 0, 0.5, 0, 1, 1, 1, m.rug)
-      ) : item.kind === 'bath' ? (
-        <>
-          {box('base', 0, 0.4, 0, 1, 0.8, 1, m.fabric)}
-          {box('water', 0, 0.805, 0, 0.82, 0.012, 0.65, m.glass)}
-          {box('tap', 0.38, 0.9, 0, 0.025, 0.2, 0.05, m.frame)}
-        </>
-      ) : item.kind === 'toilet' ? (
-        <>
-          {box('tank', 0, 0.58, -0.34, 1, 0.84, 0.32, m.fabric)}
-          {box('bowl', 0, 0.32, 0.1, 0.86, 0.55, 0.8, m.fabric)}
-        </>
-      ) : (
-        <>
-          {box('body', 0, 0.46, 0, 0.94, 0.92, 0.94, m.wood)}
-          {box('top', 0, 0.96, 0, 1, 0.08, 1, item.kind === 'wardrobe' ? m.wood : m.wall)}
-          {box('handle', 0, 0.64, 0.48, 0.25, 0.025, 0.04, m.frame)}
-          {['island', 'vanity'].includes(item.kind) &&
-            box('sink', 0, 0.999, 0, 0.35, 0.002, 0.45, m.frame)}
-        </>
-      )}
-      {selected && (
-        <mesh position={[0, 0.5, 0]}>
-          <boxGeometry args={[1.015, 1.015, 1.015]} />
-          <meshBasicMaterial color="#d3933d" wireframe toneMapped={false} />
-        </mesh>
-      )}
-    </group>
-  );
-}
-
 function RoomMesh({
   house,
   room: r,
@@ -261,9 +143,13 @@ function RoomMesh({
   selected,
   onSelect,
   quality,
+  roomEnvironment,
+  roomEnvironmentIntensity = 1,
 }: {
   house: Scene;
   room: Room;
+  roomEnvironment?: THREE.Texture;
+  roomEnvironmentIntensity?: number;
   materials: Record<string, THREE.Material>;
   materialSets: Record<string, Record<string, THREE.Material>>;
   selection?: DesignSelection | null;
@@ -275,13 +161,90 @@ function RoomMesh({
   quality: Quality;
 }) {
   const outdoor = ['terrace', 'courtyard'].includes(r.kind);
+  const interiorSets = useMemo(
+    () =>
+      Object.fromEntries(
+        Object.entries(materialSets).map(([palette, set]) => [
+          palette,
+          Object.fromEntries(
+            Object.entries(set).map(([name, source]) => {
+              const material = source.clone() as THREE.MeshStandardMaterial;
+              material.envMap = roomEnvironment ?? null;
+              if (roomEnvironment)
+                applyRoomIrradiance(
+                  material,
+                  roomIrradiance(roomEnvironment.image.data as Float32Array),
+                  roomEnvironmentIntensity,
+                );
+              material.envMapIntensity = roomEnvironment
+                ? roomEnvironmentIntensity
+                : source instanceof THREE.MeshStandardMaterial
+                  ? source.envMapIntensity
+                  : 1;
+              return [name, material];
+            }),
+          ),
+        ]),
+      ),
+    [materialSets, roomEnvironment, roomEnvironmentIntensity],
+  );
+  useEffect(
+    () => () =>
+      Object.values(interiorSets).forEach((set) =>
+        Object.values(set).forEach((material) => material.dispose()),
+      ),
+    [interiorSets],
+  );
+  const insideMaterial = (surface: DesignSurface) =>
+    interiorSets[surfacePalette(house, r, surface)];
+  const wallMaterials = (side: Side, name: string) => {
+    const outside = materialSets[surfacePalette(house, r, side)][name];
+    const inside = insideMaterial(side)[name];
+    return [outside, inside];
+  };
   const surfaceMaterial = (surface: DesignSurface) =>
     materialSets[surfacePalette(house, r, surface)];
   const pick = (surface: DesignSurface) =>
     onSelectSurface ? onSelectSurface({ roomId: r.id, surface }) : onSelect();
   const isSelected = (surface: DesignSurface) =>
-    quality !== 'refined' && selection?.roomId === r.id && selection.surface === surface;
+    selection?.roomId === r.id && selection.surface === surface;
   const slabs = useMemo(() => roomSlabs(house, r), [house, r]);
+  const finishes = useMemo(
+    () =>
+      Object.fromEntries(
+        (['north', 'south', 'east', 'west'] as const).map((side) => [
+          side,
+          wallFinishGeometry(house, r, side),
+        ]),
+      ),
+    [house, r],
+  );
+  useEffect(
+    () => () =>
+      Object.values(finishes)
+        .flat()
+        .forEach((part) => part.geometry.dispose()),
+    [finishes],
+  );
+
+  const wallSurfaces = useMemo(
+    () =>
+      Object.fromEntries(
+        (['north', 'south', 'east', 'west'] as const).map((side) => [
+          side,
+          wallSurfaceGeometry(house, r, side),
+        ]),
+      ),
+    [house, r],
+  );
+  useEffect(
+    () => () =>
+      Object.values(wallSurfaces)
+        .flat()
+        .forEach((part) => part.geometry.dispose()),
+    [wallSurfaces],
+  );
+
   const slab = (
     rect: Rect,
     y: number,
@@ -303,6 +266,14 @@ function RoomMesh({
     const origin: [number, number, number] = [r.x, r.elevation, r.z];
     const roofY = (x: number, z: number) =>
       slabs.roofClipped ? r.elevation + r.height : roofHeightAt(house, r, x, z);
+    const cap = (side: Side) => {
+      const geometry = wallCapGeometry(
+        wallTopProfile(house, r, side),
+        r.height,
+        roomOpenings(house, r.id, side),
+      );
+      return geometry ? interiorFaceGroups(geometry, side === 'north' || side === 'east') : null;
+    };
     return {
       roofs: roofPatches(house, r).map((rect) =>
         slabGeometry(rect, origin, (x, z) => roofY(x, z) + 0.18, roofY),
@@ -324,14 +295,7 @@ function RoomMesh({
         ),
       ),
       caps: Object.fromEntries(
-        (['north', 'south', 'east', 'west'] as const).map((side) => [
-          side,
-          wallCapGeometry(
-            wallTopProfile(house, r, side),
-            r.height,
-            roomOpenings(house, r.id, side),
-          ),
-        ]),
+        (['north', 'south', 'east', 'west'] as const).map((side) => [side, cap(side)]),
       ),
     };
   }, [house, r, slabs]);
@@ -348,7 +312,7 @@ function RoomMesh({
   );
   const generatedMesh = (
     geometry: THREE.BufferGeometry,
-    material: THREE.Material,
+    material: THREE.Material | THREE.Material[],
     key: number | string,
     surface?: DesignSurface,
   ) => (
@@ -377,42 +341,10 @@ function RoomMesh({
   const wall = (side: Side) => {
     if (cutaway && cutawaySides.includes(side)) return null;
     const { horizontal } = wallAxis(r, side);
-    const sm = surfaceMaterial(side);
+    const openings = roomOpenings(house, r.id, side);
     const position: [number, number, number] = horizontal
       ? [0, 0, (side === 'north' ? -1 : 1) * (r.depth / 2 - 0.05)]
       : [(side === 'west' ? -1 : 1) * (r.width / 2 - 0.05), 0, 0];
-    const panels = wallPanels(house, r, side, false);
-    const openings = roomOpenings(house, r.id, side);
-    const glazing = (offset: number, bottom: number, width: number, height: number, id: string) => (
-      <group key={id} position={[offset, bottom, 0]}>
-        <Box
-          position={[0, height / 2, 0]}
-          size={[width, height, 0.024]}
-          material={sm.glass}
-          cast={false}
-          highlight={isSelected(side)}
-        />
-        {[0, height].map((y) => (
-          <Box
-            key={y}
-            position={[0, y, 0]}
-            size={[width + 0.07, 0.055, 0.12]}
-            material={sm.frame}
-          />
-        ))}
-        {Array.from(
-          { length: Math.ceil(width / 1.7) + 1 },
-          (_, i) => -width / 2 + (i * width) / Math.ceil(width / 1.7),
-        ).map((x) => (
-          <Box
-            key={x}
-            position={[x, height / 2, 0]}
-            size={[0.045, height, 0.12]}
-            material={sm.frame}
-          />
-        ))}
-      </group>
-    );
     return (
       <group
         key={side}
@@ -423,54 +355,37 @@ function RoomMesh({
           pick(side);
         }}
       >
-        {panels.map((panel, index) =>
-          r[side] === 'glass' && !openings.length ? (
-            glazing(panel.offset, panel.bottom, panel.width, panel.height, `wall-${index}`)
-          ) : (
-            <Box
-              key={index}
-              position={[panel.offset, panel.bottom + panel.height / 2, 0]}
-              size={[panel.width, panel.height, 0.1]}
-              material={sm.wall}
-              highlight={isSelected(side)}
-            />
-          ),
-        )}
+        {finishes[side].map((part) => (
+          <mesh
+            key={part.material}
+            geometry={part.geometry}
+            material={insideMaterial(side)[part.material]}
+            castShadow
+            receiveShadow
+          />
+        ))}
+        {wallSurfaces[side].map((part) => (
+          <mesh
+            key={part.material}
+            geometry={part.geometry}
+            material={wallMaterials(side, part.material)}
+            castShadow={part.material !== 'glass'}
+            receiveShadow
+          >
+            {isSelected(side) && (
+              <mesh geometry={part.geometry} scale={1.001}>
+                <meshBasicMaterial color="#e3a44f" wireframe toneMapped={false} />
+              </mesh>
+            )}
+          </mesh>
+        ))}
         {generated.caps[side] &&
           generatedMesh(
             generated.caps[side]!,
-            r[side] === 'glass' && !openings.length ? sm.glass : sm.wall,
+            wallMaterials(side, r[side] === 'glass' && !openings.length ? 'glass' : 'wall'),
             `cap-${side}`,
             side,
           )}
-        {openings.map((opening) =>
-          opening.kind === 'window' ? (
-            <group key={opening.id}>
-              {glazing(opening.offset, opening.sill, opening.width, opening.height, opening.id)}
-              <Box
-                position={[opening.offset, opening.sill - 0.035, 0]}
-                size={[opening.width + 0.12, 0.06, 0.24]}
-                material={sm.wood}
-              />
-            </group>
-          ) : opening.kind === 'door' ? (
-            <group key={opening.id} position={[opening.offset, opening.sill, 0]}>
-              {[-1, 1].map((sign) => (
-                <Box
-                  key={sign}
-                  position={[sign * (opening.width / 2 - 0.025), opening.height / 2, 0]}
-                  size={[0.05, opening.height, 0.15]}
-                  material={sm.frame}
-                />
-              ))}
-              <Box
-                position={[0, opening.height - 0.025, 0]}
-                size={[opening.width, 0.05, 0.15]}
-                material={sm.frame}
-              />
-            </group>
-          ) : null,
-        )}
       </group>
     );
   };
@@ -489,7 +404,9 @@ function RoomMesh({
           0.22,
           outdoor && !r.palette && !r.surfacePalettes?.floor
             ? m.deck
-            : surfaceMaterial('floor').floor,
+            : outdoor
+              ? surfaceMaterial('floor').floor
+              : insideMaterial('floor').floor,
           index,
           'floor',
         ),
@@ -504,7 +421,7 @@ function RoomMesh({
                 generatedMesh(geometry, surfaceMaterial('roof').roof, index, 'roof'),
               )}
               {generated.soffits.map((geometry, index) =>
-                generatedMesh(geometry, surfaceMaterial('roof').wood, `soffit-${index}`, 'roof'),
+                generatedMesh(geometry, insideMaterial('roof').wood, `soffit-${index}`, 'roof'),
               )}
             </>
           )}
@@ -514,10 +431,14 @@ function RoomMesh({
         <FurnitureMesh
           key={item.id}
           item={item}
-          materials={item.palette ? materialSets[item.palette] : m}
-          selected={
-            quality !== 'refined' && selection?.roomId === r.id && selection.furnitureId === item.id
+          materials={
+            outdoor
+              ? item.palette
+                ? materialSets[item.palette]
+                : m
+              : interiorSets[item.palette ?? r.palette ?? house.palette]
           }
+          selected={selection?.roomId === r.id && selection.furnitureId === item.id}
           onSelect={() =>
             onSelectSurface
               ? onSelectSurface({ roomId: r.id, surface: 'room', furnitureId: item.id })
@@ -531,7 +452,7 @@ function RoomMesh({
           <Tree x={0} z={0} y={0.35} scale={0.6} />
         </>
       )}
-      {selected && quality !== 'refined' && (
+      {selected && (
         <>
           {(!selection || (selection.surface === 'room' && !selection.furnitureId)) && (
             <mesh position={[0, 0.03, 0]} rotation={[-Math.PI / 2, 0, 0]}>
@@ -539,22 +460,63 @@ function RoomMesh({
               <meshBasicMaterial color="#b87f45" transparent opacity={0.19} depthWrite={false} />
             </mesh>
           )}
-          <Html position={[0, r.height + 0.8, 0]} center>
-            <div className="room-label">
-              {r.name}
-              {selection?.roomId === r.id && selection.surface !== 'room'
-                ? ` · ${selection.surface}`
-                : ''}
-              <span>
-                {r.width} × {r.depth} m
-              </span>
-            </div>
-          </Html>
+          <RoomLabel room={r} selection={selection} />
         </>
       )}
     </group>
   );
 }
+/** A plain projected label avoids a nested React DOM root inside the canvas.
+ * Its owner removes the element synchronously without unmounting another root. */
+function RoomLabel({ room, selection }: { room: Room; selection?: DesignSelection | null }) {
+  const { gl, camera, size, invalidate } = useThree();
+  const label = useRef<HTMLDivElement | null>(null);
+  const point = useMemo(() => new THREE.Vector3(), []);
+  useEffect(() => {
+    const element = document.createElement('div');
+    element.className = 'room-label';
+    Object.assign(element.style, {
+      position: 'absolute',
+      left: '0',
+      top: '0',
+      pointerEvents: 'none',
+      zIndex: '2',
+    });
+    const surface =
+      selection?.roomId === room.id && selection.surface !== 'room'
+        ? ` · ${selection.surface}`
+        : '';
+    element.append(document.createTextNode(room.name + surface));
+    const dimensions = document.createElement('span');
+    dimensions.textContent = `${room.width} × ${room.depth} m`;
+    element.append(dimensions);
+    gl.domElement.parentElement?.append(element);
+    label.current = element;
+    invalidate();
+    return () => {
+      label.current = null;
+      element.remove();
+    };
+  }, [
+    gl,
+    room.id,
+    room.name,
+    room.width,
+    room.depth,
+    selection?.roomId,
+    selection?.surface,
+    invalidate,
+  ]);
+  useFrame(() => {
+    if (!label.current) return;
+    camera.updateMatrixWorld();
+    point.set(room.x, room.elevation + room.height + 0.8, room.z).project(camera);
+    label.current.style.display = point.z < -1 || point.z > 1 ? 'none' : '';
+    label.current.style.transform = `translate(-50%, -50%) translate(${((point.x + 1) * size.width) / 2}px, ${((1 - point.y) * size.height) / 2}px)`;
+  }, 0.5);
+  return null;
+}
+
 function Tree({ x, z, y = 0, scale = 1 }: { x: number; z: number; y?: number; scale?: number }) {
   return (
     <group position={[x, y, z]} scale={scale}>
@@ -580,7 +542,7 @@ function Tree({ x, z, y = 0, scale = 1 }: { x: number; z: number; y?: number; sc
   );
 }
 export function Environment({ light, house }: { light: Light; house?: Scene }) {
-  const { scene } = useThree();
+  const { scene, gl, invalidate } = useThree();
   const lighting = useMemo(() => {
     const rooms = house?.rooms ?? [];
     const minX = Math.min(0, ...rooms.map((room) => room.x - room.width / 2));
@@ -596,52 +558,32 @@ export function Environment({ light, house }: { light: Light; house?: Scene }) {
     };
   }, [house?.rooms]);
   useEffect(() => {
-    const canvas = document.createElement('canvas');
-    canvas.width = 512;
-    canvas.height = 256;
-    const ctx = canvas.getContext('2d')!;
-    const gradient = ctx.createLinearGradient(0, 0, 0, 256);
-    const colors =
-      light === 'evening'
-        ? ['#263953', '#829093', '#4c5140']
-        : light === 'golden'
-          ? ['#b3c5cf', '#f1dbc2', '#777d63']
-          : ['#a3c4d6', '#e7ecdf', '#777f69'];
-    gradient.addColorStop(0, colors[0]);
-    gradient.addColorStop(0.5, colors[1]);
-    gradient.addColorStop(1, colors[2]);
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, 512, 256);
-    const pixels = ctx.getImageData(0, 0, 512, 256).data;
-    const data = new Float32Array(512 * 256 * 4);
-    for (let i = 0; i < pixels.length; i += 4) {
-      const color = new THREE.Color(
-        pixels[i] / 255,
-        pixels[i + 1] / 255,
-        pixels[i + 2] / 255,
-      ).convertSRGBToLinear();
-      data[i] = color.r;
-      data[i + 1] = color.g;
-      data[i + 2] = color.b;
-      data[i + 3] = 1;
-    }
+    const data = daylightSkyPixels(light);
     const tex = new THREE.DataTexture(data, 512, 256, THREE.RGBAFormat, THREE.FloatType);
     tex.mapping = THREE.EquirectangularReflectionMapping;
     tex.needsUpdate = true;
     scene.environment = tex;
     scene.background = new THREE.Color(
-      light === 'evening' ? '#9aa9ae' : light === 'golden' ? '#dedfce' : '#dbe3dc',
+      light === 'evening' ? '#9ba8bb' : light === 'golden' ? '#e6ded2' : '#d5e0e9',
     );
-    scene.environmentIntensity = light === 'evening' ? 0.45 : 0.9;
+    scene.environmentIntensity = 0.8;
+    const previousExposure = gl.toneMappingExposure;
+    gl.toneMappingExposure = 1.05;
+    gl.shadowMap.needsUpdate = true;
+    invalidate();
+    // Three replaces its PMREM cache on context restoration. Dispose source
+    // textures while old target callbacks still belong to the lost context.
+    const lost = () => tex.dispose();
+    gl.domElement.addEventListener('webglcontextlost', lost);
     return () => {
+      gl.domElement.removeEventListener('webglcontextlost', lost);
       scene.environment = null;
+      gl.toneMappingExposure = previousExposure;
       tex.dispose();
     };
-  }, [scene, light]);
+  }, [scene, gl, light, invalidate]);
   return (
     <>
-      <ambientLight intensity={light === 'evening' ? 0.12 : 0.22} />
-      <hemisphereLight args={['#e7eff4', '#766d56', 0.85]} />
       <directionalLight
         position={[
           lighting.target.position.x - 30,
@@ -649,8 +591,8 @@ export function Environment({ light, house }: { light: Light; house?: Scene }) {
           lighting.target.position.z + 20,
         ]}
         target={lighting.target}
-        intensity={light === 'evening' ? 0.4 : 3}
-        color={light === 'golden' ? '#ffe1aa' : '#fff3db'}
+        intensity={light === 'evening' ? 0.4 : 3.2}
+        color={light === 'golden' ? '#ffe1b7' : '#fff9ef'}
         castShadow
         shadow-mapSize={[2048, 2048]}
         shadow-camera-left={-lighting.extent}
@@ -659,23 +601,24 @@ export function Environment({ light, house }: { light: Light; house?: Scene }) {
         shadow-camera-bottom={-lighting.extent}
         shadow-camera-far={150}
         shadow-bias={-0.0002}
-        shadow-normalBias={0.015}
+        shadow-normalBias={0.012}
+        shadow-radius={2}
       />
     </>
   );
 }
 export function Site({ house, quality }: { house: Scene; quality: Quality }) {
-  const texture = useMemo(() => makeTexture('ground'), []);
+  const texture = useMemo(() => makeSurfaceTextures('ground'), []);
   const geometry = useMemo(() => {
     const geo = new THREE.PlaneGeometry(180, 180, 180, 180);
     geo.rotateX(-Math.PI / 2);
     const p = geo.attributes.position;
     for (let i = 0; i < p.count; i++) p.setY(i, terrainHeight(house, p.getX(i), p.getZ(i)));
     geo.computeVertexNormals();
-    return geo;
+    return physicalUvs(geo);
   }, [house.slope, house.rooms]);
   useEffect(() => () => geometry.dispose(), [geometry]);
-  useEffect(() => () => texture.dispose(), [texture]);
+  useEffect(() => () => Object.values(texture).forEach((map) => map.dispose()), [texture]);
   const positions = [
     [-27, -14, 1.4],
     [-23, 6, 1.1],
@@ -696,8 +639,9 @@ export function Site({ house, quality }: { house: Scene; quality: Quality }) {
     <group>
       <mesh geometry={geometry} receiveShadow onClick={(e) => e.stopPropagation()}>
         <meshStandardMaterial
-          color={quality === 'clay' ? '#c6c4b9' : '#929d75'}
-          map={quality === 'clay' ? null : texture}
+          color={quality === 'clay' ? '#c6c4b9' : '#858b68'}
+          {...(quality === 'clay' || quality === 'wireframe' ? {} : texture)}
+          normalScale={new THREE.Vector2(0.8, 0.8)}
           roughness={1}
           wireframe={quality === 'wireframe'}
         />
@@ -728,6 +672,7 @@ export function Site({ house, quality }: { house: Scene; quality: Quality }) {
 }
 export function Architecture({
   house,
+  light = 'day',
   quality,
   cutaway,
   cutawaySides,
@@ -745,67 +690,179 @@ export function Architecture({
   | 'selection'
   | 'onSelectSurface'
   | 'cutawaySides'
->) {
-  const textures = useMemo(() => ({ stone: makeTexture('stone'), wood: makeTexture('wood') }), []);
-  useEffect(() => () => Object.values(textures).forEach((t) => t.dispose()), [textures]);
+> & { light?: Light }) {
+  const surfaceQuality = quality === 'clay' || quality === 'wireframe' ? quality : 'live';
+  const { gl, invalidate } = useThree();
+  const daylightKey = JSON.stringify({
+    palette: house.palette,
+    roof: house.roof,
+    roofPitch: house.roofPitch,
+    roofDirection: house.roofDirection,
+    stairs: house.stairs,
+    rooms: house.rooms.map(({ name, furniture, ...room }) => room),
+    design: { connections: house.design?.connections, stairLinks: house.design?.stairLinks },
+  });
+  const environments = useMemo(() => {
+    const start = performance.now();
+    const field = roomDaylightField(house, light);
+    const fallback = roomEnvironmentTexture(new Float32Array(128 * 64 * 4).fill(1));
+    const maps = new Map<string, THREE.Texture>();
+    const intensities = new Map<string, number>();
+    for (const room of house.rooms) {
+      if (['terrace', 'courtyard'].includes(room.kind)) continue;
+      intensities.set(
+        room.id,
+        maps.size < ROOM_MAP_LIMIT ? 1 : roomDaylightFallback(house, room, field),
+      );
+      maps.set(
+        room.id,
+        maps.size < ROOM_MAP_LIMIT
+          ? roomEnvironmentTexture(cachedRoomDaylightPixels(house, room, light, field, daylightKey))
+          : fallback,
+      );
+    }
+    return { maps, intensities, fallback, milliseconds: performance.now() - start };
+  }, [daylightKey, light]);
+  useEffect(() => {
+    gl.domElement.dataset.roomEnvironmentCount = String(
+      Math.min(environments.maps.size, ROOM_MAP_LIMIT),
+    );
+    gl.domElement.dataset.roomEnvironmentBuildMs = environments.milliseconds.toFixed(1);
+    invalidate();
+    const release = () =>
+      new Set([...environments.maps.values(), environments.fallback]).forEach((texture) =>
+        texture.dispose(),
+      );
+    gl.domElement.addEventListener('webglcontextlost', release);
+    return () => {
+      gl.domElement.removeEventListener('webglcontextlost', release);
+      release();
+    };
+  }, [environments, gl, invalidate]);
+
+  const textures = useMemo(
+    () =>
+      Object.fromEntries(
+        (['timber', 'oak', 'plaster', 'concrete', 'linen', 'rug', 'metal'] as SurfaceKind[]).map(
+          (kind) => [kind, makeSurfaceTextures(kind)],
+        ),
+      ),
+    [],
+  );
+  useEffect(
+    () => () =>
+      Object.values(textures).forEach((set) => Object.values(set).forEach((map) => map.dispose())),
+    [textures],
+  );
   const materialSets = useMemo(
     () =>
       Object.fromEntries(
         (Object.keys(palettes) as Palette[]).map((palette) => {
           const p = palettes[palette];
-          const wireframe = quality === 'wireframe',
-            clay = quality === 'clay';
-          const mat = (color: string, roughness = 0.8, map: THREE.Texture | null = null) =>
+          const wireframe = surfaceQuality === 'wireframe',
+            clay = surfaceQuality === 'clay';
+          const mat = (color: string, roughness = 0.8, surface?: SurfaceKind, bumpScale = 0.002) =>
             new THREE.MeshStandardMaterial({
               color: clay ? '#e0dcd1' : color,
               roughness,
               wireframe,
-              map: clay ? null : map,
-              bumpMap: clay || wireframe ? null : map,
-              bumpScale: map === textures.wood ? 0.018 : 0.012,
+              ...(surface && !clay && !wireframe
+                ? {
+                    ...textures[surface],
+                    normalScale: new THREE.Vector2(bumpScale / 0.003, bumpScale / 0.003),
+                  }
+                : {}),
             });
+          const fabricColor = {
+            chalk: '#ddd7cb',
+            limestone: '#c9bfaa',
+            cedar: '#c5b6a0',
+            charcoal: '#515958',
+          }[palette];
+          const textile = (color: string) =>
+            new THREE.MeshPhysicalMaterial({
+              color: clay ? '#e0dcd1' : color,
+              roughness: 1,
+              wireframe,
+              ...(clay || wireframe
+                ? {}
+                : {
+                    ...textures.linen,
+                    normalScale: new THREE.Vector2(0.12, 0.12),
+                    sheen: 0.28,
+                    sheenRoughness: 0.85,
+                    sheenColor: new THREE.Color(color).lerp(new THREE.Color('white'), 0.2),
+                  }),
+            });
+          const glass =
+            clay || wireframe
+              ? mat('#cad8d3', 0.2)
+              : new THREE.MeshPhysicalMaterial({
+                  color: '#f4f8f8',
+                  roughness: 0.025,
+                  metalness: 0,
+                  transparent: true,
+                  opacity: 0.12,
+                  transmission: 0,
+                  thickness: 0.024,
+                  ior: 1.5,
+                  depthWrite: false,
+                  envMapIntensity: 1.2,
+                  side: THREE.DoubleSide,
+                });
           return [
             palette,
             {
               wall: mat(
                 p.wall,
-                0.85,
-                palette === 'cedar' || palette === 'charcoal' ? textures.wood : textures.stone,
+                1,
+                palette === 'cedar' || palette === 'charcoal' ? 'timber' : 'plaster',
+                0.003,
               ),
-              wood: mat(p.wood, 0.65, textures.wood),
-              floor: mat(p.floor, 0.7, textures.wood),
-              roof: new THREE.MeshStandardMaterial({
-                color: clay ? '#e0dcd1' : p.roof,
-                roughness: 0.55,
-                metalness: clay ? 0 : 0.25,
+              wood: new THREE.MeshPhysicalMaterial({
+                color: clay ? '#e0dcd1' : p.wood,
+                roughness: 0.72,
+                wireframe,
+                ...(clay || wireframe
+                  ? {}
+                  : {
+                      ...textures.oak,
+                      normalScale: new THREE.Vector2(0.5, 0.5),
+                      clearcoat: 0.16,
+                      clearcoatRoughness: 0.4,
+                    }),
+              }),
+              trim: mat(p.wood, 0.7, 'oak', 0.001),
+              floor: mat(p.floor, 0.9, palette === 'charcoal' ? 'concrete' : 'oak', 0.003),
+              roof: mat(p.roof, 0.8, 'metal', 0.012),
+              frame: new THREE.MeshStandardMaterial({
+                color: clay ? '#e0dcd1' : p.accent,
+                roughness: 0.34,
+                metalness: clay ? 0 : 0.55,
                 wireframe,
               }),
-              frame: mat(p.accent, 0.3),
-              foundation: mat('#a19d8f', 1, textures.stone),
-              deck: mat('#bcbaa7', 0.9, textures.stone),
-              fabric: mat('#e2decd', 1),
-              rug: mat('#bcb8a4', 1),
-              glass:
-                clay || wireframe
-                  ? mat('#cad8d3', 0.2)
-                  : new THREE.MeshPhysicalMaterial({
-                      color: '#edf6f5',
-                      roughness: 0.08,
-                      metalness: 0,
-                      transparent: true,
-                      opacity: quality === 'refined' ? 1 : 0.22,
-                      transmission: quality === 'refined' ? 0.94 : 0,
-                      thickness: 0.02,
-                      ior: 1.5,
-                      depthWrite: false,
-                      envMapIntensity: 1.2,
-                      side: THREE.DoubleSide,
-                    }),
+              foundation: mat('#a4a19b', 1, 'concrete', 0.006),
+              deck: mat('#b6a185', 1, 'oak', 0.006),
+              fabric: textile(fabricColor),
+              seam: textile(new THREE.Color(fabricColor).multiplyScalar(0.85).getStyle()),
+              accentFabric: textile(palette === 'charcoal' ? '#a89b82' : '#998870'),
+              rug: mat(palette === 'charcoal' ? '#8c9089' : '#b8ac97', 1, 'rug', 0.0025),
+              rugEdge: mat('#8f8575', 1, 'rug', 0.001),
+              ceramic: mat('#edede7', 0.18),
+              basin: mat('#a5afad', 0.16),
+              worktop: mat('#dfddd3', 0.42, 'concrete', 0.0005),
+              chrome: new THREE.MeshStandardMaterial({
+                color: clay ? '#e0dcd1' : '#c4c9cb',
+                metalness: clay ? 0 : 0.95,
+                roughness: 0.2,
+                wireframe,
+              }),
+              glass,
             },
           ];
         }),
       ),
-    [quality, textures],
+    [surfaceQuality, textures],
   );
   useEffect(
     () => () =>
@@ -831,6 +888,8 @@ export function Architecture({
           selected={selected === r.id}
           onSelect={() => onSelect(r.id)}
           quality={quality}
+          roomEnvironment={surfaceQuality === 'live' ? environments.maps.get(r.id) : undefined}
+          roomEnvironmentIntensity={environments.intensities.get(r.id)}
         />
       ))}
       {house.stairs.map((s) => (
@@ -881,11 +940,11 @@ function CameraRig({
   onCameraChange,
 }: Pick<Props, 'view' | 'resetKey' | 'house' | 'onCameraChange'>) {
   const controls = useRef<OrbitControlsImpl>(null);
-  const { camera, gl } = useThree();
+  const { camera, gl, invalidate } = useThree();
   const pressed = useRef(new Set<string>());
   const report = useRef(onCameraChange);
   report.current = onCameraChange;
-  const lastReport = useRef({ time: -1, coordinates: [] as number[] });
+  const lastReport = useRef<number[]>([]);
   useEffect(() => {
     if (view === 'walk') {
       const room = house.rooms.find((r) => r.kind === 'living') || house.rooms[0];
@@ -902,7 +961,8 @@ function CameraRig({
       camera.lookAt(...framing.target);
       controls.current?.update();
     }
-  }, [view, resetKey, camera, house.rooms.length === 0]);
+    invalidate();
+  }, [view, resetKey, camera, house.rooms.length === 0, invalidate]);
   useEffect(() => {
     if (view !== 'walk') return;
     const canvas = gl.domElement;
@@ -915,12 +975,22 @@ function CameraRig({
       e.y -= event.movementX * 0.002;
       e.x = THREE.MathUtils.clamp(e.x - event.movementY * 0.002, -1.45, 1.45);
       camera.quaternion.setFromEuler(e);
+      invalidate();
     };
     const down = (e: KeyboardEvent) => {
-      if (document.pointerLockElement === canvas) pressed.current.add(e.code);
+      if (document.pointerLockElement === canvas) {
+        pressed.current.add(e.code);
+        invalidate();
+      }
     };
-    const up = (e: KeyboardEvent) => pressed.current.delete(e.code);
-    const blur = () => pressed.current.clear();
+    const up = (e: KeyboardEvent) => {
+      pressed.current.delete(e.code);
+      invalidate();
+    };
+    const blur = () => {
+      pressed.current.clear();
+      invalidate();
+    };
     canvas.addEventListener('click', click);
     document.addEventListener('mousemove', move);
     window.addEventListener('keydown', down);
@@ -936,9 +1006,12 @@ function CameraRig({
       document.removeEventListener('pointerlockchange', blur);
       if (document.pointerLockElement === canvas) document.exitPointerLock();
     };
-  }, [view, camera, gl]);
+  }, [view, camera, gl, invalidate]);
   useFrame((_, delta) => {
     if (view !== 'walk' || document.pointerLockElement !== gl.domElement) return;
+    if (!['KeyW', 'KeyS', 'KeyA', 'KeyD', 'KeyE', 'KeyQ'].some((key) => pressed.current.has(key)))
+      return;
+    invalidate();
     const speed = Math.min(delta, 0.05) * (pressed.current.has('ShiftLeft') ? 8 : 3.5);
     const forward = new THREE.Vector3();
     camera.getWorldDirection(forward);
@@ -952,8 +1025,8 @@ function CameraRig({
     if (pressed.current.has('KeyE')) camera.position.y += speed;
     if (pressed.current.has('KeyQ')) camera.position.y -= speed;
   });
-  useFrame(({ clock }) => {
-    if (!report.current || clock.elapsedTime - lastReport.current.time < 0.25) return;
+  useFrame(() => {
+    if (!report.current) return;
     const target =
       view === 'orbit' && controls.current
         ? controls.current.target
@@ -963,12 +1036,11 @@ function CameraRig({
     const coordinates = [...position, ...focus];
     if (
       !coordinates.some(
-        (value, index) =>
-          Math.abs(value - (lastReport.current.coordinates[index] ?? Infinity)) > 0.001,
+        (value, index) => Math.abs(value - (lastReport.current[index] ?? Infinity)) > 0.001,
       )
     )
       return;
-    lastReport.current = { time: clock.elapsedTime, coordinates };
+    lastReport.current = coordinates;
     report.current({ position, target: focus });
   });
   return view === 'orbit' ? (
@@ -984,279 +1056,146 @@ function CameraRig({
     />
   ) : null;
 }
-function ProgressiveRenderer({
-  enabled,
+/** Immediate PBR rendering: camera motion spends its budget on geometry;
+ * contact shading is drawn once after motion settles, then the canvas sleeps. */
+function InteractiveRenderer({
+  house,
+  quality,
   sceneKey,
   light,
   onStatus,
 }: {
-  enabled: boolean;
+  house: Scene;
+  quality: Quality;
   sceneKey: string;
   light: Light;
   onStatus: (text: string) => void;
 }) {
-  const { gl, scene, camera, size } = useThree();
-  // Installed 0.0.24 exposes this getter but omits it from its declaration.
-  type Tracer = import('three-gpu-pathtracer').WebGLPathTracer & { readonly isCompiling: boolean };
-  const state = useRef<{
-    pt: Tracer;
-    worker: import('./pathTraceWorker').PathTraceWorker;
-    busy: boolean;
-    key: string | null;
-    light: Light;
-    builds: number;
-    scale: number;
-    started: number;
-    preparingSince: number;
-  } | null>(null);
-  const resources = useRef<RetainedResource<NonNullable<typeof state.current>> | null>(null);
-  const materialRevision = useRef(0);
-  const current = useRef({ sceneKey, light, onStatus, enabled });
-  current.current = { sceneKey, light, onStatus, enabled };
-  const lastMatrix = useRef<number[]>([]);
-  const lastStatus = useRef('');
+  const { gl, scene, camera, size, invalidate, setDpr } = useThree();
+  const raster = useRef<RasterRenderer | null>(null);
+  const activity = useRef(new RenderActivity());
+  const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const contextLost = useRef(false);
+  const frames = useRef(0),
+    shadowUpdates = useRef(0),
+    aoFrames = useRef(0);
+  const status = useRef('');
+  const current = useRef({ quality, onStatus });
+  current.current = { quality, onStatus };
   const rendererName = useMemo(() => {
     const context = gl.getContext();
     const extension = context.getExtension('WEBGL_debug_renderer_info');
     return extension ? String(context.getParameter(extension.UNMASKED_RENDERER_WEBGL)) : '';
   }, [gl]);
-  const gpu = useMemo(
-    () =>
-      new GpuSchedule(
-        gl.getContext() as WebGL2RenderingContext,
-        /intel|swiftshader|llvmpipe/i.test(rendererName) ? 24 : 12,
-      ),
-    [gl, rendererName],
+  const budget = rasterBudget(
+    rendererName,
+    size.width,
+    size.height,
+    window.devicePixelRatio || 1,
+    quality === 'refined',
   );
-  const contextLost = useRef(false);
-  const disabledAfterError = useRef(false);
-  const report = (status: string) => {
-    if (status !== lastStatus.current) {
-      lastStatus.current = status;
-      current.current.onStatus(status);
-    }
-  };
-  const abandon = (message: string) => {
-    state.current = null;
-    disabledAfterError.current = true;
-    resources.current?.clear();
-    gpu.dispose();
-    if (!gl.getContext().isContextLost()) {
-      gl.setRenderTarget(null);
-      gl.setScissorTest(false);
-      const viewport = gl.getSize(new THREE.Vector2());
-      gl.setViewport(0, 0, viewport.x, viewport.y);
-      gl.autoClear = true;
-    }
-    gl.domElement.dataset.renderError = message;
-    report(message);
+  useEffect(() => {
+    setDpr(budget.dpr);
+    invalidate();
+  }, [budget.dpr, setDpr, invalidate]);
+  const report = (text: string) => {
+    if (status.current === text) return;
+    status.current = text;
+    current.current.onStatus(text);
   };
   useEffect(() => {
-    const owner = new RetainedResource<NonNullable<typeof state.current>>((active) => {
-      active.worker.dispose();
-      active.pt.dispose();
-    });
-    resources.current = owner;
+    const previousAutoUpdate = gl.shadowMap.autoUpdate;
+    gl.shadowMap.autoUpdate = false;
+    gl.shadowMap.needsUpdate = true;
+    raster.current = new RasterRenderer(gl, scene, camera);
     const lost = (event: Event) => {
       event.preventDefault();
       contextLost.current = true;
-      abandon('Graphics context lost · waiting to restore the live view');
+      // Release pass handles while their context is lost. Disposing them after
+      // restoration would send stale WebGL handles to the new context.
+      raster.current?.dispose();
+      raster.current = null;
+      gl.domElement.dataset.renderStatus = 'context-lost';
+      report('Graphics context lost · waiting to restore');
     };
     const restored = () => {
       contextLost.current = false;
-      report('Graphics restored · live rendering');
+      raster.current = new RasterRenderer(gl, scene, camera);
+      gl.shadowMap.autoUpdate = false;
+      gl.shadowMap.needsUpdate = true;
+      activity.current = new RenderActivity();
+      delete gl.domElement.dataset.renderError;
+      invalidate();
     };
     gl.domElement.addEventListener('webglcontextlost', lost);
     gl.domElement.addEventListener('webglcontextrestored', restored);
+    invalidate();
     return () => {
-      if (resources.current === owner) {
-        resources.current = null;
-        state.current = null;
-      }
-      owner.dispose();
-      gpu.dispose();
+      if (settleTimer.current !== null) clearTimeout(settleTimer.current);
+      raster.current?.dispose();
+      raster.current = null;
+      gl.shadowMap.autoUpdate = previousAutoUpdate;
       gl.domElement.removeEventListener('webglcontextlost', lost);
       gl.domElement.removeEventListener('webglcontextrestored', restored);
     };
-  }, [gl, gpu]);
+  }, [gl, scene, camera, invalidate]);
   useEffect(() => {
-    let cancelled = false;
-    disabledAfterError.current = false;
-    delete gl.domElement.dataset.renderError;
-    delete gl.domElement.dataset.renderFirstSampleMs;
-    report(enabled ? 'Preparing path tracer' : 'Live rendering');
-    const owner = resources.current;
-    if (enabled && owner) {
-      // Quality changes replace raster materials; reuse the tracer but refresh
-      // its scene references before showing its next accumulated image.
-      materialRevision.current++;
-      void owner
-        .acquire(async () => {
-          const [{ WebGLPathTracer }, { PathTraceWorker }] = await Promise.all([
-            import('three-gpu-pathtracer'),
-            import('./pathTraceWorker'),
-          ]);
-          if (owner.closed || resources.current !== owner || contextLost.current)
-            throw new Error('The render canvas is no longer available.');
-          const pt = new WebGLPathTracer(gl) as Tracer;
-          let worker: import('./pathTraceWorker').PathTraceWorker;
-          try {
-            worker = new PathTraceWorker();
-          } catch (error) {
-            pt.dispose();
-            throw error;
-          }
-          pt.setBVHWorker(worker);
-          pt.textureSize.set(256, 256);
-          pt.bounces = 4;
-          pt.transmissiveBounces = 6;
-          pt.filterGlossyFactor = 0.5;
-          pt.renderDelay = 180;
-          pt.minSamples = 1;
-          pt.fadeDuration = 180;
-          return {
-            pt,
-            worker,
-            busy: false,
-            key: null,
-            light: current.current.light,
-            builds: 0,
-            scale: 0,
-            started: performance.now(),
-            preparingSince: performance.now(),
-          };
-        })
-        .then((active) => {
-          if (cancelled || !active || resources.current !== owner || contextLost.current) return;
-          state.current = active;
-          lastMatrix.current = [];
-        })
-        .catch((error) => {
-          if (cancelled || resources.current !== owner) return;
-          console.error('Path tracer initialization failed', error);
-          abandon('Refinement unavailable · live rendering');
-        });
-    }
-    // Keep initialized resources paused while another rendering mode is shown.
-    // Their canvas owns final cleanup, including its underlying GL context.
-    return () => {
-      cancelled = true;
-    };
-  }, [enabled, gl]);
+    gl.shadowMap.needsUpdate = true;
+    invalidate();
+  }, [gl, sceneKey, light, quality, invalidate]);
   useFrame(() => {
-    if (contextLost.current || gl.getContext().isContextLost()) return;
+    if (contextLost.current || gl.getContext().isContextLost() || !raster.current) return;
     const now = performance.now();
-    const active = state.current;
-    if (enabled && !disabledAfterError.current) {
-      try {
-        // A driver's initial program compilation can hold its command queue.
-        // Give it the same startup budget as the asynchronous shader compiler.
-        if (!gpu.ready(now, active?.pt.isCompiling ? 45_000 : 12_000)) return;
-      } catch (error) {
-        abandon('Refinement paused · live rendering');
-        console.error(error);
-        return;
-      }
+    camera.updateMatrixWorld();
+    const changed = activity.current.observe(
+      [...camera.matrixWorld.elements, ...camera.projectionMatrix.elements],
+      now,
+    );
+    if (changed) {
+      if (settleTimer.current !== null) clearTimeout(settleTimer.current);
+      settleTimer.current = setTimeout(() => {
+        settleTimer.current = null;
+        invalidate();
+      }, 130);
     }
-    const raster = () => {
-      gl.render(scene, camera);
-      if (enabled && !disabledAfterError.current) gpu.submittedFrame(now);
-    };
-    if (!enabled || !active) {
-      raster();
-      return;
-    }
-    const { pt } = active;
-    const requestedKey = `${current.current.sceneKey}|materials:${materialRevision.current}`;
-    if (
-      (active.busy && now - active.preparingSince > 30_000) ||
-      (pt.isCompiling && now - active.started > 45_000)
-    ) {
-      abandon('Refinement took too long · live rendering');
-      raster();
-      return;
-    }
-    if (!active.busy && active.key !== requestedKey) {
-      active.busy = true;
-      const key = requestedKey;
-      const began = performance.now();
-      active.preparingSince = began;
-      report('Preparing light · live view available');
-      scene.updateMatrixWorld(true);
-      void pt
-        .setSceneAsync(scene, camera)
-        .then(() => {
-          if (state.current !== active) return;
-          active.busy = false;
-          active.key = key;
-          active.light = current.current.light;
-          active.started = performance.now();
-          active.builds += 1;
-          gl.domElement.dataset.renderBuildMs = String(Math.round(performance.now() - began));
-          gl.domElement.dataset.renderBuilds = String(active.builds);
-          lastMatrix.current = [];
-        })
-        .catch((error) => {
-          if (state.current !== active) return;
-          console.error('Path tracer preparation failed', error);
-          abandon('Refinement unavailable · live rendering');
-        });
-    }
-    if (active.busy || active.key !== requestedKey) {
-      raster();
-      return;
-    }
+    const moving = activity.current.moving(now);
+    const contact = quality !== 'wireframe' && !moving;
+    gl.toneMappingExposure = interiorExposure(house, camera.position);
+    const refreshShadow = gl.shadowMap.needsUpdate;
+    const autoReset = gl.info.autoReset;
+    gl.info.autoReset = false;
+    gl.info.reset();
+    let shaded = false;
     try {
-      const budget = renderingBudget(rendererName, size.width, size.height, gl.getPixelRatio());
-      if (Math.abs(active.scale - budget.scale) > 0.0001) {
-        active.scale = budget.scale;
-        pt.renderScale = budget.scale;
-        pt.tiles.set(budget.tiles, budget.tiles);
-        pt.reset();
-      }
-      if (active.light !== current.current.light) {
-        active.light = current.current.light;
-        pt.updateEnvironment();
-        pt.updateLights();
-      }
-      const matrix = [...camera.matrixWorld.elements, ...camera.projectionMatrix.elements];
-      if (
-        matrix.some(
-          (value, index) => Math.abs(value - (lastMatrix.current[index] ?? Infinity)) > 1e-5,
-        )
-      ) {
-        pt.updateCamera();
-        lastMatrix.current = [...matrix];
-        active.started = performance.now();
-      }
-      if (pt.samples < budget.maxSamples) {
-        pt.renderSample();
-        gpu.submittedFrame(now);
-      }
-      gl.domElement.dataset.renderCompiling = String(pt.isCompiling);
-      gl.domElement.dataset.renderSamples = String(pt.samples);
-      gl.domElement.dataset.renderScale = String(budget.scale.toFixed(3));
-      gl.domElement.dataset.renderElapsedMs = String(
-        Math.round(performance.now() - active.started),
-      );
-      if (pt.samples >= 1 && !gl.domElement.dataset.renderFirstSampleMs)
-        gl.domElement.dataset.renderFirstSampleMs = String(
-          Math.round(performance.now() - active.started),
-        );
-      report(
-        pt.samples >= budget.maxSamples
-          ? `Path traced · ${budget.maxSamples} samples`
-          : pt.samples < 1
-            ? 'Settling light…'
-            : `Refining · ${Math.floor(pt.samples)} / ${budget.maxSamples} samples`,
-      );
-    } catch (error) {
-      console.error('Path tracer render failed', error);
-      abandon('Refinement unavailable · live rendering');
-      gl.setRenderTarget(null);
-      gl.setScissorTest(false);
-      gl.render(scene, camera);
+      shaded = raster.current.render(contact, budget.aoPixels);
+    } finally {
+      gl.info.autoReset = autoReset;
     }
+    frames.current++;
+    if (refreshShadow) shadowUpdates.current++;
+    if (shaded) aoFrames.current++;
+    Object.assign(gl.domElement.dataset, {
+      renderMode: 'realtime',
+      renderStatus: 'ready',
+      renderFrames: String(frames.current),
+      renderDrawCalls: String(gl.info.render.calls),
+      renderTriangles: String(gl.info.render.triangles),
+      renderShadowUpdates: String(shadowUpdates.current),
+      renderAoFrames: String(aoFrames.current),
+      renderAo: moving ? 'moving' : shaded ? 'on' : contact ? 'unavailable' : 'off',
+      renderDpr: String(gl.getPixelRatio()),
+      renderTextures: String(gl.info.memory.textures),
+      renderGeometries: String(gl.info.memory.geometries),
+    });
+    report(
+      quality === 'refined'
+        ? 'Presentation · ready'
+        : quality === 'clay'
+          ? 'Clay · ready'
+          : quality === 'wireframe'
+            ? 'Wireframe · ready'
+            : 'Live · ready',
+    );
   }, 1);
   return null;
 }
@@ -1705,7 +1644,8 @@ export default function SceneView(props: Props) {
     <CanvasError>
       <Canvas
         shadows
-        dpr={[1, 1.5]}
+        frameloop="demand"
+        dpr={1}
         camera={{ position: [34, 26, 38], fov: 43, near: 0.1, far: 500 }}
         gl={{
           antialias: true,
@@ -1720,8 +1660,9 @@ export default function SceneView(props: Props) {
           <Site house={props.house} quality={props.quality} />
           <Architecture {...props} />
           <CameraRig {...props} />
-          <ProgressiveRenderer
-            enabled={props.quality === 'refined'}
+          <InteractiveRenderer
+            house={props.house}
+            quality={props.quality}
             sceneKey={sceneKey}
             light={props.light}
             onStatus={props.onRenderStatus}

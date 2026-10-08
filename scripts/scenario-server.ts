@@ -92,7 +92,7 @@ host.use((req, _res, next) => {
 });
 host.use(express.json({ limit: '4mb' }));
 host.get('/__verification', (_req, res) =>
-  res.json({ mode: 'simulated', directory, queuedTurns: steps.length }),
+  res.json({ mode: 'simulated', directory, processId: process.pid, queuedTurns: steps.length }),
 );
 host.post('/__verification/turns', (req, res) => {
   steps = z.array(stepSchema).min(1).max(20).parse(req.body.steps);

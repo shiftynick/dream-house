@@ -1,5 +1,9 @@
 # Terrain session handoff
 
+Current renderer note, October 7, 2026: the user resumed work and prioritized interactive speed with visual fidelity. The browser renderer now uses demand-driven WebGL2 PBR with Live, Clay, Wireframe and single-frame Presentation modes. The progressive path tracer, its worker files, and direct tracing/BVH dependencies were retired. See [the rendering decision](docs/browser-rendering-approach.md), [browser performance evidence](docs/render-performance.md), and [capture commands](docs/render-fidelity-capture.md). The user's running production app is on port 5174; isolated checks must never reset or replace it. No commits or pushes were requested for this resumed work.
+
+The September checkpoint below records historical project and provider verification, not current runtime availability.
+
 Updated September 29, 2026. The user asked to stop development, leave the repository committed/pushed/clean, and record enough context for the next session. No feature implementation is in progress. The earlier upgrade goal is complete; this handoff does not start another goal or authorize the suggested follow-ups below.
 
 ## Starting point
@@ -76,7 +80,7 @@ The default daily cap is 60 cloud requests, shared by model rounds, transcriptio
 
 ## Architecture and invariants
 
-The stack is React + TypeScript + Vite, React Three Fiber/Three.js, a local Express server, Zod contracts and `three-gpu-pathtracer`. There is no database, cloud project storage, hosted rendering service or MCP server.
+The stack is React + TypeScript + Vite, React Three Fiber/Three.js, a local Express server and Zod contracts. The current browser renderer is WebGL2 raster PBR; it no longer imports a path tracer. There is no database, cloud project storage, hosted rendering service or MCP server.
 
 Request flow:
 
@@ -88,17 +92,17 @@ Request flow:
 
 Main source map:
 
-| Area                               | Files                                                                                                                                                                      |
-| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Documents and history              | `shared/model.ts`, `server/storage.ts`, `src/useProject.ts`, `src/projectPersistence.ts`                                                                                   |
-| Geometry and semantic commands     | `shared/design.ts`, `shared/geometry.ts`, `shared/architecture.ts`, `shared/openings.ts`, `shared/spatial.ts`                                                              |
-| Drafts, assertions and selection   | `shared/draft.ts`, `shared/assessment.ts`, `shared/selection.ts`, `shared/harness.ts`, `server/design-service.ts`                                                          |
-| Model loop and provider adapters   | `server/agent.ts`, `server/agent-context.ts`, `server/gateway.ts`, `server/connections.ts`                                                                                 |
-| Render requests and alternatives   | `shared/render.ts`, `server/render-service.ts`, `server/alternative-service.ts`, `src/useRenderBridge.ts`, `src/RenderCapture.tsx`                                         |
-| Interactive render and performance | `src/SceneView.tsx`, `src/renderGeometry.ts`, `src/renderMeshes.ts`, `src/renderPerformance.ts`, `src/gpuSchedule.ts`, `src/pathTraceWorker.ts`, `src/retainedResource.ts` |
-| Furniture                          | `shared/furniture.ts`, `shared/furniture-layout.ts`, `src/FurnitureControls.tsx`, `tests/furniture.test.ts`                                                                |
-| UI and voice                       | `src/App.tsx`, `src/ArchitectureControls.tsx`, `src/ProjectChooser.tsx`, `src/VisualAlternatives.tsx`, `src/useVoice.ts`, `src/voiceSession.ts`                            |
-| HTTP and hosting                   | `server/app.ts`, `server/index.ts`                                                                                                                                         |
+| Area                               | Files                                                                                                                                                                                                  |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Documents and history              | `shared/model.ts`, `server/storage.ts`, `src/useProject.ts`, `src/projectPersistence.ts`                                                                                                               |
+| Geometry and semantic commands     | `shared/design.ts`, `shared/geometry.ts`, `shared/architecture.ts`, `shared/openings.ts`, `shared/spatial.ts`                                                                                          |
+| Drafts, assertions and selection   | `shared/draft.ts`, `shared/assessment.ts`, `shared/selection.ts`, `shared/harness.ts`, `server/design-service.ts`                                                                                      |
+| Model loop and provider adapters   | `server/agent.ts`, `server/agent-context.ts`, `server/gateway.ts`, `server/connections.ts`                                                                                                             |
+| Render requests and alternatives   | `shared/render.ts`, `server/render-service.ts`, `server/alternative-service.ts`, `src/useRenderBridge.ts`, `src/RenderCapture.tsx`                                                                     |
+| Interactive render and performance | `src/SceneView.tsx`, `src/renderGeometry.ts`, `src/renderMeshes.ts`, `src/renderPerformance.ts`, `src/rasterRenderer.ts`, `src/renderMaterials.ts`, `src/renderLighting.ts`, `src/renderFurniture.tsx` |
+| Furniture                          | `shared/furniture.ts`, `shared/furniture-layout.ts`, `src/FurnitureControls.tsx`, `tests/furniture.test.ts`                                                                                            |
+| UI and voice                       | `src/App.tsx`, `src/ArchitectureControls.tsx`, `src/ProjectChooser.tsx`, `src/VisualAlternatives.tsx`, `src/useVoice.ts`, `src/voiceSession.ts`                                                        |
+| HTTP and hosting                   | `server/app.ts`, `server/index.ts`                                                                                                                                                                     |
 
 Preserve these contracts:
 
@@ -144,7 +148,7 @@ These are candidates for the next agreed task, not unfinished work in this check
 
 1. **Furniture relationships and clearances:** the bounded search and axis-aligned rotated bounds are conservative. Bed/nightstand adjacency, chairs under tables, seating orientation and grouped moves would benefit from explicit relationships and more appropriate usable-side clearance rules. Meshes remain schematic; add better assets only with corresponding bounds/selection/inspection support.
 2. **Agent cost and quality:** the successful small furniture run still used about 76k reported input tokens over three calls. Profile schema/context size and maintain meaningful model evaluations before changing tool exposure, prompts or model choice. Avoid restoring warning-chasing or stale-baseline claims.
-3. **Rendering/performance:** cold path-tracer shader setup on Intel was slow. General roof intersections, foundations, terrain interaction and architectural detailing remain concept approximations. Live/Clay/Wireframe modes and fast agent captures already work.
+3. **Rendering/performance:** the former path tracer's cold shader setup and continuous drawing were superseded by demand-driven raster rendering on October 7; current measurements are in `docs/render-performance.md`. General roof intersections, foundations, terrain interaction and architectural detailing remain concept approximations. Live/Clay/Wireframe modes and fast agent captures already work.
 4. **Geometry/circulation:** rooms are rectangular volumes, stairs straight, and walkthrough has no collision/gravity simulation. General constraint solving, arbitrary plans, BIM/construction documents, engineering and compliance are out of scope today.
 5. **Voice:** synthetic transport and earlier live provider checks passed, but real microphone permissions, noise robustness and conversational usability need a human microphone session.
 6. **MCP:** the control API and services are prepared for an adapter, but no MCP implementation or remote authentication is present. Wait for an explicit request to expose it.

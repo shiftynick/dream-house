@@ -90,7 +90,7 @@ type RunProgress = Pick<RunStatus, 'message' | 'status'> & {
 
 const qualityNames: Record<Quality, string> = {
   live: 'Live',
-  refined: 'Path traced',
+  refined: 'Presentation',
   clay: 'Clay',
   wireframe: 'Wireframe',
 };
@@ -2314,7 +2314,8 @@ export default function App() {
             <h3>Limitations</h3>
             <p>
               Rooms use rectangular geometry. Layouts need review for access, structure, and
-              construction. Path tracing refines lighting over time.
+              construction. Live and Presentation render immediately; contact shading settles after
+              movement.
             </p>
             <p>
               {status?.usage.requests || 0} / {status?.dailyLimit || 60} cloud requests today.

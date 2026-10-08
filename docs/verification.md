@@ -1,3 +1,5 @@
+Current renderer update, October 7, 2026: progressive path tracing was superseded by demand-driven WebGL2 PBR and single-frame Presentation. See [current browser performance evidence](render-performance.md) and [the rendering decision](browser-rendering-approach.md). The dated results below remain truthful historical records; tracing sample/build timings no longer describe the current renderer.
+
 # Editable furniture — September 29, 2026
 
 **204 automated tests and the production build passed.** Furniture is now persistent scene data, shared by 3D meshes, furnished floor plans, selection, clearance inspection and agent commands. Tests cover legacy lazy materialization, stable IDs, room-local movement, rotated bounds, deterministic arrangement, impossible fits, duplicate/missing IDs, locks, request assertions, rendered-evidence invalidation, baseline inventory deltas and save/reload/undo/redo through the shared design service.
