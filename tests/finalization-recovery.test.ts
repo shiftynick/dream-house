@@ -169,3 +169,31 @@ test('canonical finalization uses planned objectives without model retranscripti
   assert.equal(result.needsConfirmation, true);
   assert.match(result.reply, /unverified/);
 });
+
+test('published object schema does not weaken mutually exclusive review variants', async () => {
+  const turns = [
+    paint(),
+    turn('review_design', checklist),
+    turn('review_design', { assessment: 'canonical', ...checklist }),
+    finish('canonical'),
+  ];
+  const result = await runAgent({
+    scene,
+    messages,
+    maxRepairs: 0,
+    context: { allowVisualReview: false },
+    client: {
+      async complete() {
+        return turns.shift()!;
+      },
+    },
+  });
+  assert.ok(
+    result.events.some(
+      (event) =>
+        event.tool === 'review_design' &&
+        event.issues?.some((issue) => issue.code === 'invalid_tool_arguments'),
+    ),
+  );
+  assert.deepEqual(result.assessment?.requirements[0].checks, checklist.requirements[0].checks);
+});

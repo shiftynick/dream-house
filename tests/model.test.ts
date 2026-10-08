@@ -14,6 +14,8 @@ import {
 import { ProjectStore } from '../server/storage.ts';
 import { gatewayAgentModel } from '../server/agent.ts';
 import { GatewayError } from '../server/gateway.ts';
+import { designCritiqueSchema, critiqueObjectiveError } from '../server/design-planning.ts';
+import { designAssessmentSchema } from '../shared/assessment.ts';
 
 test('new projects start empty; undo, redo, and branching preserve the previous design', () => {
   const initial = newProject();
@@ -117,6 +119,20 @@ test('agent gateway adapter sends documented tool contracts and preserves usage'
           tool.function.parameters.type === 'object',
       ),
     );
+    for (const tool of body.tools) {
+      for (const combinator of ['oneOf', 'anyOf', 'allOf']) {
+        assert.equal(
+          combinator in tool.function.parameters,
+          false,
+          `${tool.function.name} must publish an object-only schema root`,
+        );
+      }
+    }
+    const review = body.tools.find((tool: any) => tool.function.name === 'review_design').function
+      .parameters;
+    assert.equal(review.properties.assessment.const, 'canonical');
+    assert.equal(review.properties.requirements.type, 'array');
+    assert.equal(review.properties.assumptions.type, 'array');
     return Response.json({
       choices: [
         {
@@ -161,4 +177,160 @@ test('agent gateway adapter rejects provider failures without retries or secret 
     return true;
   });
   assert.equal(calls, 1);
+});
+
+test('Sonnet 5.5 critique-only requests use low adaptive reasoning without changing output allowance or other calls', async () => {
+  const cases = [
+    { model: 'anthropic/claude-sonnet-5.5', toolNames: ['submit_design_critique'], low: true },
+    { model: 'anthropic/claude-sonnet-5.5', toolNames: undefined, low: false },
+    { model: 'anthropic/claude-sonnet-5.5', toolNames: ['finish_design'], low: false },
+    {
+      model: 'anthropic/claude-sonnet-5.5',
+      toolNames: ['submit_design_critique', 'apply_operations'],
+      low: false,
+    },
+    { model: 'anthropic/claude-sonnet-4.5', toolNames: ['submit_design_critique'], low: false },
+    { model: 'test/model', toolNames: ['submit_design_critique'], low: false },
+  ];
+  for (const item of cases) {
+    let requests = 0;
+    const client = gatewayAgentModel('test-only', item.model, (async (_url, init) => {
+      requests++;
+      const body = JSON.parse(String(init?.body));
+      assert.equal(body.max_tokens, 6000);
+      assert.equal(body.temperature, 0.2);
+      assert.equal(body.tool_choice, 'required');
+      assert.equal(body.parallel_tool_calls, false);
+      assert.deepEqual(body.reasoning, item.low ? { effort: 'low' } : undefined);
+      assert.equal(body.reasoning_effort, undefined);
+      assert.equal(body.thinking, undefined);
+      if (item.low)
+        assert.deepEqual(
+          body.tools.map((tool: any) => tool.function.name),
+          ['submit_design_critique'],
+        );
+      return Response.json({
+        choices: [{ finish_reason: 'tool_calls', message: { content: null, tool_calls: [] } }],
+        usage: { prompt_tokens: 1, completion_tokens: 1, cost: 0 },
+      });
+    }) as typeof fetch);
+    await client.complete(
+      [{ role: 'user', content: 'Review the supplied draft.' }],
+      undefined,
+      item.toolNames,
+    );
+    assert.equal(requests, 1);
+  }
+});
+
+test('critic manifest constrains provider observations and complete responses pass the actual objective gate', async () => {
+  const ids = ['plan-intent', ...Array.from({ length: 7 }, (_, index) => `required-${index}`)];
+  const objectives = designAssessmentSchema.parse({
+    requirements: ids.map((id) => ({
+      id,
+      request: `Complete ${id}`,
+      status: 'unverified',
+      evidence: 'Declared objective.',
+    })),
+  });
+  const submission = {
+    intentReview: { status: 'adequate', evidence: 'Reviewed the complete request.' },
+    observations: ids.map((objectiveId) => ({
+      objectiveId,
+      status: 'satisfactory',
+      evidence: 'Checked the current evidence.',
+    })),
+  };
+  const client = gatewayAgentModel('test-only', 'anthropic/claude-sonnet-5.5', (async (
+    _url,
+    init,
+  ) => {
+    const body = JSON.parse(String(init?.body));
+    const observations = body.tools[0].function.parameters.properties.observations;
+    assert.equal(observations.minItems, ids.length);
+    assert.equal(observations.maxItems, ids.length);
+    assert.deepEqual(observations.items.properties.objectiveId.enum, ids);
+    assert.deepEqual(body.reasoning, { effort: 'low' });
+    assert.equal(body.max_tokens, 6000);
+    return Response.json({
+      choices: [
+        {
+          finish_reason: 'tool_calls',
+          message: {
+            content: null,
+            tool_calls: [
+              {
+                id: 'critique',
+                type: 'function',
+                function: { name: 'submit_design_critique', arguments: JSON.stringify(submission) },
+              },
+            ],
+          },
+        },
+      ],
+      usage: { prompt_tokens: 1, completion_tokens: 1, cost: 0 },
+    });
+  }) as typeof fetch);
+  const response = await client.complete([], undefined, ['submit_design_critique'], ids);
+  const accepted = designCritiqueSchema.parse(JSON.parse(response.calls[0].function.arguments));
+  assert.equal(critiqueObjectiveError(objectives, accepted), undefined);
+  const incomplete = designCritiqueSchema.parse({
+    ...submission,
+    observations: submission.observations.slice(0, 1),
+  });
+  assert.match(
+    critiqueObjectiveError(objectives, incomplete)!,
+    /every immutable planned objective/,
+  );
+  const duplicated = designCritiqueSchema.parse({
+    ...submission,
+    observations: ids.map(() => submission.observations[0]),
+  });
+  assert.match(
+    critiqueObjectiveError(objectives, duplicated)!,
+    /every immutable planned objective/,
+  );
+});
+
+test('critic schema falls back safely without a valid bounded manifest and never constrains builder calls', async () => {
+  for (const ids of [
+    undefined,
+    [],
+    ['same', 'same'],
+    [''],
+    ['x'.repeat(61)],
+    Array.from({ length: 13 }, (_, index) => `item-${index}`),
+  ]) {
+    const client = gatewayAgentModel('test-only', 'anthropic/claude-sonnet-5.5', (async (
+      _url,
+      init,
+    ) => {
+      const observations = JSON.parse(String(init?.body)).tools[0].function.parameters.properties
+        .observations;
+      assert.equal(observations.minItems, 1);
+      assert.equal(observations.maxItems, 12);
+      assert.equal(observations.items.properties.objectiveId.enum, undefined);
+      return Response.json({
+        choices: [{ finish_reason: 'stop', message: { content: null } }],
+        usage: { prompt_tokens: 1, completion_tokens: 1, cost: 0 },
+      });
+    }) as typeof fetch);
+    await client.complete([], undefined, ['submit_design_critique'], ids);
+  }
+  const client = gatewayAgentModel('test-only', 'anthropic/claude-sonnet-5.5', (async (
+    _url,
+    init,
+  ) => {
+    const body = JSON.parse(String(init?.body));
+    assert.equal(body.reasoning, undefined);
+    assert.equal(
+      body.tools.some((tool: any) => tool.function.name === 'submit_design_critique'),
+      false,
+    );
+    return Response.json({
+      choices: [{ finish_reason: 'stop', message: { content: null } }],
+      usage: { prompt_tokens: 1, completion_tokens: 1, cost: 0 },
+    });
+  }) as typeof fetch);
+  await client.complete([], undefined, undefined, ['plan-intent']);
 });

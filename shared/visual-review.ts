@@ -10,7 +10,7 @@ import type { DesignSelection } from './selection.ts';
 export const visualReviewSchema = z
   .object({
     status: z.enum(['passed', 'issues', 'unverified']),
-    captureIds: z.array(z.string().min(1).max(60)).min(1).max(3),
+    captureIds: z.array(z.string().min(1).max(60)).min(1).max(6),
     observations: z.array(z.string().trim().min(1).max(400)).min(1).max(6),
     limitations: z.array(z.string().trim().min(1).max(400)).max(6).default([]),
   })

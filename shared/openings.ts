@@ -99,12 +99,40 @@ export function roomOpenings(scene: Scene, roomId: string, side: Side): Resolved
       (connection.roomBId === roomId && oppositeSide(connection.sideA) === side)
     ))
       continue;
+    let height = connection.kind === 'open' ? room.height : connection.height;
+    let sill = 0;
+    if (connection.kind === 'open') {
+      const a = scene.rooms.find((candidate) => candidate.id === connection.roomAId);
+      const b = scene.rooms.find((candidate) => candidate.id === connection.roomBId);
+      // A shared indoor passage is one physical aperture. Resolving each face
+      // to its own ceiling cuts an exterior hole above the shorter neighbor.
+      // Use the live ceilings, rather than stale saved connection.height, and
+      // preserve standalone/outdoor and split-level stair-opening semantics.
+      if (a && b && !outdoor(a) && !outdoor(b) && close(a.elevation, b.elevation)) {
+        const bottom = Math.max(a.elevation, b.elevation);
+        const top = Math.min(
+          ...([a, b] as const).map((face, index) => {
+            const faceSide = index === 0 ? connection.sideA : oppositeSide(connection.sideA);
+            const offset = connection.center - (horizontalSide(faceSide) ? face.x : face.z);
+            return (
+              face.elevation +
+              Math.min(
+                face.height,
+                wallOpeningHeightLimit(scene, face, faceSide, offset, connection.width),
+              )
+            );
+          }),
+        );
+        height = round(Math.max(0, top - bottom));
+        sill = round(bottom - room.elevation);
+      }
+    }
     result.push({
       id: connection.id,
       offset: round(connection.center - (horizontalSide(side) ? room.x : room.z)),
       width: connection.width,
-      height: connection.kind === 'open' ? room.height : connection.height,
-      sill: 0,
+      height,
+      sill,
       kind: connection.kind,
       source: 'connection',
       sourceRoomId: connection.roomAId,

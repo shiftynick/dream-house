@@ -10,6 +10,24 @@ import {
 } from '../shared/assessment.ts';
 import type { Scene } from '../shared/model.ts';
 
+/** Capability-specific design advice, not a fixed layout or a universal room schedule. */
+export const ARCHITECTURAL_COMPOSITION_GUIDANCE = `
+ARCHITECTURAL COMPOSITION WITH THE AVAILABLE TOOLS
+For an ambitious brief, make architectural decisions in the first plan and shell rather than expecting window enlargement or furniture alone to turn a generic box into an accomplished composition. Choose a clear primary gathering volume, substantial complementary occupied wings, a legible arrival and a useful outdoor destination when appropriate to the owner's brief. Give major wings enough wall height, roof pitch and depth to support the intended scale; reserve noticeably lower appendages for deliberate secondary roles. Coordinate ridge directions, eaves, shared boundaries and roof transitions. set_roof supports pitched and single-pitch roofs with pitch/direction; update_room.height raises eaves without introducing a new floor level. Actual changes in floor elevation need aligned stair connections and reviewed circulation. No particular number of rooms, floors or bedrooms establishes grandeur.
+Choose one predominant wall material and a purposeful accent placement, such as a stone hall/base/entry or selected wall planes within a timber composition. Use surface palettes to keep roof color consistent across different wall materials; room.palette changes every inherited surface. A material_composition allowed set alone does not establish a coherent balance. Palette names describe material collections, not literal products: verify actual roof appearance in images before claiming timber shingles, stone construction or a particular finish. A contrasting roof should be an explicit architectural choice rather than accidental room-palette inheritance.
+Design the arrival as an actual route from outside through a dimensioned exterior door into the intended entry and main circulation. A glazed foyer with only an internal door is not an entrance. Make an entry/foyer volume and its gable proportions purposeful relative to the main building, with an appropriate door position and useful space inside. After final massing, inspect the chosen outward wall and neighboring rooms to prove the door faces outdoors rather than another indoor room. Add a required feature check using {kind:'wall_opening',roomId:<chosen arrival room>,side:<inspected exterior side>,openingKind:'door',minCount:1,minWidth:<your chosen width>,minHeight:<your chosen height>}. Those dimensions are design choices, not universal standards. This typed check proves door dimensions only; the shared-wall inspection must separately establish exterior exposure. An indoor_route check or a room named Entry cannot replace this evidence. set_wall_openings replaces standalone apertures on that face: include the exterior door whenever adding or replacing windows on the same wall.
+Finish all required room massing and connections before detailed fenestration. Use the actual exposed, unoccupied wall rectangles to place generous dimensioned windows for the intended use, views and proportions, with solid wall/roof continuity above low wings. Large high windows can occupy supported gable/clerestory geometry after roof limits are inspected; open gaps are not glazing. Coordinate sill/head heights across related elevations and preserve arrival doors and internal passages. Review both the approach elevation and the plan, including portions hidden behind taller volumes.
+Make selected features usable in the first furnished scheme. Arrange gathering seats toward a modeled fireplace and check the whole hearth footprint inside its room, circulation past it and separation from the coffee table; the fireplace center alone is insufficient. Place its chimney purposefully relative to the roof profile. Furnish dining and sleeping uses, bathroom fixtures and storage through available furniture operations. A chosen terrace should connect through a real door and have a purposeful table/chair or seating arrangement that leaves arrival/circulation clear. Terrace/courtyard kinds render a floor/deck and furniture, with no enclosing roof or walls; setting their roof or wall flags does not create a roofed pavilion, balustrade or covered porch. Custom trusses, log profiles, railings, landscaping paths and bespoke structural detailing are not dedicated primitives here. Do not promise them from names or dormant flags; realize the strongest supported composition and state relevant limits honestly.
+`;
+
+export const ARCHITECTURAL_CRITIQUE_GUIDANCE = `
+CAPABILITY-AWARE ARCHITECTURAL REVIEW
+Evaluate the original ambition through the supported massing, roof hierarchy, coordinated materials, real glazing, arrival and usable furnishing. A room count or a tall hall alone is not proof of a grand or coherent design. Examine major occupied wings and the entry as parts of the whole composition, and identify a specific feasible change when their scale or proportions are inadequate. Distinguish a factual functional failure from a subjective architectural judgment and from an optional refinement; retain needs_work when the actual result does not meet the brief.
+Explicitly trace arrival from outdoors. Find a real dimensioned exterior door on the intended arrival room's exposed wall, then its route into the house. Check the opening's kind, side and dimensions against neighboring volumes. A room labelled Entry, an internal door, exterior windows or a connected indoor graph does not establish an outside entrance. If the intended entry has no exterior door, report the missing functional arrival and request a door that preserves existing glazing on that face. Do not prescribe an arbitrary universal door width.
+Check actual windows and wall continuity above low adjoining roofs, deliberate wall/roof material assignments, furniture purpose, hearth fit and circulation, and the chosen terrace's usable access/furnishing. Pixels may hide the entry, rear terrace, hearth or interior volume: use geometry for factual presence, disclose visual limits, and do not claim hidden details were inspected. Clearance warnings are schematic assumptions; do not turn every chair/table or wall-adjacent nightstand warning into an essential redesign. Wall-adjacent bathtubs and vanities can be intentional usable layouts: an assumed 0.6 m gap on every side is not a universal requirement. Identify the actual access face and obstruction before calling a bath fixture unusable.
+Repairs must be achievable with the exposed operations: room dimensions/placement/heights, supported roof styles and slopes, surface palettes, dimensioned apertures, connections, furniture and fireplace placement. For a broad ambitious brief, do not make unsupported decorative trusses, bespoke log construction, railings, roofed terrace flags, detailed landscape works or an invented bedroom/storey count mandatory. Terrace/courtyard kinds render floor and furniture only. Suggest achievable alternatives that address the identified shortcoming; do not erase a real needs_work finding merely because optional ornament is unavailable. Judge literal materials from rendered evidence, not palette names. Keep subjective style judgments labelled and reserve new required objectives for essential function or explicit owner commitments.
+`;
+
 const id = z.string().min(1).max(60);
 export const designPlanSchema = z
   .object({
@@ -88,7 +106,7 @@ export const designPlanSchema = z
           code: 'custom',
           path: ['reviewViews'],
           message:
-            'Choose exactly two distinct critique views: exterior plus one plan/interior/cutaway, leaving two captures for fresh views after a repair.',
+            'Choose exactly two distinct critique views: exterior plus one plan/interior/cutaway, leaving four captures for fresh pairs after up to two repairs.',
         });
       if (
         !plan.reviewViews.includes('exterior') ||
@@ -315,7 +333,7 @@ export const designCritiqueSchema = z
           .default([]),
       })
       .strict(),
-    captureIds: z.array(id).max(4).default([]),
+    captureIds: z.array(id).max(6).default([]),
     observations: z
       .array(
         z

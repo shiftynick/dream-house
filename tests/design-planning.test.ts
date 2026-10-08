@@ -204,11 +204,15 @@ test('planned composition gets separate skeptical critique, refuses early partia
       charged++;
     },
     client: {
-      async complete(history, _signal, tools) {
+      async complete(history, _signal, tools, criticObjectiveIds) {
         calls++;
         if (tools?.includes('submit_design_critique')) {
           critics++;
           assert.deepEqual(tools, ['submit_design_critique']);
+          assert.deepEqual(
+            criticObjectiveIds,
+            assessment.requirements.map((item) => item.id),
+          );
           assert.equal(
             history.some((message) => message.role === 'assistant' || message.role === 'tool'),
             false,
@@ -929,7 +933,7 @@ test('critic evidence has a bounded larger allowance and invalid schema feedback
   assert.equal(result.critique?.assessment.requirements[0].evidence.length, 500);
 });
 
-test('accepted composition defaults to sixteen actual calls while explicit twelve stays strict', async () => {
+test('accepted composition defaults to twenty actual calls while explicit twelve stays strict', async () => {
   const run = async (maxCalls?: number) => {
     let calls = 0;
     let critics = 0;
@@ -948,12 +952,12 @@ test('accepted composition defaults to sixteen actual calls while explicit twelv
           }
           if (calls === 1) return turn('plan_design', plan);
           if (calls === 2) return build(true);
-          if (calls <= 10)
+          if (calls <= 14)
             return turn('apply_operations', {
               operations: [{ type: 'move_group', roomIds: ['hall', 'kitchen'], dx: 0.1, dz: 0 }],
             });
-          if (calls === 11) return renderBoth();
-          if (calls === 12) return turn('critique_design', {});
+          if (calls === 15) return renderBoth();
+          if (calls === 16) return turn('critique_design', {});
           return finish(history);
         },
       },
@@ -964,8 +968,8 @@ test('accepted composition defaults to sixteen actual calls while explicit twelv
       assert.equal(critics, 0);
     } else {
       const result = await promise;
-      assert.equal(calls, 14);
-      assert.equal(result.usage.calls, 14);
+      assert.equal(calls, 18);
+      assert.equal(result.usage.calls, 18);
       assert.equal(critics, 1);
       assert.equal(result.critique?.requiresConfirmation, false);
       assert.equal(result.metrics?.captures, 2);
@@ -973,4 +977,282 @@ test('accepted composition defaults to sixteen actual calls while explicit twelv
   };
   await run();
   await run(12);
+});
+
+test('planned composition permits an initial review pair and two fresh repair pairs with current critiques', async () => {
+  let calls = 0;
+  let critics = 0;
+  const result = await runAgent({
+    scene: emptyScene,
+    messages,
+    maxRepairs: 0,
+    context: { allowVisualReview: true },
+    render: provider,
+    client: {
+      async complete(history, _signal, tools) {
+        calls++;
+        if (tools?.includes('submit_design_critique')) {
+          critics++;
+          return turn(
+            'submit_design_critique',
+            submitted(true, [`capture-${2 * critics - 1}`, `capture-${2 * critics}`]),
+          );
+        }
+        if (calls === 1) return turn('plan_design', plan);
+        if (calls === 2) return build(true);
+        if (calls === 3) return renderBoth();
+        if ([4, 7, 10].includes(calls)) return turn('critique_design', {});
+        if ([6, 9].includes(calls)) {
+          const repair = turn('apply_operations', {
+            operations: [{ type: 'set_roof', style: 'pitched', pitch: calls === 6 ? 12 : 13 }],
+          });
+          repair.calls.push(...renderBoth().calls);
+          return repair;
+        }
+        return finish(history, ['capture-5', 'capture-6']);
+      },
+    },
+  });
+  assert.equal(result.metrics?.captures, 6);
+  assert.equal(critics, 3);
+  assert.equal(result.usage.calls, 12);
+  assert.deepEqual(result.visualReview?.captureIds, ['capture-5', 'capture-6']);
+});
+
+test('planned capture budget remains hard bounded at six distinct images', async () => {
+  let calls = 0;
+  let rendered = 0;
+  await assert.rejects(
+    runAgent({
+      scene: emptyScene,
+      messages,
+      context: { allowVisualReview: true },
+      render: async (...args) => {
+        rendered++;
+        return provider(...args);
+      },
+      client: {
+        async complete() {
+          calls++;
+          if (calls === 1) return turn('plan_design', plan);
+          if (calls === 2) return build(true);
+          if (calls === 3) {
+            const captures = turn('render_view', { view: 'exterior', angle: 'southeast' });
+            for (const angle of ['southeast', 'southwest', 'northeast']) {
+              if (angle !== 'southeast')
+                captures.calls.push(...turn('render_view', { view: 'exterior', angle }).calls);
+              captures.calls.push(...turn('render_view', { view: 'plan', angle }).calls);
+            }
+            return captures;
+          }
+          return turn('render_view', { view: 'exterior', angle: 'northwest' });
+        },
+      },
+    }),
+    /six-image review limit/,
+  );
+  assert.equal(rendered, 6);
+});
+
+test('finish feedback routes a ready delivered pair directly to critique without spending more captures', async () => {
+  let calls = 0;
+  const result = await runAgent({
+    scene: emptyScene,
+    messages,
+    maxCalls: 7,
+    maxRepairs: 0,
+    context: { allowVisualReview: true },
+    render: provider,
+    client: {
+      async complete(history, _signal, tools) {
+        calls++;
+        if (tools?.includes('submit_design_critique'))
+          return turn('submit_design_critique', submitted(true, ['capture-1', 'capture-2']));
+        if (calls === 1) return turn('plan_design', plan);
+        if (calls === 2) return build(true);
+        if (calls === 3) return renderBoth();
+        if (calls === 4) return finish(history);
+        if (calls === 5) {
+          assert.match(
+            toolResults(history).at(-1).error,
+            /Current paired views are ready; call critique_design next/,
+          );
+          assert.match(toolResults(history).at(-1).error, /No additional render is needed/);
+          return turn('critique_design', {});
+        }
+        const final = finish(history);
+        const args = JSON.parse(final.calls[0].function.arguments);
+        args.assessment = 'canonical';
+        return turn('finish_design', args);
+      },
+    },
+  });
+  assert.equal(result.usage.calls, 7);
+  assert.equal(result.metrics?.captures, 2);
+  assert.equal(
+    result.assessment?.requirements.find((item) => item.id === 'plan-intent')?.status,
+    'fulfilled',
+  );
+});
+
+test('ready review pair does not force a critic when its next builder, critic and finish calls cannot fit', async () => {
+  let calls = 0;
+  const result = await runAgent({
+    scene: emptyScene,
+    messages,
+    maxCalls: 6,
+    maxRepairs: 0,
+    context: { allowVisualReview: true },
+    render: provider,
+    client: {
+      async complete(history) {
+        calls++;
+        if (calls === 1) return turn('plan_design', plan);
+        if (calls === 2) return build(true);
+        if (calls === 3) return renderBoth();
+        return finish(history);
+      },
+    },
+  });
+  assert.equal(result.usage.calls, 4);
+  assert.equal(result.needsConfirmation, true);
+  assert.match(result.reply, /Independent design critique remains unverified/);
+});
+
+test('cached A-to-B-to-A capture IDs cannot enter critique until a later builder delivery round', async () => {
+  let calls = 0,
+    critics = 0,
+    renders = 0;
+  const result = await runAgent({
+    scene: emptyScene,
+    messages,
+    context: { allowVisualReview: true },
+    render: async (...args) => {
+      renders++;
+      return provider(...args);
+    },
+    client: {
+      async complete(history, _signal, tools) {
+        calls++;
+        if (tools?.includes('submit_design_critique')) {
+          critics++;
+          assert.equal(calls, 6, 'critic must wait for the cached image delivery builder round');
+          return turn('submit_design_critique', submitted(true, ['capture-1', 'capture-2']));
+        }
+        if (calls === 1) return turn('plan_design', plan);
+        if (calls === 2) return build(true);
+        if (calls === 3) return renderBoth();
+        if (calls === 4) {
+          const batch = turn('apply_operations', {
+            operations: [{ type: 'set_material', palette: 'chalk' }],
+          });
+          batch.calls.push(
+            ...turn('apply_operations', {
+              operations: [{ type: 'set_material', palette: 'cedar' }],
+            }).calls,
+            ...renderBoth().calls,
+            ...turn('critique_design', {}).calls,
+          );
+          return batch;
+        }
+        if (calls === 5) {
+          assert.equal(critics, 0, 'same-turn cached request must not invoke a critic');
+          assert.match(toolResults(history).at(-1).error, /Same-round or stale captures/);
+          const budget = JSON.parse(String(history[2].content).split('\n')[1]);
+          assert.deepEqual(
+            budget.missingCurrentCritiqueViews,
+            [],
+            'upcoming builder call receives the pending images',
+          );
+          assert.equal(
+            history.filter(
+              (message) =>
+                Array.isArray(message.content) &&
+                message.content.some((part) => part.type === 'image_url'),
+            ).length,
+            2,
+          );
+          return turn('critique_design', {});
+        }
+        return finish(history);
+      },
+    },
+  });
+  assert.equal(calls, 7);
+  assert.equal(critics, 1);
+  assert.equal(renders, 2, 'cached rehydration must not spend another renderer capture');
+  assert.equal(result.metrics?.reusedCaptures, 2);
+  assert.deepEqual(result.critique?.critique.captureIds, ['capture-1', 'capture-2']);
+});
+
+test('oversized plan feedback budgets generated objectives and keeps the intended room program', async () => {
+  let calls = 0;
+  const oversized = {
+    ...plan,
+    features: Array.from({ length: 6 }, (_, index) => ({
+      id: `extra-${index}`,
+      request: `Feature ${index}`,
+    })),
+  };
+  const result = await runAgent({
+    scene: emptyScene,
+    messages,
+    maxCalls: 4,
+    maxRepairs: 0,
+    context: { allowVisualReview: false },
+    client: {
+      async complete(history) {
+        calls++;
+        if (calls === 1) return turn('plan_design', oversized);
+        if (calls === 2) {
+          const feedback = toolResults(history).at(-1);
+          assert.deepEqual(feedback.objectiveBudget, {
+            maximumInitialObjectives: 8,
+            automaticObjectives: 4,
+            maximumFeatureObjectives: 4,
+            suppliedFeatureObjectives: 6,
+          });
+          assert.match(feedback.planRepair, /instead of dropping rooms/);
+          return turn('plan_design', plan);
+        }
+        if (calls === 3) return build(true);
+        return turn('finish_design', {
+          mode: 'propose',
+          reply: 'A partial composition for review.',
+          assessment: 'canonical',
+        });
+      },
+    },
+  });
+  assert.equal(result.scene?.rooms.length, plan.roomProgram.length);
+  assert.ok(
+    result.assessment?.requirements.some((item) =>
+      item.checks.some((check) => check.kind === 'room_exists' && check.roomId === 'kitchen'),
+    ),
+  );
+});
+
+test('default planned twenty-call bound and focused twelve-call bound remain hard limits', async () => {
+  for (const composition of [true, false]) {
+    let calls = 0;
+    await assert.rejects(
+      runAgent({
+        scene: composition ? emptyScene : { ...emptyScene, rooms },
+        messages,
+        context: { allowVisualReview: false },
+        client: {
+          async complete() {
+            calls++;
+            if (composition && calls === 1) return turn('plan_design', plan);
+            if (composition && calls === 2) return build(true);
+            return turn('apply_operations', {
+              operations: [{ type: 'move_group', roomIds: ['hall', 'kitchen'], dx: 0.1, dz: 0 }],
+            });
+          },
+        },
+      }),
+      /model-call limit/,
+    );
+    assert.equal(calls, composition ? 20 : 12);
+  }
 });
