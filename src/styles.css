@@ -1011,6 +1011,49 @@ kbd {
   white-space: nowrap;
   font-size: 11px;
 }
+.proposal-bar {
+  max-width: calc(100% - 32px);
+  flex-wrap: wrap;
+  white-space: normal;
+}
+.proposal-bar > span {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+.alternative-preview-stack {
+  position: absolute;
+  bottom: 108px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: calc(100% - 32px);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 3;
+}
+.alternative-preview-stack > .proposal-bar {
+  position: static;
+  transform: none;
+  width: 100%;
+  max-width: 100%;
+}
+.alternative-review-notes {
+  order: -1;
+  max-height: min(200px, 28vh);
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+.alternative-review-notes > div {
+  min-width: 0;
+}
+.alternative-review-notes p {
+  margin: 5px 0 0;
+}
+.alternative-preview-bar button {
+  flex-shrink: 0;
+}
 .compare-bar {
   top: 18px;
   bottom: auto;

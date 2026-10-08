@@ -77,6 +77,38 @@ test('explicit roof, aperture and dimension assertions verify the actual cabin g
   assert.equal(result.requirements[0].verification, 'geometry');
   assert.ok(result.requirements[0].results.every((check) => check.passed));
 });
+
+test('individual aperture assertions use its stable ID and requested dimensions', () => {
+  const input = assessment([
+    {
+      kind: 'opening_item',
+      roomId: 'cabin',
+      side: 'south',
+      openingId: 'south-window',
+      width: 3,
+      offset: -1,
+      openingKind: 'window',
+    },
+  ]);
+  assert.equal(evaluateDesignAssessment(scene, input).requiresConfirmation, false);
+  const changed = structuredClone(scene);
+  changed.rooms[0].wallOpenings![0].width = 2.5;
+  assert.equal(evaluateDesignAssessment(changed, input).requiresConfirmation, true);
+  const removal = assessment([
+    {
+      kind: 'opening_item',
+      roomId: 'cabin',
+      side: 'south',
+      openingId: 'south-window',
+      present: false,
+    },
+  ]);
+  assert.equal(evaluateDesignAssessment(scene, removal).requiresConfirmation, true);
+  changed.rooms[0].wallOpenings!.shift();
+  assert.equal(evaluateDesignAssessment(changed, removal).requiresConfirmation, false);
+  changed.rooms = [];
+  assert.equal(evaluateDesignAssessment(changed, removal).requiresConfirmation, true);
+});
 test('claimed fulfillment cannot override a wrong roof, window direction, missing room or unmet dimensions', () => {
   const result = evaluateDesignAssessment(
     scene,

@@ -10,6 +10,7 @@ import type { AgentModel, ModelTurn } from '../server/agent.ts';
 import { ProjectStore } from '../server/storage.ts';
 import { newProject, redo, undo, type Project } from '../shared/model.ts';
 import { renderCamera, type RenderJob } from '../shared/render.ts';
+import { executeCommands } from '../shared/design.ts';
 import { cabinOperations } from '../scripts/scenarios.ts';
 
 const messages = [
@@ -525,5 +526,248 @@ test(
     });
     assert.equal(accepted.status, 200);
     assert.match(accepted.body.reply, /roof panels appear inconsistent/);
+  },
+);
+
+test(
+  'HTTP proposal refinement starts from the unsaved candidate, retains it, and adopts cumulatively once',
+  { timeout: 10000 },
+  async (t) => {
+    let round = 0;
+    const app = await fixture(t, {
+      modelClient: {
+        async complete(history) {
+          round++;
+          if (round === 1) return turn([['apply_operations', { operations: cabinOperations() }]]);
+          if (round === 2)
+            return turn([
+              ['finish_design', { mode: 'propose', reply: 'Review the cabin.', assessment }],
+            ]);
+          if (round === 3) {
+            assert.match(String(history[1].content), /"id":"living"/);
+            assert.match(JSON.stringify(history), /Refine this uncommitted proposal/);
+            return turn([
+              [
+                'apply_operations',
+                {
+                  operations: [
+                    {
+                      type: 'set_surface_material',
+                      roomId: 'living',
+                      surface: 'floor',
+                      palette: 'cedar',
+                    },
+                  ],
+                },
+              ],
+            ]);
+          }
+          return turn([
+            ['finish_design', { mode: 'apply', reply: 'The cabin floor is cedar.', assessment }],
+          ]);
+        },
+      },
+    });
+    const proposal = await app.http('/api/agent', 'POST', app.agentInput());
+    assert.equal(proposal.status, 200);
+    const before = structuredClone(app.designs.describe(proposal.body.draftId));
+    const refinement = await app.http(
+      `/api/design/drafts/${proposal.body.draftId}/refine`,
+      'POST',
+      {
+        projectId: app.project.projectId,
+        baseRevision: app.project.revision,
+        prompt: 'Make the living room floor cedar.',
+        context: {
+          allowVisualReview: false,
+          selection: { roomId: 'living', surface: 'floor' },
+          editScope: { roomId: 'living', surface: 'floor' },
+        },
+      },
+    );
+    assert.equal(refinement.status, 200);
+    assert.notEqual(refinement.body.draftId, proposal.body.draftId);
+    assert.equal(refinement.body.needsConfirmation, true);
+    assert.equal(refinement.body.editScopeReview.preserved, true);
+    assert.deepEqual(app.designs.describe(proposal.body.draftId), before);
+    assert.deepEqual(await app.store.read(), app.project);
+    const blocked = await app.http(`/api/design/drafts/${refinement.body.draftId}/commit`, 'POST', {
+      expectedRevision: app.project.revision,
+    });
+    assert.equal(blocked.status, 409);
+    const accepted = await app.http(
+      `/api/design/drafts/${refinement.body.draftId}/commit`,
+      'POST',
+      { expectedRevision: app.project.revision, confirm: true },
+    );
+    assert.equal(accepted.status, 200);
+    assert.equal(
+      accepted.body.project.scene.rooms.find((room: { id: string }) => room.id === 'living')
+        .surfacePalettes.floor,
+      'cedar',
+    );
+    assert.equal(accepted.body.project.past.length, 1);
+    assert.deepEqual(accepted.body.project.past[0], app.project.scene);
+  },
+);
+
+test(
+  'HTTP refinement cancellation preserves the source proposal and saved project',
+  { timeout: 10000 },
+  async (t) => {
+    const entered = deferred<void>();
+    const app = await fixture(t, {
+      modelClient: {
+        async complete(_history, signal) {
+          entered.resolve();
+          return await new Promise<ModelTurn>((_resolve, reject) =>
+            signal!.addEventListener(
+              'abort',
+              () => reject(new DOMException('Cancelled', 'AbortError')),
+              { once: true },
+            ),
+          );
+        },
+      },
+    });
+    const source = await app.designs.create(app.project.revision);
+    app.designs.apply(source.id, cabinOperations());
+    const before = structuredClone(app.designs.describe(source.id));
+    const runId = randomUUID();
+    const pending = app.http(`/api/design/drafts/${source.id}/refine`, 'POST', {
+      runId,
+      projectId: app.project.projectId,
+      baseRevision: app.project.revision,
+      prompt: 'Make the floor cedar.',
+      context: { allowVisualReview: false },
+    });
+    await entered.promise;
+    assert.equal((await app.http(`/api/agent/runs/${runId}/cancel`, 'POST')).status, 200);
+    const result = await pending;
+    assert.notEqual(result.status, 200);
+    assert.match(result.body.error, /cancelled/i);
+    assert.deepEqual(app.designs.describe(source.id), before);
+    assert.deepEqual(await app.store.read(), app.project);
+  },
+);
+
+test(
+  'HTTP alternative refinement appends an unsaved copy and enforces outstanding-item confirmation on adoption',
+  { timeout: 10000 },
+  async (t) => {
+    let round = 0;
+    const app = await fixture(t, {
+      modelClient: {
+        async complete() {
+          if (++round === 1)
+            return turn([
+              [
+                'apply_operations',
+                {
+                  operations: [
+                    {
+                      type: 'set_surface_material',
+                      roomId: 'living',
+                      surface: 'floor',
+                      palette: 'cedar',
+                    },
+                  ],
+                },
+              ],
+            ]);
+          return turn([
+            [
+              'finish_design',
+              {
+                mode: 'propose',
+                reply: 'Review the refined floor and roof preference.',
+                assessment: {
+                  requirements: [
+                    {
+                      id: 'roof-preference',
+                      request: 'A steeper roof.',
+                      status: 'unverified',
+                      evidence: 'The roof was kept as before.',
+                      limitation: 'The requested pitch is unresolved.',
+                    },
+                  ],
+                },
+              },
+            ],
+          ]);
+        },
+      },
+    });
+    const capture = async (
+      scene: Parameters<typeof renderCamera>[0],
+      request: Parameters<typeof renderCamera>[1],
+    ) => {
+      const { position, target } = renderCamera(scene, request);
+      const { sceneFingerprint } = await import('../server/render-service.ts');
+      return {
+        image: 'data:image/png;base64,YWJj',
+        width: 768,
+        height: 576,
+        sceneHash: sceneFingerprint(scene),
+        view: request.view,
+        camera: { position, target },
+      };
+    };
+    const base = executeCommands(app.project.scene, cabinOperations()).scene;
+    const choices = await app.alternatives.generate({
+      project: app.project,
+      prompt: 'Explore cabin materials.',
+      count: 2,
+      render: capture,
+      build: async (index) => ({
+        scene: { ...base, palette: index ? 'chalk' : 'cedar' },
+        reply: 'A cabin option.',
+        needsConfirmation: false,
+        issues: [],
+        changes: ['Built cabin.'],
+        events: [],
+        usage: { calls: 0, inputTokens: 0, outputTokens: 0, cost: 0 },
+      }),
+    });
+    const clientId = (await app.http('/api/render/clients', 'POST')).body.clientId;
+    t.after(() => app.renders.disconnect(clientId));
+    const listening = app.http(`/api/render/jobs?clientId=${clientId}&wait=1`);
+    const running = app.http('/api/alternatives/refine', 'POST', {
+      projectId: app.project.projectId,
+      baseRevision: app.project.revision,
+      choiceSetId: choices.choiceSetId,
+      optionId: choices.options[0].id,
+      prompt: 'Make the living floor cedar.',
+      renderClientId: clientId,
+      context: { allowVisualReview: false },
+    });
+    const job = (await listening).body.job as RenderJob;
+    await app.http(`/api/render/jobs/${job.id}/result`, 'POST', {
+      clientId,
+      result: await capture(job.scene, job.request),
+    });
+    const refined = await running;
+    assert.equal(refined.status, 200);
+    assert.equal(refined.body.draftId, undefined);
+    assert.equal(refined.body.choices.options.length, 3);
+    assert.deepEqual(
+      refined.body.choices.options.slice(0, 2),
+      JSON.parse(JSON.stringify(choices.options)),
+    );
+    assert.deepEqual(await app.store.read(), app.project);
+    const adoption = {
+      projectId: app.project.projectId,
+      expectedRevision: app.project.revision,
+      choiceSetId: choices.choiceSetId,
+      optionId: refined.body.refinedOptionId,
+    };
+    assert.equal((await app.http('/api/alternatives/choose', 'POST', adoption)).status, 409);
+    const accepted = await app.http('/api/alternatives/choose', 'POST', {
+      ...adoption,
+      confirm: true,
+    });
+    assert.equal(accepted.status, 200);
+    assert.equal(accepted.body.project.past.length, 1);
+    assert.equal(accepted.body.project.variants.length, 3);
   },
 );

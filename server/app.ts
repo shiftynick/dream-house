@@ -15,6 +15,7 @@ import {
 import { ProjectStore, RevisionConflict } from './storage.ts';
 import { runAgent, AgentRunError, type AgentModel } from './agent.ts';
 import { DesignService, DesignServiceError } from './design-service.ts';
+import { inheritedPreservationContext } from './refinement-review.ts';
 import { AlternativeService } from './alternative-service.ts';
 import { RenderBroker, RenderUnavailable } from './render-service.ts';
 import { ConnectionStore, resolveConnections } from './connections.ts';
@@ -272,177 +273,269 @@ export async function createApplication(options: {
     if (run.state.status === 'running') run.controller.abort();
     res.json({ ok: true });
   });
-  app.post('/api/agent', async (req, res, next) => {
-    const config = gateway();
-    if (!config.key)
-      return res.status(428).json({
-        error: 'Add a Vercel AI Gateway key in Connections or AI_GATEWAY_API_KEY in .env to begin.',
-      });
-    if (agentBusy)
-      return res.status(409).json({
-        error: 'A design is already in progress. Please wait for it to finish or cancel it.',
-      });
-    let run: Run | undefined, draftId: string | undefined, result: HarnessResult | undefined;
-    const runUsage: AgentUsage = { inputTokens: 0, outputTokens: 0, cost: 0, calls: 0 };
-    let reportedCalls = 0;
-    try {
-      const input = z
-        .object({
-          runId: runIdSchema.optional(),
-          baseRevision: revisionSchema.optional(),
-          projectId: projectIdSchema.optional(),
-          scene: sceneSchema,
-          messages: z.array(messageSchema).min(1).max(100),
-          context: agentContextSchema.optional(),
-          previewOnly: z.boolean().default(false),
-        })
-        .parse(req.body);
-      const id = input.runId || randomUUID();
-      if (runs.has(id))
-        throw new DesignServiceError(
-          'This request was already submitted. Check its result before sending another.',
-          409,
-        );
-      agentBusy = true;
-      if (input.context?.allowVisualReview && !renders.available(input.context.renderClientId))
-        throw new RenderUnavailable();
-      const entry = input.previewOnly
-        ? undefined
-        : await designs.create(
-            revisionSchema.parse(input.baseRevision),
-            input.scene,
-            projectIdSchema.parse(input.projectId),
+  app.post(
+    ['/api/agent', '/api/design/drafts/:id/refine', '/api/alternatives/refine'],
+    async (req, res, next) => {
+      const config = gateway();
+      if (!config.key)
+        return res.status(428).json({
+          error:
+            'Add a Vercel AI Gateway key in Connections or AI_GATEWAY_API_KEY in .env to begin.',
+        });
+      if (agentBusy)
+        return res.status(409).json({
+          error: 'A design is already in progress. Please wait for it to finish or cancel it.',
+        });
+      let run: Run | undefined, draftId: string | undefined, result: HarnessResult | undefined;
+      const runUsage: AgentUsage = { inputTokens: 0, outputTokens: 0, cost: 0, calls: 0 };
+      let reportedCalls = 0;
+      try {
+        const input = z
+          .object({
+            runId: runIdSchema.optional(),
+            baseRevision: revisionSchema.optional(),
+            projectId: projectIdSchema.optional(),
+            scene: sceneSchema.optional(),
+            messages: z.array(messageSchema).min(1).max(100).optional(),
+            prompt: z.string().trim().min(1).max(2000).optional(),
+            choiceSetId: runIdSchema.optional(),
+            optionId: runIdSchema.optional(),
+            renderClientId: runIdSchema.optional(),
+            context: agentContextSchema.optional(),
+            previewOnly: z.boolean().default(false),
+          })
+          .parse(req.body);
+        const id = input.runId || randomUUID();
+        if (runs.has(id))
+          throw new DesignServiceError(
+            'This request was already submitted. Check its result before sending another.',
+            409,
           );
-      draftId = entry?.id;
-      const draft = entry?.draft || new DesignDraft(input.scene);
-      run = {
-        controller: new AbortController(),
-        createdAt: Date.now(),
-        state: {
-          id,
-          status: 'running',
-          stage: 'starting',
-          message: 'Starting the design request.',
-          events: [],
-          preview: null,
-          issues: [],
-          changes: [],
-        },
-      };
-      runs.set(id, run);
-      for (const [key, old] of runs)
+        agentBusy = true;
+        if (input.context?.allowVisualReview && !renders.available(input.context.renderClientId))
+          throw new RenderUnavailable();
+        const refiningProposal = req.path.startsWith('/api/design/drafts/');
+        const refiningOption = req.path === '/api/alternatives/refine';
+        const refining = refiningProposal || refiningOption;
+        if (refining && input.previewOnly)
+          throw new DesignServiceError('Refinements use isolated server drafts.');
+        let alternativeSource: Awaited<ReturnType<typeof alternatives.source>> | undefined;
+        const projectId = refining ? projectIdSchema.parse(input.projectId) : input.projectId;
+        const revision = refining ? revisionSchema.parse(input.baseRevision) : input.baseRevision;
+        const prompt = refining
+          ? z.string().trim().min(1).max(2000).parse(input.prompt)
+          : undefined;
+        if (refiningOption) {
+          if (!renders.available(input.renderClientId)) throw new RenderUnavailable();
+          alternativeSource = await alternatives.source(
+            runIdSchema.parse(input.choiceSetId),
+            runIdSchema.parse(input.optionId),
+            projectId!,
+            revision!,
+          );
+        }
         if (
-          old.state.status !== 'running' &&
-          (runs.size > 40 || old.createdAt < Date.now() - 30 * 60_000)
+          alternativeSource &&
+          alternativeSource.project.variants.length + alternativeSource.optionCount >= 30
         )
-          runs.delete(key);
-      const activeRun = run;
-      res.on('close', () => {
-        if (!res.writableEnded) activeRun.controller.abort();
-      });
-      const answer = await runAgent({
-        key: config.key,
-        model: config.model,
-        scene: input.scene,
-        messages: input.messages,
-        context: input.context,
-        draft,
-        client: options.modelClient,
-        render: input.context?.allowVisualReview
-          ? renders.provider(input.context.renderClientId!)
-          : undefined,
-        signal: AbortSignal.any([run.controller.signal, AbortSignal.timeout(300_000)]),
-        beforeModelCall: async () => {
-          await chargeRequest();
-          runUsage.calls++;
-        },
-        onUsage: async (cost) => {
-          reportedCalls++;
-          runUsage.inputTokens += cost.inputTokens;
-          runUsage.outputTokens += cost.outputTokens;
-          runUsage.cost =
-            runUsage.cost === null || cost.cost === null ? null : runUsage.cost + cost.cost;
-          if (cost.cost !== null) {
-            resetDay();
-            usage.modelCost += cost.cost;
-            await persistUsage();
-          }
-        },
-        onEvent: (event, preview) => {
-          activeRun.state.stage = event.stage;
-          activeRun.state.message = event.message;
-          activeRun.state.events.push(event);
-          activeRun.state.preview = preview;
-          if (event.issues) activeRun.state.issues = event.issues;
-          if (event.changes) activeRun.state.changes = event.changes;
-        },
-      });
-      run.controller.signal.throwIfAborted();
-      if (entry && answer.scene) {
-        entry.reply = answer.reply;
-        entry.needsConfirmation = answer.needsConfirmation;
-        entry.ready = true;
-      } else if (entry) {
-        designs.discard(entry.id);
-        draftId = undefined;
-      }
-      result = {
-        ...answer,
-        runId: id,
-        baseRevision: entry?.baseRevision ?? input.baseRevision ?? 0,
-        ...(draftId ? { draftId } : {}),
-      };
-      run.state.status = 'succeeded';
-      run.state.stage = 'complete';
-      run.state.message = answer.scene ? 'The validated draft is ready.' : 'The reply is ready.';
-      res.json(result);
-    } catch (error) {
-      if (draftId) designs.discard(draftId);
-      const cancelled = run?.controller.signal.aborted;
-      const failure = cancelled
-        ? new AgentRunError('Design cancelled. Your saved house is unchanged.')
-        : error;
-      if (run) {
-        run.state.status = cancelled ? 'cancelled' : 'failed';
-        run.state.stage = cancelled ? 'cancelled' : 'failed';
-        run.state.error = failure instanceof Error ? failure.message : 'The design request failed.';
-        run.state.message = run.state.error;
-        run.state.preview = null;
-        if (failure instanceof AgentRunError) run.state.issues = failure.issues;
-      }
-      next(failure);
-    } finally {
-      agentBusy = false;
-      if (run) {
-        // Local diagnostic summaries only: no credentials, image data, or private model reasoning.
-        try {
-          await mkdir(path.join(directory, 'runs'), { recursive: true, mode: 0o700 });
-          await writeFile(
-            path.join(directory, 'runs', `${run.state.id}.json`),
-            JSON.stringify(
-              {
-                id: run.state.id,
-                model: config.model,
-                status: run.state.status,
-                events: run.state.events,
-                error: run.state.error,
-                usage: result?.usage || {
-                  ...runUsage,
-                  cost: reportedCalls === runUsage.calls ? runUsage.cost : null,
-                },
-                changes: result?.changes || run.state.changes,
-              },
-              null,
-              2,
-            ),
-            { mode: 0o600 },
+          throw new DesignServiceError(
+            'There is no room for another alternative. Remove a saved option first.',
           );
-        } catch {
-          // Diagnostics must never turn an already completed response into another failure.
+        const entry = refiningProposal
+          ? await designs.refine(z.string().parse(req.params.id), revision!, projectId!)
+          : alternativeSource
+            ? await designs.createFromCandidate(
+                revision!,
+                projectId!,
+                alternativeSource.scene,
+                alternativeSource.original,
+              )
+            : input.previewOnly
+              ? undefined
+              : await designs.create(
+                  revisionSchema.parse(input.baseRevision),
+                  sceneSchema.parse(input.scene),
+                  projectIdSchema.parse(input.projectId),
+                );
+        draftId = entry?.id;
+        const draft = entry?.draft || new DesignDraft(sceneSchema.parse(input.scene));
+        const startingScene = draft.scene;
+        const savedProject = refining ? await store.read() : undefined;
+        const sourceDescription =
+          alternativeSource?.option.description ||
+          (refiningProposal ? designs.get(z.string().parse(req.params.id)).reply : '');
+        const sourceReview =
+          alternativeSource?.reviewState ||
+          (refiningProposal ? designs.get(z.string().parse(req.params.id)) : undefined);
+        const refinementMessages = refining
+          ? [
+              ...savedProject!.messages.slice(-8),
+              {
+                id: randomUUID(),
+                role: 'assistant' as const,
+                text: `${sourceDescription || 'The displayed design is an unsaved proposal.'}\nInherited review checklist (retain required IDs/checks and resolve or disclose outstanding items): ${JSON.stringify(alternativeSource?.option.assessment || (refiningProposal ? designs.get(z.string().parse(req.params.id)).assessment : undefined))}\nImmutable original preservation baselines (these precede the current candidate; repair or disclose these constraints): ${JSON.stringify(inheritedPreservationContext(sourceReview))}\nInherited visual concerns: ${JSON.stringify(alternativeSource?.option.visualReview || (refiningProposal ? designs.get(z.string().parse(req.params.id)).visualReview : undefined))}`,
+              },
+              {
+                id: randomUUID(),
+                role: 'user' as const,
+                text: `Refine this uncommitted ${alternativeSource ? 'alternative' : 'proposal'}: ${prompt}. Preserve its existing design intent, confirmed requirements and unrelated geometry. The saved house remains unchanged until the user adopts the result.`,
+              },
+            ]
+          : z.array(messageSchema).min(1).max(100).parse(input.messages);
+        run = {
+          controller: new AbortController(),
+          createdAt: Date.now(),
+          state: {
+            id,
+            status: 'running',
+            stage: 'starting',
+            message: 'Starting the design request.',
+            events: [],
+            preview: null,
+            issues: [],
+            changes: [],
+          },
+        };
+        runs.set(id, run);
+        for (const [key, old] of runs)
+          if (
+            old.state.status !== 'running' &&
+            (runs.size > 40 || old.createdAt < Date.now() - 30 * 60_000)
+          )
+            runs.delete(key);
+        const activeRun = run;
+        res.on('close', () => {
+          if (!res.writableEnded) activeRun.controller.abort();
+        });
+        let answer = await runAgent({
+          key: config.key,
+          model: config.model,
+          scene: startingScene,
+          messages: refinementMessages,
+          context: input.context,
+          draft,
+          client: options.modelClient,
+          render: input.context?.allowVisualReview
+            ? renders.provider(input.context.renderClientId!)
+            : undefined,
+          signal: AbortSignal.any([run.controller.signal, AbortSignal.timeout(300_000)]),
+          beforeModelCall: async () => {
+            await chargeRequest();
+            runUsage.calls++;
+          },
+          onUsage: async (cost) => {
+            reportedCalls++;
+            runUsage.inputTokens += cost.inputTokens;
+            runUsage.outputTokens += cost.outputTokens;
+            runUsage.cost =
+              runUsage.cost === null || cost.cost === null ? null : runUsage.cost + cost.cost;
+            if (cost.cost !== null) {
+              resetDay();
+              usage.modelCost += cost.cost;
+              await persistUsage();
+            }
+          },
+          onEvent: (event, preview) => {
+            activeRun.state.stage = event.stage;
+            activeRun.state.message = event.message;
+            activeRun.state.events.push(event);
+            activeRun.state.preview = preview;
+            if (event.issues) activeRun.state.issues = event.issues;
+            if (event.changes) activeRun.state.changes = event.changes;
+          },
+        });
+        run.controller.signal.throwIfAborted();
+        if (entry && answer.scene) {
+          answer = designs.complete(entry.id, answer, input.context);
+          if (designs.describe(entry.id).issues.some((issue) => issue.severity === 'error'))
+            throw new DesignServiceError('The refinement violates the saved house design checks.');
+        } else if (entry) {
+          designs.discard(entry.id);
+          draftId = undefined;
+        }
+        let refinedAlternative:
+          Awaited<ReturnType<typeof alternatives.appendRefinement>> | undefined;
+        if (alternativeSource && answer.scene) {
+          refinedAlternative = await alternatives.appendRefinement({
+            choiceSetId: input.choiceSetId!,
+            optionId: input.optionId!,
+            projectId: projectId!,
+            expectedRevision: revision!,
+            answer,
+            context: input.context,
+            render: renders.provider(input.renderClientId!),
+            signal: run.controller.signal,
+          });
+          answer = refinedAlternative.answer;
+          if (draftId) designs.discard(draftId);
+          draftId = undefined;
+        }
+        result = {
+          ...answer,
+          ...(refining && answer.scene ? { needsConfirmation: true } : {}),
+          ...(refinedAlternative
+            ? {
+                choices: refinedAlternative.choices,
+                refinedOptionId: refinedAlternative.refinedOptionId,
+              }
+            : {}),
+          runId: id,
+          baseRevision: entry?.baseRevision ?? input.baseRevision ?? 0,
+          ...(draftId ? { draftId } : {}),
+        };
+        run.state.status = 'succeeded';
+        run.state.stage = 'complete';
+        run.state.message = answer.scene ? 'The validated draft is ready.' : 'The reply is ready.';
+        res.json(result);
+      } catch (error) {
+        if (draftId) designs.discard(draftId);
+        const cancelled = run?.controller.signal.aborted;
+        const failure = cancelled
+          ? new AgentRunError('Design cancelled. Your saved house is unchanged.')
+          : error;
+        if (run) {
+          run.state.status = cancelled ? 'cancelled' : 'failed';
+          run.state.stage = cancelled ? 'cancelled' : 'failed';
+          run.state.error =
+            failure instanceof Error ? failure.message : 'The design request failed.';
+          run.state.message = run.state.error;
+          run.state.preview = null;
+          if (failure instanceof AgentRunError) run.state.issues = failure.issues;
+        }
+        next(failure);
+      } finally {
+        agentBusy = false;
+        if (run) {
+          // Local diagnostic summaries only: no credentials, image data, or private model reasoning.
+          try {
+            await mkdir(path.join(directory, 'runs'), { recursive: true, mode: 0o700 });
+            await writeFile(
+              path.join(directory, 'runs', `${run.state.id}.json`),
+              JSON.stringify(
+                {
+                  id: run.state.id,
+                  model: config.model,
+                  status: run.state.status,
+                  events: run.state.events,
+                  error: run.state.error,
+                  usage: result?.usage || {
+                    ...runUsage,
+                    cost: reportedCalls === runUsage.calls ? runUsage.cost : null,
+                  },
+                  changes: result?.changes || run.state.changes,
+                },
+                null,
+                2,
+              ),
+              { mode: 0o600 },
+            );
+          } catch {
+            // Diagnostics must never turn an already completed response into another failure.
+          }
         }
       }
-    }
-  });
+    },
+  );
   app.post('/api/alternatives/generate', async (req, res, next) => {
     if (agentBusy)
       return res
@@ -478,6 +571,7 @@ export async function createApplication(options: {
         project,
         prompt: input.prompt,
         count: input.count,
+        context: input.context,
         render: renders.provider(input.renderClientId),
         signal,
         build: async (index, previous) =>
@@ -521,6 +615,24 @@ export async function createApplication(options: {
       agentBusy = false;
     }
   });
+  app.post('/api/alternatives/refinements/discard', async (req, res) => {
+    const input = z
+      .object({
+        projectId: projectIdSchema,
+        expectedRevision: revisionSchema,
+        choiceSetId: runIdSchema,
+        optionId: runIdSchema,
+      })
+      .parse(req.body);
+    res.json({
+      choices: await alternatives.discardRefinement(
+        input.choiceSetId,
+        input.optionId,
+        input.projectId,
+        input.expectedRevision,
+      ),
+    });
+  });
   app.post('/api/alternatives/choose', async (req, res) => {
     const input = z
       .object({
@@ -529,6 +641,7 @@ export async function createApplication(options: {
         choiceSetId: runIdSchema,
         optionId: runIdSchema,
         preferenceText: z.string().max(1000).default(''),
+        confirm: z.boolean().default(false),
       })
       .parse(req.body);
     res.json({
@@ -538,6 +651,7 @@ export async function createApplication(options: {
         input.projectId,
         input.expectedRevision,
         input.preferenceText,
+        input.confirm,
       ),
     });
   });

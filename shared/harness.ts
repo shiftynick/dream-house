@@ -4,11 +4,19 @@ import type { Scene, Project } from './model.ts';
 import type { DesignIssue } from './design.ts';
 import { designSelectionSchema } from './selection.ts';
 import type { EvaluatedAssessment } from './assessment.ts';
+import {
+  preservationAssertionSchema,
+  type EditScopeReview,
+  type PreservationResult,
+} from './preservation.ts';
 
 const vector = z.tuple([z.number().finite(), z.number().finite(), z.number().finite()]);
 export const agentContextSchema = z.object({
   selectedRoomId: z.string().max(60).nullable().optional(),
   selection: designSelectionSchema.nullable().optional(),
+  // Per-request scope: edits outside this selected part require explicit review.
+  editScope: designSelectionSchema.optional(),
+  preservationChecks: z.array(preservationAssertionSchema).max(12).optional(),
   renderClientId: z.string().uuid().optional(),
   allowVisualReview: z.boolean().optional(),
   view: z.enum(['orbit', 'walk', 'plan']).optional(),
@@ -74,6 +82,8 @@ export type HarnessResult = {
   metrics?: RunMetrics;
   assessment?: EvaluatedAssessment;
   visualReview?: EvaluatedVisualReview;
+  editScopeReview?: EditScopeReview;
+  preservationResults?: PreservationResult[];
 };
 export type RunStatus = {
   id: string;

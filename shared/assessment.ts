@@ -6,10 +6,27 @@ import { paletteSchema, sideSchema, surfaceSchema, type Scene } from './model.ts
 import { roomFurniture } from './furniture.ts';
 import { furnitureBlockingCodes } from './furniture-layout.ts';
 import { inspectRoomFurniture } from './spatial.ts';
+import { preservationAssertionSchemas, evaluatePreservation } from './preservation.ts';
 
 const id = z.string().min(1).max(60);
 const tolerance = z.number().finite().min(0).max(0.5).default(0.01);
 export const designAssertionSchema = z.discriminatedUnion('kind', [
+  ...preservationAssertionSchemas,
+  z
+    .object({
+      kind: z.literal('opening_item'),
+      roomId: id,
+      side: sideSchema,
+      openingId: id,
+      present: z.boolean().default(true),
+      openingKind: z.enum(['window', 'door', 'open']).optional(),
+      offset: z.number().finite().optional(),
+      width: z.number().finite().optional(),
+      height: z.number().finite().optional(),
+      sill: z.number().finite().optional(),
+      tolerance,
+    })
+    .strict(),
   z.object({ kind: z.literal('furniture_layout'), roomId: id }).strict(),
   z
     .object({
@@ -127,9 +144,41 @@ export type EvaluatedAssessment = {
 export function evaluateDesignAssessment(
   scene: Scene,
   input: DesignAssessment,
+  baseline?: Scene,
 ): EvaluatedAssessment {
   const inspection = inspectDesign(scene);
   const check = (assertion: z.infer<typeof designAssertionSchema>): AssertionResult => {
+    if (
+      assertion.kind === 'unchanged_room' ||
+      assertion.kind === 'unchanged_surface' ||
+      assertion.kind === 'unchanged_furniture' ||
+      assertion.kind === 'unchanged_opening' ||
+      assertion.kind === 'unchanged_except_selection'
+    )
+      return evaluatePreservation(baseline, scene, assertion);
+    if (assertion.kind === 'opening_item') {
+      if (!scene.rooms.some((room) => room.id === assertion.roomId))
+        return { passed: false, actual: null, reason: `Room ${assertion.roomId} does not exist.` };
+      const opening = roomOpenings(scene, assertion.roomId, assertion.side).find(
+        (item) => item.id === assertion.openingId,
+      );
+      const matches =
+        !!opening &&
+        (!assertion.openingKind || opening.kind === assertion.openingKind) &&
+        (['offset', 'width', 'height', 'sill'] as const).every(
+          (property) =>
+            assertion[property] === undefined ||
+            Math.abs(opening[property] - assertion[property]!) <= assertion.tolerance,
+        );
+      const passed = assertion.present ? matches : !opening;
+      return {
+        passed,
+        actual: opening ?? null,
+        reason: passed
+          ? `Opening ${assertion.openingId} matches the request.`
+          : `Opening ${assertion.openingId} does not match the requested presence or dimensions.`,
+      };
+    }
     if (assertion.kind === 'indoor_route') {
       const component = inspection.components.find((ids) =>
         assertion.roomIds.every((id) => ids.includes(id)),

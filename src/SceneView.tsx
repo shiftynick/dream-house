@@ -22,6 +22,8 @@ import { roomOpenings } from '../shared/openings';
 import { renderCamera, renderRequestSchema } from '../shared/render';
 import { surfacePalette, type DesignSelection, type DesignSurface } from '../shared/selection';
 import { roomFurniture } from '../shared/furniture';
+import type { DesignCommand } from '../shared/design';
+import { PlanFurniture } from './PlanFurniture';
 import { daylightSkyPixels, interiorExposure } from './renderLighting';
 import { RasterRenderer } from './rasterRenderer';
 import { FurnitureMesh } from './renderFurniture';
@@ -58,6 +60,9 @@ type Props = {
   onRenderStatus: (text: string) => void;
   resetKey: number;
   onCameraChange?: (camera: CameraContext) => void;
+  onApplyFurniture?: (commands: DesignCommand[]) => boolean;
+  onInteractionError?: (message: string) => void;
+  editingDisabled?: boolean;
 };
 
 function Box({
@@ -359,7 +364,17 @@ function RoomMesh({
         rotation={[0, horizontal ? 0 : -Math.PI / 2, 0]}
         onClick={(event) => {
           event.stopPropagation();
-          pick(side);
+          const offset = horizontal ? event.point.x - r.x : event.point.z - r.z;
+          const height = event.point.y - r.elevation;
+          const opening = openings.find(
+            (item) =>
+              Math.abs(offset - item.offset) <= item.width / 2 + 0.04 &&
+              height >= item.sill - 0.04 &&
+              height <= item.sill + item.height + 0.04,
+          );
+          if (opening && onSelectSurface)
+            onSelectSurface({ roomId: r.id, surface: side, openingId: opening.id });
+          else pick(side);
         }}
       >
         {finishes[side].map((part) => (
@@ -1214,7 +1229,20 @@ export function FloorPlanSvg({
   onSelectSurface,
   level,
   quality = 'live',
-}: Pick<Props, 'house' | 'selected' | 'onSelect' | 'selection' | 'onSelectSurface'> & {
+  onApplyFurniture,
+  onInteractionError,
+  editingDisabled,
+}: Pick<
+  Props,
+  | 'house'
+  | 'selected'
+  | 'onSelect'
+  | 'selection'
+  | 'onSelectSurface'
+  | 'onApplyFurniture'
+  | 'onInteractionError'
+  | 'editingDisabled'
+> & {
   level: number;
   quality?: Quality;
 }) {
@@ -1309,67 +1337,22 @@ export function FloorPlanSvg({
             {[...roomFurniture(r)]
               .sort((a, b) => Number(b.kind === 'rug') - Number(a.kind === 'rug'))
               .map((item) => (
-                <g
+                <PlanFurniture
                   key={item.id}
-                  data-furniture-id={item.id}
-                  data-furniture-kind={item.kind}
-                  transform={`translate(${r.x + item.x} ${r.z + item.z}) rotate(${-item.rotation})`}
-                  role={onSelectSurface ? 'button' : undefined}
-                  tabIndex={onSelectSurface ? 0 : undefined}
-                  aria-label={`${item.name} in ${r.name}`}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onSelectSurface?.({ roomId: r.id, surface: 'room', furnitureId: item.id });
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      onSelectSurface?.({ roomId: r.id, surface: 'room', furnitureId: item.id });
-                    }
-                  }}
-                >
-                  <title>{`${item.name} · ${item.width} × ${item.depth} m`}</title>
-                  <rect
-                    x={-item.width / 2}
-                    y={-item.depth / 2}
-                    width={item.width}
-                    height={item.depth}
-                    rx={Math.min(0.08, item.width * 0.1)}
-                    fill={item.kind === 'rug' ? '#ded2b9' : '#f3eee4'}
-                    fillOpacity={item.kind === 'rug' ? 0.28 : 0.92}
-                    stroke={
-                      selection?.roomId === r.id && selection.furnitureId === item.id
-                        ? '#b87f45'
-                        : '#7e897f'
-                    }
-                    strokeWidth={
-                      selection?.roomId === r.id && selection?.furnitureId === item.id
-                        ? 0.08
-                        : 0.035
-                    }
-                    strokeDasharray={item.kind === 'rug' ? '.12 .08' : undefined}
-                  />
-                  {['sofa', 'armchair', 'chair', 'bed'].includes(item.kind) && (
-                    <rect
-                      pointerEvents="none"
-                      x={-item.width * 0.44}
-                      y={-item.depth * 0.44}
-                      width={item.width * 0.88}
-                      height={item.depth * 0.2}
-                      fill="#c3c6ba"
-                    />
-                  )}
-                  {item.kind !== 'rug' && (
-                    <path
-                      pointerEvents="none"
-                      d={`M 0 ${item.depth * 0.2} l -.12 -.12 m .12 .12 l .12 -.12`}
-                      fill="none"
-                      stroke="#7e897f"
-                      strokeWidth=".035"
-                    />
-                  )}
-                </g>
+                  scene={house}
+                  room={r}
+                  item={item}
+                  selected={selection?.roomId === r.id && selection.furnitureId === item.id}
+                  disabled={editingDisabled}
+                  onApply={onApplyFurniture}
+                  onError={onInteractionError}
+                  onSelect={
+                    onSelectSurface
+                      ? () =>
+                          onSelectSurface({ roomId: r.id, surface: 'room', furnitureId: item.id })
+                      : undefined
+                  }
+                />
               ))}
             <text
               pointerEvents="none"
@@ -1478,20 +1461,64 @@ export function FloorPlanSvg({
                     const start = center - opening.width / 2,
                       end = center + opening.width / 2;
                     const color =
-                      selection?.roomId === room.id && selection.surface === side
+                      selection?.roomId === room.id &&
+                      selection.surface === side &&
+                      (!selection.openingId || selection.openingId === opening.id)
                         ? '#c98a36'
                         : '#658f9a';
                     return (
                       <g
                         key={`opening-${opening.id}`}
+                        data-opening-id={opening.id}
                         data-opening-kind={opening.kind}
-                        pointerEvents="none"
+                        role={onSelectSurface ? 'button' : undefined}
+                        tabIndex={onSelectSurface ? 0 : undefined}
+                        aria-label={`Select ${room.name} ${side} ${opening.kind === 'open' ? 'passage' : opening.kind} ${opening.id}`}
+                        onClick={
+                          onSelectSurface
+                            ? (event) => {
+                                event.stopPropagation();
+                                onSelectSurface({
+                                  roomId: room.id,
+                                  surface: side,
+                                  openingId: opening.id,
+                                });
+                              }
+                            : undefined
+                        }
+                        onKeyDown={
+                          onSelectSurface
+                            ? (event) => {
+                                if (event.key === 'Enter' || event.key === ' ') {
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                  onSelectSurface({
+                                    roomId: room.id,
+                                    surface: side,
+                                    openingId: opening.id,
+                                  });
+                                }
+                              }
+                            : undefined
+                        }
+                        style={onSelectSurface ? { cursor: 'pointer' } : undefined}
                         transform={
                           axis.horizontal
                             ? `translate(${start} ${axis.boundary})`
                             : `translate(${axis.boundary} ${start}) rotate(90)`
                         }
                       >
+                        {onSelectSurface && (
+                          <rect
+                            x={0}
+                            y={-0.25}
+                            width={opening.width}
+                            height={0.5}
+                            fill={selection?.openingId === opening.id ? '#e6b773' : 'transparent'}
+                            fillOpacity={0.35}
+                            pointerEvents="all"
+                          />
+                        )}
                         {opening.kind === 'window' ? (
                           <>
                             <rect
@@ -1601,13 +1628,32 @@ function FloorPlan({
   selection,
   onSelectSurface,
   quality,
-}: Pick<Props, 'house' | 'selected' | 'onSelect' | 'selection' | 'onSelectSurface' | 'quality'>) {
+  onApplyFurniture,
+  onInteractionError,
+  editingDisabled,
+}: Pick<
+  Props,
+  | 'house'
+  | 'selected'
+  | 'onSelect'
+  | 'selection'
+  | 'onSelectSurface'
+  | 'quality'
+  | 'onApplyFurniture'
+  | 'onInteractionError'
+  | 'editingDisabled'
+>) {
   const levels = [...new Set(house.rooms.map((r) => r.elevation))].sort((a, b) => a - b);
   return (
     <div className="floor-plan">
       <div className="plan-heading">
         <h2>Floor plan</h2>
-        <p>Dimensions in meters · blue lines are windows · arcs are doors</p>
+        <p>Dimensions in meters · select a window or door to edit it</p>
+        {onApplyFurniture && !editingDisabled && (
+          <p>
+            Drag furniture to move · drag its round handle to rotate · Shift snaps · Escape cancels
+          </p>
+        )}
       </div>
       <div className="plan-levels">
         {(levels.length ? levels : [0]).map((level) => (
@@ -1621,6 +1667,9 @@ function FloorPlan({
               onSelectSurface={onSelectSurface}
               level={level}
               quality={quality}
+              onApplyFurniture={onApplyFurniture}
+              onInteractionError={onInteractionError}
+              editingDisabled={editingDisabled}
             />
           </div>
         ))}

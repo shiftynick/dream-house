@@ -1,4 +1,5 @@
 import { FurnitureControls } from './FurnitureControls';
+import { SelectedOpeningControls } from './SelectedOpeningControls';
 import { roomFurniture } from '../shared/furniture';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
@@ -42,6 +43,7 @@ import {
 import { api, ApiError, type Status } from './api';
 import { useProject } from './useProject';
 import Modal from './Modal';
+import DesignReport from './DesignReport';
 import { OpeningControls, RoofControls } from './ArchitectureControls';
 import ProjectChooser from './ProjectChooser';
 import { useRenderBridge } from './useRenderBridge';
@@ -276,7 +278,9 @@ export default function App() {
     [light, setLight] = useState<Light>('day'),
     [cutaway, setCutaway] = useState(false),
     [resetKey, setResetKey] = useState(0);
-  const [modal, setModal] = useState<'connections' | 'versions' | 'projects' | 'help' | null>(null),
+  const [modal, setModal] = useState<
+      'connections' | 'versions' | 'projects' | 'help' | 'report' | null
+    >(null),
     [panel, setPanel] = useState<'spaces' | 'materials'>('spaces'),
     [partner, setPartner] = useState(true);
   const [input, setInput] = useState(''),
@@ -299,6 +303,8 @@ export default function App() {
     runIdRef = useRef<string | null>(null),
     cancelledRef = useRef(false);
   const [runProgress, setRunProgress] = useState<RunProgress | null>(null);
+  const [proposalVersions, setProposalVersions] = useState<DesignResult[]>([]);
+  const [onlySelectedPart, setOnlySelectedPart] = useState(false);
   const [lastResult, setLastResult] = useState<DesignResult | null>(null);
   const previousAlternativeError = useRef('');
   const [allowVisualReview, setAllowVisualReview] = useState(() => {
@@ -345,9 +351,6 @@ export default function App() {
   useEffect(() => {
     chatEnd.current?.scrollIntoView({ behavior: 'smooth' });
   }, [project?.messages.length, busy]);
-  useEffect(() => {
-    if (project && selection && !validSelection(project.scene, selection)) setSelection(null);
-  }, [project, selection]);
   const stopSpeech = useCallback(() => {
     speechRun.current++;
     speechRequest.current?.abort();
@@ -416,6 +419,7 @@ export default function App() {
     context: {
       selectedRoomId: selected,
       selection: selection ?? undefined,
+      ...(onlySelectedPart && selection ? { editScope: selection } : {}),
       view,
       allowVisualReview,
       renderClientId: renderBridge.clientId ?? undefined,
@@ -431,12 +435,23 @@ export default function App() {
       setSelection(null);
       setCompareId(null);
       setPending(null);
+      setProposalVersions([]);
       setLastResult(null);
       setRunProgress(null);
       setResetKey((key) => key + 1);
       setModal(null);
     },
   });
+  useEffect(() => {
+    const scene = alternativeModel.preview?.scene || pending?.scene || project?.scene;
+    if (!scene || (selection && !validSelection(scene, selection))) {
+      setSelection(null);
+      setOnlySelectedPart(false);
+    }
+  }, [project?.scene, alternativeModel.preview?.scene, pending?.scene, selection]);
+  useEffect(() => {
+    setOnlySelectedPart(false);
+  }, [project?.projectId]);
   useEffect(() => {
     const previous = previousAlternativeError.current;
     previousAlternativeError.current = alternativeModel.error;
@@ -513,25 +528,31 @@ export default function App() {
       });
       const wasEmpty = !latest.scene.rooms.length;
       acceptPersisted(committed.project);
+      for (const version of proposalVersions)
+        if (version.draftId && version.draftId !== result.draftId)
+          void api(`design/drafts/${version.draftId}`, { method: 'DELETE' }).catch(() => {});
+      setProposalVersions([]);
       setPending(null);
       setCompareId(null);
       if (!committed.project.scene.rooms.some((room) => room.id === selected)) setSelected(null);
       if (wasEmpty && committed.project.scene.rooms.length) setResetKey((key) => key + 1);
       void speak(committed.reply, true);
     },
-    [flush, acceptPersisted, selected, speak],
+    [flush, acceptPersisted, selected, speak, proposalVersions],
   );
   const discardDraft = useCallback(async () => {
     if (!pending?.draftId) return;
     try {
       await api(`design/drafts/${pending.draftId}`, { method: 'DELETE' });
-      setPending(null);
-      setLastResult(null);
+      const remaining = proposalVersions.filter((version) => version.draftId !== pending.draftId);
+      setProposalVersions(remaining);
+      setPending(remaining.at(-1) || null);
+      setLastResult(remaining.at(-1) || null);
       setRunProgress(null);
     } catch (error) {
       notify((error as Error).message);
     }
-  }, [pending, notify]);
+  }, [pending, proposalVersions, notify]);
   const keepDraft = useCallback(async () => {
     if (!pending || busyRef.current) return;
     busyRef.current = true;
@@ -548,6 +569,7 @@ export default function App() {
   }, [pending, applyDraft, notify, markConflict]);
   const cancelRun = useCallback(async () => {
     cancelledRef.current = true;
+    if (alternativeModel.busy === 'refining') alternativeModel.cancel();
     setRunProgress(
       (progress) => progress && { ...progress, message: 'Cancelling this design request…' },
     );
@@ -559,7 +581,7 @@ export default function App() {
         /* A request still flushing local saves has not registered its run yet. */
       }
     }
-  }, []);
+  }, [alternativeModel.busy, alternativeModel.cancel]);
   useEffect(() => {
     if (!busy) return;
     let active = true;
@@ -593,18 +615,8 @@ export default function App() {
       text = text.trim();
       const current = projectRef.current;
       if (!text || !current || busyRef.current) return;
-      if (pending) {
-        notify('Keep or discard the proposed change before making another request.');
-        return;
-      }
       if (compareId) {
         notify('Exit comparison before asking for a change to your current house.');
-        return;
-      }
-      if (alternativeModel.preview) {
-        notify(
-          'Choose a direction or return to your current house before asking for another change.',
-        );
         return;
       }
       if (saved === 'conflict') {
@@ -634,12 +646,81 @@ export default function App() {
                         ? () => setCutaway(false)
                         : null;
       if (command) {
+        if ((local === 'undo' || local === 'redo') && (pending || alternativeModel.preview)) {
+          notify('Return to the saved house before undoing or redoing.');
+          return;
+        }
         command();
         return;
       }
       if (!status?.modelConnected) {
         setInput(text);
         setModal('connections');
+        return;
+      }
+      if (pending || alternativeModel.preview) {
+        cancelledRef.current = false;
+        runIdRef.current = uid();
+        const refinementContext = {
+          selectedRoomId: selected,
+          selection: selection ?? undefined,
+          ...(onlySelectedPart && selection ? { editScope: selection } : {}),
+          allowVisualReview,
+          renderClientId: renderBridge.clientId ?? undefined,
+          view,
+          ...(view !== 'plan' && cameraRef.current ? { camera: cameraRef.current } : {}),
+        };
+        try {
+          let result: DesignResult | undefined;
+          if (alternativeModel.preview)
+            result = await alternativeModel.refine(text, refinementContext, runIdRef.current);
+          else if (pending?.draftId) {
+            busyRef.current = true;
+            setBusy(true);
+            setRunProgress({
+              stage: 'starting',
+              status: 'running',
+              message: 'Refining the unsaved proposal…',
+            });
+            const latest = await flush();
+            if (!latest) throw new Error('Your house is not loaded.');
+            if (cancelledRef.current) throw new Error('Refinement cancelled.');
+            result = await api<DesignResult>(`design/drafts/${pending.draftId}/refine`, {
+              method: 'POST',
+              body: JSON.stringify({
+                runId: runIdRef.current,
+                projectId: latest.projectId,
+                baseRevision: latest.revision,
+                prompt: text,
+                context: refinementContext,
+              }),
+            });
+            if (cancelledRef.current) {
+              if (result.draftId)
+                await api(`design/drafts/${result.draftId}`, { method: 'DELETE' });
+              throw new Error('Refinement cancelled. The original proposal remains available.');
+            }
+            if (result.scene) {
+              setProposalVersions((versions) => [
+                ...(versions.length ? versions : [pending]),
+                result!,
+              ]);
+              setPending(result);
+            }
+          }
+          if (result) {
+            setLastResult(result);
+            void speak(result.reply);
+          }
+        } catch (failure) {
+          if (failure instanceof ApiError && failure.code === 'revision_conflict') markConflict();
+          notify((failure as Error).message);
+        } finally {
+          runIdRef.current = null;
+          busyRef.current = false;
+          setBusy(false);
+          refreshStatus();
+        }
         return;
       }
       setProject((p) =>
@@ -674,6 +755,7 @@ export default function App() {
             context: {
               selectedRoomId: selected,
               selection: selection ?? undefined,
+              ...(onlySelectedPart && selection ? { editScope: selection } : {}),
               allowVisualReview,
               renderClientId: renderBridge.clientId ?? undefined,
               view,
@@ -689,6 +771,7 @@ export default function App() {
         if (result.scene) {
           if (result.needsConfirmation) {
             setPending(result);
+            setProposalVersions([result]);
             setCompareId(null);
           } else await applyDraft(result, false);
         } else {
@@ -742,6 +825,8 @@ export default function App() {
       pending,
       compareId,
       alternativeModel.preview,
+      alternativeModel.refine,
+      onlySelectedPart,
       saved,
       notify,
       refreshStatus,
@@ -760,17 +845,11 @@ export default function App() {
     ],
   );
   const voice = useVoice({
-    scopeKey: project?.projectId,
+    scopeKey: `${project?.projectId}:${pending?.draftId || alternativeModel.preview?.id || 'saved'}:${selection?.roomId ?? ''}:${selection?.surface ?? ''}:${selection?.furnitureId ?? ''}:${selection?.openingId ?? ''}:${onlySelectedPart}`,
     onText: send,
     onError: notify,
     enabled: !!status?.voiceConnected,
-    busy:
-      busy ||
-      !!modal ||
-      !!pending ||
-      !!alternativeModel.preview ||
-      !!compareId ||
-      saved === 'conflict',
+    busy: busy || !!modal || !!compareId || saved === 'conflict',
   });
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
@@ -945,6 +1024,8 @@ export default function App() {
     pending?.scene ||
     (busy ? runProgress?.preview : null) ||
     (comparison && compareSide === 'saved' ? comparison.scene : house);
+  const contextScene = alternativeModel.preview?.scene || pending?.scene || house;
+  const contextSelectedRoom = contextScene.rooms.find((room) => room.id === selected);
   const locked =
     busy || !!pending || !!comparison || !!alternativeModel.preview || saved === 'conflict';
   lockedRef.current = locked;
@@ -1009,6 +1090,9 @@ export default function App() {
           <IconButton label="Connections and settings" onClick={() => setModal('connections')}>
             <Settings2 size={17} />
           </IconButton>
+          <button className="export-button" onClick={() => setModal('report')}>
+            Design report
+          </button>
           <button className="export-button" onClick={download}>
             <ArrowDownToLine size={15} /> Export project
           </button>
@@ -1100,9 +1184,15 @@ export default function App() {
                       <select
                         aria-label="Selected house part"
                         disabled={busy}
-                        value={selection?.furnitureId ? 'furniture' : selection?.surface || 'room'}
+                        value={
+                          selection?.furnitureId
+                            ? 'furniture'
+                            : selection?.openingId
+                              ? 'opening'
+                              : selection?.surface || 'room'
+                        }
                         onChange={(event) =>
-                          event.target.value !== 'furniture' &&
+                          !['furniture', 'opening'].includes(event.target.value) &&
                           setSelection({
                             roomId: selectedRoom.id,
                             surface: event.target.value as DesignSelection['surface'],
@@ -1110,6 +1200,9 @@ export default function App() {
                         }
                       >
                         <option value="room">Whole room</option>
+                        {selection?.openingId && (
+                          <option value="opening">Selected window or door</option>
+                        )}
                         {selection?.furnitureId && (
                           <option value="furniture">
                             {
@@ -1294,10 +1387,10 @@ export default function App() {
                           disabled={locked}
                           onApply={applyArchitecture}
                         />
-                        <OpeningControls
-                          key={`${project.projectId}-${selectedRoom.id}-openings`}
+                        <SelectedOpeningControls
                           scene={house}
                           room={selectedRoom}
+                          selectedId={selection?.openingId}
                           selectedSide={
                             selection &&
                             ['north', 'south', 'east', 'west'].includes(selection.surface)
@@ -1306,7 +1399,29 @@ export default function App() {
                           }
                           disabled={locked}
                           onApply={applyArchitecture}
+                          onSelect={(side, openingId) =>
+                            setSelection({
+                              roomId: selectedRoom.id,
+                              surface: side,
+                              ...(openingId ? { openingId } : {}),
+                            })
+                          }
                         />
+                        {!selection?.openingId && (
+                          <OpeningControls
+                            key={`${project.projectId}-${selectedRoom.id}-openings`}
+                            scene={house}
+                            room={selectedRoom}
+                            selectedSide={
+                              selection &&
+                              ['north', 'south', 'east', 'west'].includes(selection.surface)
+                                ? (selection.surface as Side)
+                                : undefined
+                            }
+                            disabled={locked}
+                            onApply={applyArchitecture}
+                          />
+                        )}
                       </>
                     )}
                     <button
@@ -1583,6 +1698,9 @@ export default function App() {
               onSelect={setSelected}
               onRenderStatus={setRenderStatus}
               onCameraChange={onCameraChange}
+              onApplyFurniture={applyArchitecture}
+              onInteractionError={notify}
+              editingDisabled={locked}
               resetKey={resetKey}
             />
             {!house.rooms.length && !pending && view !== 'plan' && (
@@ -1674,9 +1792,11 @@ export default function App() {
                 <span>
                   {alternativeModel.busy === 'generating'
                     ? 'Exploring and rendering your alternatives…'
-                    : alternativeModel.busy === 'choosing'
-                      ? 'Keeping your chosen direction…'
-                      : runProgress?.message || 'Finding the shape of your idea…'}
+                    : alternativeModel.busy === 'refining'
+                      ? 'Refining your unsaved choice…'
+                      : alternativeModel.busy === 'choosing'
+                        ? 'Keeping your chosen direction…'
+                        : runProgress?.message || 'Finding the shape of your idea…'}
                 </span>
                 {runIdRef.current && (
                   <button
@@ -1692,7 +1812,29 @@ export default function App() {
             {pending && (
               <div className="proposal-bar">
                 <Sparkles size={17} />
-                <span>Validated proposal · review before keeping</span>
+                <span>Unsaved proposal · type or speak to refine</span>
+                {proposalVersions.length > 1 && (
+                  <select
+                    aria-label="Proposal version"
+                    value={pending.draftId}
+                    disabled={busy}
+                    onChange={(event) => {
+                      const version = proposalVersions.find(
+                        (item) => item.draftId === event.target.value,
+                      );
+                      if (version) {
+                        setPending(version);
+                        setLastResult(version);
+                      }
+                    }}
+                  >
+                    {proposalVersions.map((version, index) => (
+                      <option key={version.draftId} value={version.draftId}>
+                        {index === 0 ? 'Original proposal' : `Refinement ${index}`}
+                      </option>
+                    ))}
+                  </select>
+                )}
                 <button className="text-button" disabled={busy} onClick={() => void discardDraft()}>
                   Discard
                 </button>
@@ -1706,38 +1848,82 @@ export default function App() {
               </div>
             )}
             {alternativeModel.preview && (
-              <div className="proposal-bar alternative-preview-bar">
-                <Eye size={16} />
-                <span>Preview: {alternativeModel.preview.name}</span>
-                <button
-                  className="text-button"
-                  disabled={busy}
-                  onClick={() => {
-                    alternativeModel.setPreview(null);
-                    setModal('versions');
-                  }}
-                >
-                  All choices
-                </button>
-                <button
-                  className="text-button"
-                  disabled={busy}
-                  onClick={() => alternativeModel.setPreview(null)}
-                >
-                  Current house
-                </button>
-                <button
-                  className="primary small"
-                  disabled={busy || saved === 'conflict'}
-                  onClick={() =>
-                    void alternativeModel.choose(
-                      alternativeModel.preview!.id,
-                      alternativeModel.preference,
-                    )
-                  }
-                >
-                  <Check size={13} /> Use this design
-                </button>
+              <div className="alternative-preview-stack">
+                <div className="proposal-bar alternative-preview-bar">
+                  <Eye size={16} />
+                  <span>Preview: {alternativeModel.preview.name} · type or speak to refine</span>
+                  {alternativeModel.preview.parentOptionId && (
+                    <button
+                      className="text-button"
+                      disabled={busy}
+                      onClick={() => void alternativeModel.discardRefinement()}
+                    >
+                      Discard refinement
+                    </button>
+                  )}
+                  <button
+                    className="text-button"
+                    disabled={busy}
+                    onClick={() => {
+                      alternativeModel.setPreview(null);
+                      setModal('versions');
+                    }}
+                  >
+                    All choices
+                  </button>
+                  <button
+                    className="text-button"
+                    disabled={busy}
+                    onClick={() => alternativeModel.setPreview(null)}
+                  >
+                    Current house
+                  </button>
+                  <button
+                    className="primary small"
+                    disabled={busy || saved === 'conflict'}
+                    onClick={() =>
+                      void alternativeModel.choose(
+                        alternativeModel.preview!.id,
+                        alternativeModel.preference,
+                      )
+                    }
+                  >
+                    <Check size={13} />{' '}
+                    {alternativeModel.preview.needsConfirmation
+                      ? 'Confirm & use this design'
+                      : 'Use this design'}
+                  </button>
+                </div>
+                {alternativeModel.preview.needsConfirmation && (
+                  <div className="proposal-bar alternative-review-notes" role="status">
+                    <div>
+                      <strong>Review before adopting</strong>
+                      <p>{alternativeModel.preview.description}</p>
+                      {alternativeModel.preview.visualReview &&
+                        [
+                          ...alternativeModel.preview.visualReview.observations,
+                          ...alternativeModel.preview.visualReview.limitations,
+                        ].map((note, index) => <p key={`visual-${index}`}>{note}</p>)}
+                      {alternativeModel.preview.assessment?.requirements
+                        .filter(
+                          (item) => item.priority === 'required' && item.status !== 'fulfilled',
+                        )
+                        .map((item) => (
+                          <p key={item.id}>
+                            {item.request}: {item.status}. {item.limitation}
+                          </p>
+                        ))}
+                      {alternativeModel.preview.assessment?.assumptions
+                        .filter((item) => item.requiresConfirmation)
+                        .map((item, index) => (
+                          <p key={`assumption-${index}`}>Assumption: {item.description}</p>
+                        ))}
+                      {alternativeModel.preview.editScopeReview?.changes.map((change, index) => (
+                        <p key={`scope-${index}`}>{change}</p>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
             {comparison && !pending && (
@@ -1863,6 +2049,16 @@ export default function App() {
                   </div>
                 </div>
               )}
+              {(pending || alternativeModel.preview) && lastResult && !lastResult.scene && (
+                <div className="assistant-message refinement-reply" role="status">
+                  <span className="mini-spark">
+                    <Sparkles size={13} />
+                  </span>
+                  <div>
+                    <p>{lastResult.reply}</p>
+                  </div>
+                </div>
+              )}
               {!busy &&
                 lastResult &&
                 (lastResult.changes.length > 0 || lastResult.issues.length > 0) && (
@@ -1876,6 +2072,18 @@ export default function App() {
                           ? 'Cost unavailable'
                           : `$${lastResult.usage.cost.toFixed(3)}`}
                       </p>
+                    )}
+                    {lastResult.editScopeReview && (
+                      <div className="design-check-note">
+                        <p>
+                          {lastResult.editScopeReview.preserved
+                            ? 'Only selected part: unrelated design preserved.'
+                            : 'Only selected part: additional changes need review.'}
+                        </p>
+                        {lastResult.editScopeReview.changes.map((change, index) => (
+                          <p key={index}>{change}</p>
+                        ))}
+                      </div>
                     )}
                     {lastResult.visualReview ? (
                       <div className="request-assessment">
@@ -1988,9 +2196,13 @@ export default function App() {
                 <textarea
                   aria-label="Describe your home"
                   ref={inputRef}
-                  placeholder="Describe a house or request a change…"
+                  placeholder={
+                    pending || alternativeModel.preview
+                      ? 'Describe how to refine this preview…'
+                      : 'Describe a house or request a change…'
+                  }
                   value={input}
-                  disabled={locked}
+                  disabled={busy || !!compareId || saved === 'conflict'}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
@@ -2005,7 +2217,9 @@ export default function App() {
                     type="button"
                     aria-label="Hold to talk"
                     className={`mic-button ${voice.state === 'recording' ? 'recording' : ''}`}
-                    disabled={locked || voice.state === 'transcribing'}
+                    disabled={
+                      busy || !!compareId || saved === 'conflict' || voice.state === 'transcribing'
+                    }
                     onPointerDown={(e) => {
                       e.preventDefault();
                       e.currentTarget.setPointerCapture(e.pointerId);
@@ -2041,7 +2255,7 @@ export default function App() {
                   <button
                     className="send-button"
                     aria-label="Send description"
-                    disabled={!input.trim() || locked}
+                    disabled={!input.trim() || busy || !!compareId || saved === 'conflict'}
                   >
                     {busy ? <LoaderCircle className="spin" size={15} /> : <ArrowRight size={17} />}
                   </button>
@@ -2079,7 +2293,7 @@ export default function App() {
                 <input
                   type="checkbox"
                   checked={allowVisualReview}
-                  disabled={locked}
+                  disabled={busy}
                   onChange={(event) => setAllowVisualReview(event.target.checked)}
                 />
                 Let AI inspect rendered views
@@ -2092,12 +2306,21 @@ export default function App() {
               {allowVisualReview && renderBridge.state === 'unavailable' && (
                 <p className="visual-review-note warning">Local visual review is reconnecting…</p>
               )}
-              {selectedRoom && (
+              <label className="view-context-control">
+                <input
+                  type="checkbox"
+                  checked={onlySelectedPart}
+                  disabled={busy || !selection}
+                  onChange={(event) => setOnlySelectedPart(event.target.checked)}
+                />{' '}
+                Only selected part
+              </label>
+              {contextSelectedRoom && (
                 <p className="selected-context">
-                  <Square size={11} /> Referring to {selectionLabel(house, selection)}
+                  <Square size={11} /> Referring to {selectionLabel(contextScene, selection)}
                 </p>
               )}
-              {!selectedRoom && house.rooms.length > 0 && (
+              {!contextSelectedRoom && contextScene.rooms.length > 0 && (
                 <p className="selected-context">
                   Select a room, surface, or furniture piece, then hold Space to speak.
                 </p>
@@ -2154,6 +2377,11 @@ export default function App() {
           onCreate={(name) => changeHouse({ name })}
           onOpen={(id) => changeHouse({ id })}
         />
+      )}
+      {modal === 'report' && (
+        <Modal title="Design report" onClose={closeModal} wide>
+          <DesignReport scene={displayed || house} onClose={closeModal} />
+        </Modal>
       )}
       {modal === 'versions' && (
         <Modal title="Alternatives" onClose={closeModal} wide>

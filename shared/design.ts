@@ -45,7 +45,15 @@ import {
 } from './furniture.ts';
 import { arrangeFurniture } from './furniture-layout.ts';
 import { effectiveRoof, roofHeightAt, roofMaximumHeight } from './architecture.ts';
-import { mirroredOpening, openingWorldCenter, roomOpenings, validateOpenings } from './openings.ts';
+import {
+  mirroredOpening,
+  openingWorldCenter,
+  roomOpenings,
+  validateOpenings,
+  editOpening,
+  OpeningEditError,
+} from './openings.ts';
+import { transformRooms, RoomTransformError } from './room-transforms.ts';
 
 export { oppositeSide } from './geometry.ts';
 export { roomOpenings } from './openings.ts';
@@ -186,6 +194,24 @@ export const commandSchema = z.discriminatedUnion('type', [
     .strict(),
   z
     .object({
+      type: z.literal('update_opening'),
+      roomId: id,
+      side: sideSchema,
+      openingId: id,
+      patch: wallOpeningSchema.omit({ id: true, side: true }).partial().strict(),
+    })
+    .strict()
+    .describe(
+      'Edit one stable opening ID from either visible face, retaining siblings. Offset and sill are measured from the selected room; mirrored ownership is handled automatically.',
+    ),
+  z
+    .object({ type: z.literal('remove_opening'), roomId: id, side: sideSchema, openingId: id })
+    .strict()
+    .describe(
+      'Remove only this physical opening or semantic passage. Closing a last passage also closes its legacy wall flags.',
+    ),
+  z
+    .object({
       type: z.literal('set_material'),
       palette: paletteSchema,
       roomIds: z.array(id).max(32).optional(),
@@ -207,6 +233,69 @@ export const commandSchema = z.discriminatedUnion('type', [
       delta: z.number().min(-28.5).max(28.5),
     })
     .strict(),
+  z
+    .object({
+      type: z.literal('move_shared_wall'),
+      roomAId: id,
+      roomBId: id,
+      delta: z
+        .number()
+        .min(-28.5)
+        .max(28.5)
+        .describe(
+          'Meters outward from room A into room B; positive expands A, negative expands B. Outer footprint stays fixed.',
+        ),
+    })
+    .strict()
+    .describe(
+      'Transfer space between fully adjoining rectangular rooms on one floor with compatible flat roofs. Furniture stays in world position; unsupported cuts roll back.',
+    ),
+  z
+    .object({
+      type: z.literal('split_room'),
+      roomId: id,
+      axis: z
+        .enum(['x', 'z'])
+        .describe(
+          'x creates west/east rooms; z creates north/south rooms. Original ID retains the west/north part.',
+        ),
+      offset: z
+        .number()
+        .min(-28.5)
+        .max(28.5)
+        .describe('Partition coordinate relative to the original room center along axis.'),
+      newRoomId: id,
+      newRoomName: roomSchema.shape.name,
+      newRoomKind: roomSchema.shape.kind.optional(),
+      passage: z
+        .object({
+          id,
+          ...opening,
+          center: z
+            .number()
+            .min(-90)
+            .max(90)
+            .optional()
+            .describe('World coordinate along the new wall; omitted uses its center.'),
+        })
+        .strict()
+        .optional(),
+    })
+    .strict()
+    .describe(
+      'Split a flat-roof rectangular room, preserving furniture and exterior openings in world position. Include a passage unless both parts already have another indoor route.',
+    ),
+  z
+    .object({
+      type: z.literal('merge_rooms'),
+      roomAId: id,
+      roomBId: id,
+      name: roomSchema.shape.name.optional(),
+    })
+    .strict()
+    .describe(
+      'Merge a rectangular pair with compatible flat roofs and finishes. Keep A identity/kind, remove B and the shared partition. Removing a room requires the existing proposal review.',
+    ),
   z
     .object({
       type: z.literal('update_site'),
@@ -929,6 +1018,60 @@ function execute(scene: Scene, command: DesignCommand): DesignChange {
       description = `Resized “${roomById(scene, command.roomId).name}” from its ${command.anchor} anchor.`;
       break;
     }
+    case 'move_shared_wall':
+    case 'split_room':
+    case 'merge_rooms': {
+      const before = structuredClone(scene);
+      changed = transformRooms(scene, command);
+      const previousErrors = new Set(
+        validateDesign(before)
+          .filter((item) => item.severity === 'error')
+          .map((item) => JSON.stringify(item)),
+      );
+      const failure = validateDesign(scene).find(
+        (item) =>
+          item.severity === 'error' &&
+          (item.objectIds.some((id) => changed.includes(id)) ||
+            !previousErrors.has(JSON.stringify(item))),
+      );
+      if (failure)
+        throw new CommandError(
+          'room_transform_invalid',
+          `The room transformation would break the design: ${failure.message}`,
+          failure.objectIds,
+          { cause: failure.code, ...failure.details },
+        );
+      const replacement = (id: string) =>
+        command.type === 'merge_rooms' && id === command.roomBId ? command.roomAId : id;
+      const components = connectedComponents(
+        scene.rooms.filter((room) => !outdoor(room)).map((room) => room.id),
+        circulationEdges(scene),
+      );
+      const connected = (a: string, b: string) =>
+        a === b || components.some((component) => component.includes(a) && component.includes(b));
+      for (const [a, b] of circulationEdges(before)) {
+        if (outdoor(roomById(before, a)) || outdoor(roomById(before, b))) continue;
+        if (!connected(replacement(a), replacement(b)))
+          throw new CommandError(
+            'room_transform_route',
+            'The partition would break an existing indoor route. Add a split passage or move the partition clear of the doorway.',
+            [a, b],
+          );
+      }
+      if (command.type === 'split_room' && !connected(command.roomId, command.newRoomId))
+        throw new CommandError(
+          'split_passage_required',
+          'The new room has no indoor route to the original room. Include a passage in split_room or provide an existing alternate indoor route.',
+          changed,
+        );
+      description =
+        command.type === 'move_shared_wall'
+          ? `Moved the shared wall ${command.delta} m outward from “${roomById(scene, command.roomAId).name}”, preserving the outside footprint.`
+          : command.type === 'split_room'
+            ? `Split “${roomById(scene, command.roomId).name}”; its ${command.axis === 'x' ? 'east' : 'south'} part is “${command.newRoomName}”.`
+            : `Merged two rooms into “${roomById(scene, command.roomAId).name}”, retaining its identity.`;
+      break;
+    }
     case 'connect_rooms':
       connect(scene, command.roomAId, command.roomBId, command);
       changed = [command.roomAId, command.roomBId];
@@ -1042,6 +1185,29 @@ function execute(scene: Scene, command: DesignCommand): DesignChange {
       replaceWallOpenings(scene, room, command.side, command.openings);
       changed = scene.rooms.filter((r) => before.get(r.id) !== JSON.stringify(r)).map((r) => r.id);
       description = `Set ${command.openings.length} explicit opening${command.openings.length === 1 ? '' : 's'} on the ${command.side} wall of “${room.name}”, preserving its semantic room connections.`;
+      break;
+    }
+    case 'update_opening':
+    case 'remove_opening': {
+      const before = structuredClone(scene);
+      const beforeErrors = new Set(
+        validateDesign(scene)
+          .filter((issue) => issue.severity === 'error')
+          .map((issue) => JSON.stringify(issue)),
+      );
+      changed = editOpening(scene, command);
+      const failure = validateDesignChange(before, scene).find(
+        (issue) =>
+          issue.severity === 'error' &&
+          (issue.objectIds.some((id) => changed.includes(id)) ||
+            !beforeErrors.has(JSON.stringify(issue))),
+      );
+      if (failure)
+        throw new CommandError('opening_edit_invalid', failure.message, failure.objectIds, {
+          cause: failure.code,
+          ...failure.details,
+        });
+      description = `${command.type === 'update_opening' ? 'Updated' : 'Removed'} the selected opening “${command.openingId}”, retaining other openings.`;
       break;
     }
     case 'set_material': {
@@ -1288,7 +1454,9 @@ export function executeCommands(
     return { scene, applied: true, changes, issues: validateDesign(scene) };
   } catch (error) {
     const failure =
-      error instanceof CommandError
+      error instanceof CommandError ||
+      error instanceof RoomTransformError ||
+      error instanceof OpeningEditError
         ? issue(error.code, error.message, error.objectIds, 'error', error.details)
         : error instanceof z.ZodError
           ? issue('invalid_geometry', 'An operation would produce invalid geometry.', [], 'error', {
@@ -1659,6 +1827,29 @@ export function inspectDesign(scene: Scene) {
     furnitureCatalog,
     furnitureCoordinates:
       'x/z relative to the room center, meters; rotation is yaw in degrees. At 0°, furniture fronts face south; +90° faces east. Rugs are not obstacles.',
+    sharedWalls: scene.rooms.flatMap((a, index) =>
+      scene.rooms.slice(index + 1).flatMap((b) => {
+        const boundary = sharedBoundary(a, b);
+        if (!boundary) return [];
+        const horizontal = horizontalSide(boundary.sideA);
+        return [
+          {
+            roomAId: a.id,
+            roomBId: b.id,
+            ...boundary,
+            normalAxis: horizontal ? 'z' : 'x',
+            coordinate: bounds(a)[boundary.sideA],
+            positiveDeltaDirection: boundary.sideA,
+            fullWall:
+              close(bounds(a)[boundary.sideA], bounds(b)[boundary.sideB], 0.0001) &&
+              close(boundary.length, horizontal ? a.width : a.depth, 0.0001) &&
+              close(boundary.length, horizontal ? b.width : b.depth, 0.0001),
+            sameFloorAndHeight:
+              close(a.elevation, b.elevation, 0.0001) && close(a.height, b.height, 0.0001),
+          },
+        ];
+      }),
+    ),
     rooms: scene.rooms.map((room) => ({
       ...room,
       bounds: bounds(room),

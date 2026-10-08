@@ -3,9 +3,10 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { executeCommands } from '../shared/design.ts';
 import { DesignService, DesignServiceError } from '../server/design-service.ts';
 import { ProjectStore, RevisionConflict } from '../server/storage.ts';
-import { emptyScene, makeRoom, newProject, type Scene } from '../shared/model.ts';
+import { emptyScene, makeRoom, newProject, editProject, type Scene } from '../shared/model.ts';
 
 function house(): Scene {
   return {
@@ -222,4 +223,194 @@ test('no-op commands do not add an undo entry or invent a material change', asyn
   assert.deepEqual(committed.project.scene, project.scene);
   assert.equal(committed.project.past.length, 0);
   assert.equal(committed.reply, 'No changes were needed.');
+});
+
+test('proposal refinements isolate source drafts and adopt the cumulative result in one undo step', async (t) => {
+  const { service, project, store } = await fixture(t);
+  const source = await service.create(project.revision, project.scene, project.projectId);
+  service.apply(source.id, cedar);
+  source.needsConfirmation = true;
+  const before = structuredClone(service.describe(source.id));
+  const refined = await service.refine(source.id, project.revision, project.projectId!);
+  service.apply(refined.id, [
+    { type: 'set_surface_material', roomId: 'kitchen', surface: 'floor', palette: 'chalk' },
+  ]);
+  assert.deepEqual(service.describe(source.id), before);
+  assert.deepEqual(await store.read(), project);
+  assert.equal(service.describe(refined.id).parentDraftId, source.id);
+  await assert.rejects(service.commit(refined.id, project.revision, false), /confirmation/);
+  const accepted = await service.commit(refined.id, project.revision, true);
+  assert.equal(accepted.project.scene.palette, 'cedar');
+  assert.equal(accepted.project.scene.rooms[0].surfacePalettes?.floor, 'chalk');
+  assert.equal(accepted.project.past.length, 1);
+  assert.deepEqual(accepted.project.past[0], project.scene);
+  assert.deepEqual(
+    service.describe(source.id),
+    before,
+    'source proposal is retained before caller cleanup',
+  );
+});
+
+test('discarded, wrong-house and stale proposal refinements leave sources and saved geometry unchanged', async (t) => {
+  const { service, project, store } = await fixture(t);
+  const source = await service.create(project.revision);
+  service.apply(source.id, cedar);
+  const refined = await service.refine(source.id, project.revision, project.projectId!);
+  service.apply(refined.id, [
+    { type: 'set_surface_material', roomId: 'kitchen', surface: 'floor', palette: 'chalk' },
+  ]);
+  service.discard(refined.id);
+  assert.equal(service.get(source.id).ready, true);
+  await assert.rejects(
+    service.refine(source.id, project.revision, 'another-house'),
+    /another tab|changed|revision/i,
+  );
+  await store.update(project.revision, (current) =>
+    editProject(current, { ...current.scene, palette: 'chalk' }),
+  );
+  await assert.rejects(
+    service.refine(source.id, project.revision, project.projectId!),
+    RevisionConflict,
+  );
+  assert.equal(service.get(source.id).draft.scene.palette, 'cedar');
+});
+
+test('refining a pending proposal cannot bypass confirmed saved-house locks', async (t) => {
+  const locked = executeCommands(house(), [
+    {
+      type: 'set_requirement',
+      requirement: {
+        id: 'kitchen-size',
+        kind: 'locked',
+        source: 'confirmed',
+        description: 'Keep kitchen dimensions.',
+        roomId: 'kitchen',
+        properties: ['size'],
+      },
+    },
+  ]).scene;
+  const { service, store, project } = await fixture(t, locked);
+  const source = await service.create(project.revision);
+  service.apply(source.id, cedar);
+  const refined = await service.refine(source.id, project.revision, project.projectId!);
+  const invalid = service.apply(refined.id, [
+    { type: 'resize_room', roomId: 'kitchen', width: 5, anchor: 'west', moveConnected: false },
+  ]);
+  assert.equal(invalid.ready, false);
+  assert.ok(invalid.issues.some((issue) => issue.code === 'locked_property_changed'));
+  await assert.rejects(service.commit(refined.id, project.revision, true), /unresolved/);
+  assert.deepEqual(await store.read(), project);
+  assert.equal(service.get(source.id).draft.scene.rooms[0].width, 4);
+});
+
+test('proposal refinement carries an unmet source requirement and clears it after actual repair', async (t) => {
+  const { evaluateDesignAssessment, designAssessmentSchema } =
+    await import('../shared/assessment.ts');
+  const { service, project } = await fixture(t);
+  const source = await service.create(project.revision);
+  service.apply(source.id, cedar);
+  const assessment = evaluateDesignAssessment(
+    source.draft.scene,
+    designAssessmentSchema.parse({
+      requirements: [
+        {
+          id: 'roof-request',
+          request: 'Use a single-pitch kitchen roof.',
+          status: 'fulfilled',
+          evidence: 'Roof checked.',
+          checks: [{ kind: 'roof', roomId: 'kitchen', style: 'single-pitch' }],
+        },
+      ],
+    }),
+  );
+  const answer = {
+    scene: source.draft.scene,
+    reply: 'The roof request is outstanding.',
+    assessment,
+    needsConfirmation: true,
+    events: [],
+    issues: [],
+    changes: [],
+    usage: { calls: 0, inputTokens: 0, outputTokens: 0, cost: 0 },
+  };
+  service.complete(source.id, answer);
+  const refined = await service.refine(source.id, project.revision, project.projectId!);
+  service.apply(refined.id, [
+    { type: 'set_surface_material', roomId: 'kitchen', surface: 'floor', palette: 'chalk' },
+  ]);
+  const carried = service.complete(refined.id, {
+    ...answer,
+    scene: refined.draft.scene,
+    reply: 'Changed floor.',
+    assessment: undefined,
+    needsConfirmation: false,
+  });
+  assert.equal(carried.assessment?.requirements[0].status, 'partial');
+  assert.match(carried.reply, /Still outstanding.*single-pitch kitchen roof/);
+  const repair = await service.refine(refined.id, project.revision, project.projectId!);
+  service.apply(repair.id, [
+    {
+      type: 'set_roof',
+      roomIds: ['kitchen'],
+      style: 'single-pitch',
+      pitch: 12,
+      direction: 'north',
+    },
+  ]);
+  const fixed = service.complete(repair.id, {
+    ...answer,
+    scene: repair.draft.scene,
+    reply: 'Fixed roof.',
+    assessment: undefined,
+    needsConfirmation: false,
+  });
+  assert.equal(fixed.assessment?.requirements[0].status, 'fulfilled');
+});
+
+test('proposal refinement reevaluates immutable context checks against the saved original baseline', async (t) => {
+  const { service, project, store } = await fixture(t);
+  const source = await service.create(project.revision);
+  service.apply(source.id, [
+    { type: 'update_room', roomId: 'kitchen', patch: { name: 'Changed kitchen' } },
+  ]);
+  const answer = (scene: Scene) => ({
+    scene,
+    reply: 'Proposal.',
+    needsConfirmation: false,
+    events: [],
+    issues: [],
+    changes: ['Changed proposal.'],
+    usage: { calls: 0, inputTokens: 0, outputTokens: 0, cost: 0 },
+  });
+  const check = {
+    kind: 'unchanged_room' as const,
+    roomId: 'kitchen',
+    properties: ['name' as const],
+  };
+  service.complete(
+    source.id,
+    {
+      ...answer(source.draft.scene),
+      needsConfirmation: true,
+      preservationResults: [{ passed: false, actual: null, reason: 'Kitchen name changed.' }],
+    },
+    { preservationChecks: [check] },
+  );
+  const refined = await service.refine(source.id, project.revision, project.projectId!);
+  service.apply(refined.id, [
+    { type: 'set_surface_material', roomId: 'living', surface: 'floor', palette: 'cedar' },
+  ]);
+  const unresolved = service.complete(refined.id, answer(refined.draft.scene), {
+    preservationChecks: [check],
+  });
+  assert.equal(unresolved.assessment?.requirements[0].status, 'partial');
+  assert.equal(unresolved.needsConfirmation, true);
+  const repaired = await service.refine(refined.id, project.revision, project.projectId!);
+  service.apply(repaired.id, [
+    { type: 'update_room', roomId: 'kitchen', patch: { name: 'Kitchen' } },
+  ]);
+  const fixed = service.complete(repaired.id, answer(repaired.draft.scene));
+  assert.equal(fixed.assessment?.requirements[0].status, 'fulfilled');
+  assert.equal(fixed.needsConfirmation, false);
+  assert.deepEqual(await store.read(), project);
 });

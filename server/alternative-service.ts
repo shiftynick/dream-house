@@ -1,15 +1,27 @@
+import {
+  carryRefinementReview,
+  preservationEntries,
+  type RefinementReviewState,
+} from './refinement-review.ts';
 import { randomUUID } from 'node:crypto';
 import { canonicalScene, canonical } from '../shared/draft.ts';
 import { editProject, type Project, type Scene, type Room } from '../shared/model.ts';
 import { validateDesignChange } from '../shared/design.ts';
 import { renderCameraForScenes, renderRequestSchema } from '../shared/render.ts';
 import type { AlternativeResult, VisualAlternative } from '../shared/alternatives.ts';
+import type { AgentContext } from '../shared/harness.ts';
 import type { AgentResult } from './agent.ts';
 import { DesignServiceError } from './design-service.ts';
 import { ProjectStore, RevisionConflict } from './storage.ts';
 import { type RenderProvider, validateCapture } from './render-service.ts';
 
-type ChoiceSet = { result: AlternativeResult; original: Scene; prompt: string; createdAt: number };
+type ChoiceSet = {
+  result: AlternativeResult;
+  original: Scene;
+  prompt: string;
+  createdAt: number;
+  reviewStates: Record<string, RefinementReviewState>;
+};
 function visualSignature(scene: Scene) {
   // Names/brief-only changes do not make a visibly different alternative.
   const sorted = (items: unknown[]) => items.map(canonical).sort();
@@ -67,6 +79,7 @@ export class AlternativeService {
     build: (index: number, previous: VisualAlternative[]) => Promise<AgentResult>;
     render: RenderProvider;
     signal?: AbortSignal;
+    context?: AgentContext;
   }): Promise<AlternativeResult> {
     this.prune();
     const { project, prompt, count, signal } = options;
@@ -77,6 +90,7 @@ export class AlternativeService {
         'Remove a saved alternative before generating more; this project can keep 30.',
       );
     const generated: VisualAlternative[] = [];
+    const reviewStates: Record<string, RefinementReviewState> = {};
     const usage = { calls: 0, inputTokens: 0, outputTokens: 0, cost: 0 as number | null };
     for (let index = 0; index < count; index++) {
       signal?.throwIfAborted();
@@ -104,7 +118,27 @@ export class AlternativeService {
         thumbnail: '',
         issues,
         changes: result.changes,
+        needsConfirmation: result.needsConfirmation,
+        assessment: result.assessment,
+        visualReview: result.visualReview,
+        editScopeReview: result.editScopeReview,
+        preservationResults: result.preservationResults,
       });
+      reviewStates[generated.at(-1)!.id] = {
+        ...result,
+        preservationEntries: preservationEntries(
+          undefined,
+          options.context?.preservationChecks,
+          project.scene,
+        ),
+        assessmentBaselines: Object.fromEntries(
+          (result.assessment?.requirements || []).map((requirement) => [
+            requirement.id,
+            structuredClone(project.scene),
+          ]),
+        ),
+        reviewBaseline: structuredClone(project.scene),
+      };
       usage.calls += result.usage.calls;
       usage.inputTokens += result.usage.inputTokens;
       usage.outputTokens += result.usage.outputTokens;
@@ -150,8 +184,149 @@ export class AlternativeService {
       original: structuredClone(project.scene),
       prompt,
       createdAt: Date.now(),
+      reviewStates,
     });
     return result;
+  }
+  async source(choiceSetId: string, optionId: string, projectId: string, expectedRevision: number) {
+    this.prune();
+    const set = this.sets.get(choiceSetId);
+    const option = set?.result.options.find((item) => item.id === optionId);
+    if (!set || !option)
+      throw new DesignServiceError('These alternatives expired. Generate fresh choices.', 404);
+    const project = await this.store.read();
+    if (
+      project.projectId !== projectId ||
+      set.result.projectId !== projectId ||
+      project.revision !== expectedRevision
+    )
+      throw new RevisionConflict();
+    if (canonicalScene(project.scene) !== canonicalScene(set.original))
+      throw new DesignServiceError(
+        'Your house changed since these alternatives were generated.',
+        409,
+        'stale_alternatives',
+      );
+    return {
+      scene: structuredClone(option.scene),
+      original: structuredClone(set.original),
+      option: structuredClone(option),
+      project,
+      optionCount: set.result.options.length,
+      reviewState: structuredClone(set.reviewStates[optionId]),
+    };
+  }
+  async appendRefinement(options: {
+    choiceSetId: string;
+    optionId: string;
+    projectId: string;
+    expectedRevision: number;
+    answer: AgentResult;
+    render: RenderProvider;
+    signal?: AbortSignal;
+    context?: AgentContext;
+  }) {
+    const source = await this.source(
+      options.choiceSetId,
+      options.optionId,
+      options.projectId,
+      options.expectedRevision,
+    );
+    const set = this.sets.get(options.choiceSetId)!;
+    const carried = carryRefinementReview(
+      source.reviewState,
+      options.answer,
+      set.original,
+      source.scene,
+    );
+    const answer = carried.answer;
+    const scene = answer.scene;
+    if (!scene) throw new DesignServiceError('The refinement did not produce a design.');
+    if (source.project.variants.length + set.result.options.length >= 30)
+      throw new DesignServiceError(
+        'There is no room for another alternative. Remove a saved option first.',
+      );
+    const issues = validateDesignChange(set.original, scene);
+    if (issues.some((issue) => issue.severity === 'error'))
+      throw new DesignServiceError('The refinement violates the saved house design checks.');
+    if (canonicalScene(source.scene) === canonicalScene(scene))
+      throw new DesignServiceError('The refinement made no design changes.');
+    const request = renderRequestSchema.parse({ view: 'exterior', quality: 'live', light: 'day' });
+    const capture = validateCapture(
+      scene,
+      request,
+      await options.render(scene, request, options.signal),
+    );
+    if (capture.image.length > 500_000)
+      throw new DesignServiceError('The local preview is too large to save.');
+    options.signal?.throwIfAborted();
+    // Recheck after asynchronous model/render work; publishing the option is atomic.
+    await this.source(
+      options.choiceSetId,
+      options.optionId,
+      options.projectId,
+      options.expectedRevision,
+    );
+    const option: VisualAlternative = {
+      id: randomUUID(),
+      name: `${source.option.name} · refinement ${set.result.options.filter((item) => item.parentOptionId).length + 1}`,
+      parentOptionId: source.option.id,
+      description: answer.reply.slice(0, 1000),
+      scene: structuredClone(scene),
+      thumbnail: capture.image,
+      issues,
+      changes: answer.changes,
+      needsConfirmation: answer.needsConfirmation,
+      reviewDisclosures: 'reviewDisclosures' in answer ? answer.reviewDisclosures : undefined,
+      assessment: answer.assessment,
+      visualReview: answer.visualReview,
+      editScopeReview: answer.editScopeReview,
+      preservationResults: answer.preservationResults,
+    };
+    set.reviewStates[option.id] = {
+      ...answer,
+      preservationEntries: preservationEntries(
+        source.reviewState,
+        options.context?.preservationChecks,
+        source.scene,
+      ),
+      assessmentBaselines: carried.baselines,
+      reviewBaseline: structuredClone(source.scene),
+    };
+    set.result = {
+      ...set.result,
+      options: [...set.result.options, option],
+      usage: {
+        calls: set.result.usage.calls + options.answer.usage.calls,
+        inputTokens: set.result.usage.inputTokens + options.answer.usage.inputTokens,
+        outputTokens: set.result.usage.outputTokens + options.answer.usage.outputTokens,
+        cost:
+          set.result.usage.cost === null || options.answer.usage.cost === null
+            ? null
+            : set.result.usage.cost + options.answer.usage.cost,
+      },
+    };
+    return { choices: structuredClone(set.result), refinedOptionId: option.id, answer };
+  }
+  async discardRefinement(
+    choiceSetId: string,
+    optionId: string,
+    projectId: string,
+    expectedRevision: number,
+  ) {
+    const source = await this.source(choiceSetId, optionId, projectId, expectedRevision);
+    if (!source.option.parentOptionId)
+      throw new DesignServiceError(
+        'Original choices are retained; return to your house to leave their preview.',
+      );
+    const set = this.sets.get(choiceSetId)!;
+    if (set.result.options.some((option) => option.parentOptionId === optionId))
+      throw new DesignServiceError('Discard later refinements first.');
+    set.result = {
+      ...set.result,
+      options: set.result.options.filter((option) => option.id !== optionId),
+    };
+    return structuredClone(set.result);
   }
   async choose(
     choiceSetId: string,
@@ -159,6 +334,7 @@ export class AlternativeService {
     projectId: string,
     expectedRevision: number,
     preferenceText = '',
+    confirm = false,
   ): Promise<Project> {
     const key = `${choiceSetId}:${optionId}`;
     const old = this.accepted.get(key);
@@ -175,6 +351,11 @@ export class AlternativeService {
     if (!set || !option)
       throw new DesignServiceError('These alternatives expired. Generate a fresh comparison.', 404);
     if (set.result.projectId !== projectId) throw new RevisionConflict();
+    if (option.needsConfirmation && !confirm)
+      throw new DesignServiceError(
+        'This option has outstanding design or review items. Confirm before applying it.',
+        409,
+      );
     const operation = this.store
       .update(
         expectedRevision,

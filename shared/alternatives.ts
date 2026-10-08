@@ -1,6 +1,8 @@
 import type { Scene } from './model.ts';
 import type { DesignIssue } from './design.ts';
-import type { AgentUsage } from './harness.ts';
+import type { EvaluatedAssessment } from './assessment.ts';
+import type { EvaluatedVisualReview } from './visual-review.ts';
+import type { AgentUsage, HarnessResult } from './harness.ts';
 
 export type VisualAlternative = {
   id: string;
@@ -10,6 +12,13 @@ export type VisualAlternative = {
   thumbnail: string;
   issues: DesignIssue[];
   changes: string[];
+  parentOptionId?: string;
+  needsConfirmation?: boolean;
+  reviewDisclosures?: string[];
+  assessment?: EvaluatedAssessment;
+  visualReview?: EvaluatedVisualReview;
+  editScopeReview?: HarnessResult['editScopeReview'];
+  preservationResults?: HarnessResult['preservationResults'];
 };
 export type AlternativeResult = {
   choiceSetId: string;
@@ -17,4 +26,9 @@ export type AlternativeResult = {
   baseRevision: number;
   options: VisualAlternative[];
   usage: AgentUsage;
+};
+
+export type AlternativeRefinementResult = HarnessResult & {
+  choices?: AlternativeResult;
+  refinedOptionId?: string;
 };

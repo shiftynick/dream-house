@@ -476,3 +476,231 @@ test('expired choices and cancellation during rendering never change the saved h
   assert.equal(captures, 1);
   assert.deepEqual(await store.read(), project);
 });
+
+test('refined alternatives retain originals without saving and adoption has one undo step', async (t) => {
+  const { service, store, project } = await fixture(t);
+  const choices = await service.generate({
+    project,
+    prompt: 'Explore finishes.',
+    count: 2,
+    render: renderer(),
+    build: materialBuild(project),
+  });
+  const originals = structuredClone(choices.options);
+  const selected = await service.source(
+    choices.choiceSetId,
+    choices.options[0].id,
+    project.projectId!,
+    project.revision,
+  );
+  const refinedScene = structuredClone(selected.scene);
+  refinedScene.rooms[0].surfacePalettes = { north: 'chalk' };
+  const refined = await service.appendRefinement({
+    choiceSetId: choices.choiceSetId,
+    optionId: selected.option.id,
+    projectId: project.projectId!,
+    expectedRevision: project.revision,
+    answer: response(refinedScene),
+    render: renderer(),
+  });
+  assert.deepEqual(refined.choices.options.slice(0, 2), originals);
+  assert.equal(refined.choices.options[2].parentOptionId, selected.option.id);
+  assert.deepEqual(await store.read(), project);
+  const accepted = await service.choose(
+    choices.choiceSetId,
+    refined.refinedOptionId,
+    project.projectId!,
+    project.revision,
+  );
+  assert.equal(accepted.scene.rooms[0].surfacePalettes?.north, 'chalk');
+  assert.equal(accepted.past.length, 1);
+  assert.deepEqual(accepted.past[0], project.scene);
+  assert.equal(accepted.variants.length, 3);
+  assert.deepEqual(
+    accepted.variants.slice(0, 2).map((option) => option.scene),
+    originals.map((option) => option.scene),
+  );
+});
+
+test('negative review refinement requires explicit adoption confirmation; discard preserves original choices', async (t) => {
+  const { service, store, project } = await fixture(t);
+  const choices = await service.generate({
+    project,
+    prompt: 'Explore finishes.',
+    count: 2,
+    render: renderer(),
+    build: materialBuild(project),
+  });
+  const selected = choices.options[0];
+  const refinedScene = structuredClone(selected.scene);
+  refinedScene.rooms[0].surfacePalettes = { north: 'chalk' };
+  const answer = {
+    ...response(refinedScene),
+    needsConfirmation: true,
+    reply: 'Still outstanding: wall consistency is unverified.',
+  };
+  const refined = await service.appendRefinement({
+    choiceSetId: choices.choiceSetId,
+    optionId: selected.id,
+    projectId: project.projectId!,
+    expectedRevision: project.revision,
+    answer,
+    render: renderer(),
+  });
+  await assert.rejects(
+    service.choose(
+      choices.choiceSetId,
+      refined.refinedOptionId,
+      project.projectId!,
+      project.revision,
+    ),
+    /Confirm/,
+  );
+  assert.deepEqual(await store.read(), project);
+  const remaining = await service.discardRefinement(
+    choices.choiceSetId,
+    refined.refinedOptionId,
+    project.projectId!,
+    project.revision,
+  );
+  assert.deepEqual(remaining.options, choices.options);
+  await assert.rejects(
+    service.discardRefinement(
+      choices.choiceSetId,
+      selected.id,
+      project.projectId!,
+      project.revision,
+    ),
+    /Original choices/,
+  );
+});
+
+test('failed, cancelled and stale alternative refinements never publish a new option or save geometry', async (t) => {
+  const { service, store, project } = await fixture(t);
+  const choices = await service.generate({
+    project,
+    prompt: 'Explore finishes.',
+    count: 2,
+    render: renderer(),
+    build: materialBuild(project),
+  });
+  const selected = choices.options[0];
+  const refinedScene = structuredClone(selected.scene);
+  refinedScene.rooms[0].surfacePalettes = { north: 'chalk' };
+  const parameters = {
+    choiceSetId: choices.choiceSetId,
+    optionId: selected.id,
+    projectId: project.projectId!,
+    expectedRevision: project.revision,
+    answer: response(refinedScene),
+  };
+  await assert.rejects(
+    service.appendRefinement({
+      ...parameters,
+      render: async () => {
+        throw new Error('Render failed');
+      },
+    }),
+    /Render failed/,
+  );
+  const controller = new AbortController();
+  await assert.rejects(
+    service.appendRefinement({
+      ...parameters,
+      signal: controller.signal,
+      render: async (...args) => {
+        const capture = await renderer()(...args);
+        controller.abort();
+        return capture;
+      },
+    }),
+    /abort/i,
+  );
+  assert.deepEqual(
+    (await service.source(choices.choiceSetId, selected.id, project.projectId!, project.revision))
+      .option,
+    selected,
+  );
+  assert.deepEqual(await store.read(), project);
+  await assert.rejects(
+    service.appendRefinement({
+      ...parameters,
+      render: async (...args) => {
+        const capture = await renderer()(...args);
+        await store.save({ ...project, scene: { ...project.scene, palette: 'chalk' } });
+        return capture;
+      },
+    }),
+    /changed|saved|revision/i,
+  );
+});
+
+test('minor alternative refinement cannot erase source failures, while a repaired source check is fulfilled', async (t) => {
+  const { evaluateDesignAssessment, designAssessmentSchema } =
+    await import('../shared/assessment.ts');
+  const { service, project } = await fixture(t);
+  const choices = await service.generate({
+    project,
+    prompt: 'Use a single-pitch roof.',
+    count: 2,
+    render: renderer(),
+    build: async (index) => {
+      const candidate = {
+        ...structuredClone(project.scene),
+        palette: index ? ('chalk' as const) : ('cedar' as const),
+      };
+      return {
+        ...response(candidate),
+        needsConfirmation: true,
+        assessment: evaluateDesignAssessment(
+          candidate,
+          designAssessmentSchema.parse({
+            requirements: [
+              {
+                id: 'roof',
+                request: 'A single-pitch roof.',
+                status: 'fulfilled',
+                evidence: 'Roof checked.',
+                checks: [{ kind: 'roof', roomId: candidate.rooms[0].id, style: 'single-pitch' }],
+              },
+            ],
+          }),
+        ),
+      };
+    },
+  });
+  const selected = choices.options[0];
+  const refinedScene = structuredClone(selected.scene);
+  refinedScene.rooms[0].surfacePalettes = { floor: 'chalk' };
+  const refined = await service.appendRefinement({
+    choiceSetId: choices.choiceSetId,
+    optionId: selected.id,
+    projectId: project.projectId!,
+    expectedRevision: project.revision,
+    answer: response(refinedScene),
+    render: renderer(),
+  });
+  const option = refined.choices.options.at(-1)!;
+  assert.equal(option.needsConfirmation, true);
+  assert.equal(option.assessment?.requirements[0].status, 'partial');
+  assert.match(option.description, /Still outstanding.*single-pitch roof/);
+  await assert.rejects(
+    service.choose(choices.choiceSetId, option.id, project.projectId!, project.revision),
+    /Confirm/,
+  );
+  const repairedScene = {
+    ...refinedScene,
+    roof: 'single-pitch' as const,
+    roofPitch: 12,
+    roofDirection: 'north' as const,
+  };
+  const repaired = await service.appendRefinement({
+    choiceSetId: choices.choiceSetId,
+    optionId: option.id,
+    projectId: project.projectId!,
+    expectedRevision: project.revision,
+    answer: response(repairedScene),
+    render: renderer(),
+  });
+  assert.equal(repaired.choices.options.at(-1)!.assessment?.requirements[0].status, 'fulfilled');
+});

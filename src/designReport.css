@@ -1,0 +1,58 @@
+.design-report {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+.design-report p,
+.design-report h3 {
+  margin: 0;
+}
+.design-report-actions,
+.design-report-sheet-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.design-report-sheet-heading {
+  justify-content: space-between;
+  padding: 12px;
+}
+.design-report-sheet {
+  border: 1px solid var(--border, #d6d7cd);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.design-report-sheet img {
+  display: block;
+  width: 100%;
+  background: white;
+}
+.design-report-table {
+  width: 100%;
+  overflow-x: auto;
+}
+.design-report table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 12px;
+}
+.design-report th,
+.design-report td {
+  padding: 9px 8px;
+  text-align: left;
+  border-bottom: 1px solid var(--border, #d6d7cd);
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.design-report th {
+  white-space: nowrap;
+  font-weight: 600;
+}
+.design-report-materials summary {
+  cursor: pointer;
+  padding: 8px 0;
+}
+.design-report-materials .panel-note {
+  margin-bottom: 10px;
+}

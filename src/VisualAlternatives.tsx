@@ -71,7 +71,9 @@ export default function VisualAlternatives({
           <LoaderCircle className="spin" size={15} />
           {model.busy === 'generating'
             ? 'Generating and rendering alternatives…'
-            : 'Applying selected design…'}
+            : model.busy === 'refining'
+              ? 'Refining the unsaved design…'
+              : 'Applying selected design…'}
         </p>
       )}
       {model.error && (
@@ -101,6 +103,38 @@ export default function VisualAlternatives({
                 <div className="alternative-choice-body">
                   <h4>{option.name}</h4>
                   <p>{option.description}</p>
+                  {option.parentOptionId && (
+                    <p className="visual-review-note">Refined copy · original choice retained</p>
+                  )}
+                  {option.visualReview?.status !== undefined &&
+                    option.visualReview.status !== 'passed' && (
+                      <div role="status">
+                        <p>Visual review: {option.visualReview.status}</p>
+                        {[
+                          ...option.visualReview.observations,
+                          ...option.visualReview.limitations,
+                        ].map((note, index) => (
+                          <p key={index}>{note}</p>
+                        ))}
+                      </div>
+                    )}
+                  {option.assessment?.requirements
+                    .filter((item) => item.priority === 'required' && item.status !== 'fulfilled')
+                    .map((item) => (
+                      <p key={item.id}>
+                        {item.request}: {item.status}. {item.limitation}
+                      </p>
+                    ))}
+                  {option.assessment?.assumptions
+                    .filter((item) => item.requiresConfirmation)
+                    .map((item, index) => (
+                      <p key={`assumption-${index}`}>Assumption: {item.description}</p>
+                    ))}
+                  {option.editScopeReview &&
+                    !option.editScopeReview.preserved &&
+                    option.editScopeReview.changes.map((change, index) => (
+                      <p key={`scope-${index}`}>{change}</p>
+                    ))}
                   {option.issues.length > 0 && (
                     <details>
                       <summary>{option.issues.length} design notes</summary>
@@ -114,7 +148,8 @@ export default function VisualAlternatives({
                     disabled={disabled || !!model.busy}
                     onClick={() => void model.choose(option.id, model.preference)}
                   >
-                    <Check size={14} /> Use this design
+                    <Check size={14} />{' '}
+                    {option.needsConfirmation ? 'Confirm & use this design' : 'Use this design'}
                   </button>
                 </div>
               </article>
@@ -132,8 +167,8 @@ export default function VisualAlternatives({
             />
           </label>
           <p className="visual-review-note">
-            Applying a design saves every option as an alternative and records your preference in
-            the design brief.
+            Preview any option, then type or speak to refine it before adopting. Applying a design
+            saves every option as an alternative and records your preference in the design brief.
           </p>
         </>
       )}

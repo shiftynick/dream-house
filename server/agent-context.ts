@@ -24,15 +24,19 @@ export function compactAgentHistory(messages: ModelMessage[]): ModelMessage[] {
   });
 }
 
-/** Pixels are sent for their review round only. Their hash/view provenance remains in history. */
-export function retireReviewedImages(messages: ModelMessage[]): void {
+/** Retain explicitly current capture pixels; retired hash/view provenance stays in history. */
+export function retireReviewedImages(
+  messages: ModelMessage[],
+  keepMessages = new Set<ModelMessage>(),
+): void {
   for (const message of messages) {
     if (!Array.isArray(message.content)) continue;
-    if (!message.content.some((part) => part.type === 'image_url')) continue;
+    if (keepMessages.has(message) || !message.content.some((part) => part.type === 'image_url'))
+      continue;
     message.content = message.content.filter((part) => part.type !== 'image_url');
     message.content.push({
       type: 'text',
-      text: 'Image pixels were supplied in an earlier model call and are omitted from subsequent calls to avoid repeated image charges. The view metadata remains; request render_view if another image is necessary.',
+      text: 'These image pixels are no longer current review evidence and are omitted from subsequent calls. The view metadata remains; request render_view if another image is necessary.',
     });
   }
 }

@@ -1,5 +1,9 @@
 import { useCallback, useRef, useState } from 'react';
-import type { AlternativeResult, VisualAlternative } from '../shared/alternatives';
+import type {
+  AlternativeResult,
+  AlternativeRefinementResult,
+  VisualAlternative,
+} from '../shared/alternatives';
 import type { AgentContext } from '../shared/harness';
 import type { Project } from '../shared/model';
 import { api, ApiError } from './api';
@@ -15,7 +19,7 @@ export function useVisualAlternatives(options: {
 }) {
   const [choices, setChoices] = useState<AlternativeResult | null>(null);
   const [error, setError] = useState('');
-  const [busy, setBusy] = useState<'generating' | 'choosing' | null>(null);
+  const [busy, setBusy] = useState<'generating' | 'choosing' | 'refining' | null>(null);
   const [preview, setPreview] = useState<VisualAlternative | null>(null);
   const [preference, setPreference] = useState('');
   const controller = useRef<AbortController | null>(null);
@@ -84,6 +88,7 @@ export function useVisualAlternatives(options: {
           expectedRevision: project.revision,
           choiceSetId: choices.choiceSetId,
           optionId,
+          confirm: true,
           ...(preferenceText.trim() ? { preferenceText: preferenceText.trim() } : {}),
         }),
       });
@@ -106,6 +111,78 @@ export function useVisualAlternatives(options: {
       options.onBusy(false);
     }
   };
+  const refine = async (prompt: string, context = options.context, runId?: string) => {
+    if (acting.current || !choices || !preview || !prompt.trim()) return;
+    acting.current = true;
+    controller.current = new AbortController();
+    setBusy('refining');
+    options.onBusy(true);
+    setError('');
+    try {
+      const project = await options.flush();
+      if (!project || project.projectId !== choices.projectId)
+        throw new Error('This preview belongs to a different house.');
+      const result = await api<AlternativeRefinementResult>('alternatives/refine', {
+        method: 'POST',
+        signal: controller.current.signal,
+        body: JSON.stringify({
+          projectId: project.projectId,
+          baseRevision: project.revision,
+          choiceSetId: choices.choiceSetId,
+          optionId: preview.id,
+          prompt: prompt.trim(),
+          context,
+          renderClientId: options.renderClientId,
+          runId,
+        }),
+      });
+      if (result.choices && result.refinedOptionId) {
+        setChoices(result.choices);
+        setPreview(result.choices.options.find((option) => option.id === result.refinedOptionId)!);
+      }
+      return result;
+    } catch (failure) {
+      if (failure instanceof ApiError && failure.code === 'revision_conflict') options.onConflict();
+      const message = controller.current?.signal.aborted
+        ? 'Refinement cancelled. The original choices remain available.'
+        : (failure as Error).message;
+      setError(message);
+      throw new Error(message);
+    } finally {
+      controller.current = null;
+      acting.current = false;
+      setBusy(null);
+      options.onBusy(false);
+    }
+  };
+  const discardRefinement = async () => {
+    if (acting.current || !choices || !preview?.parentOptionId) return;
+    acting.current = true;
+    options.onBusy(true);
+    setError('');
+    try {
+      const project = await options.flush();
+      if (!project) throw new Error('Your house is not loaded.');
+      const result = await api<{ choices: AlternativeResult }>('alternatives/refinements/discard', {
+        method: 'POST',
+        body: JSON.stringify({
+          projectId: project.projectId,
+          expectedRevision: project.revision,
+          choiceSetId: choices.choiceSetId,
+          optionId: preview.id,
+        }),
+      });
+      setChoices(result.choices);
+      setPreview(
+        result.choices.options.find((option) => option.id === preview.parentOptionId) || null,
+      );
+    } catch (failure) {
+      setError((failure as Error).message);
+    } finally {
+      acting.current = false;
+      options.onBusy(false);
+    }
+  };
   return {
     choices,
     error,
@@ -117,6 +194,8 @@ export function useVisualAlternatives(options: {
     clear,
     generate,
     choose,
+    refine,
+    discardRefinement,
     cancel: () => controller.current?.abort(),
   };
 }

@@ -32,6 +32,10 @@ export function FurnitureControls({
       <div className="section-title">
         <span>FURNITURE</span>
       </div>
+      <p className="panel-note">
+        In Floor plan, drag a piece to move it and its round handle to rotate. Shift snaps; Escape
+        cancels. Arrow keys move a selected piece 0.1 m, or 0.01 m with Shift.
+      </p>
       <label className="field-label">
         Piece
         <select

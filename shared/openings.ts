@@ -2,6 +2,7 @@ import type { Room, Scene, Side, WallOpening } from './model.ts';
 import { close, horizontalSide, oppositeSide, round, sharedBoundary } from './geometry.ts';
 import { roofHeightAt } from './architecture.ts';
 import type { DesignIssue } from './design.ts';
+import type { DesignCommand } from './design.ts';
 
 export type ResolvedWallOpening = Omit<WallOpening, 'side'> & {
   source: 'explicit' | 'connection';
@@ -108,6 +109,124 @@ export function roomOpenings(scene: Scene, roomId: string, side: Side): Resolved
     });
   }
   return result.sort((a, b) => a.offset - b.offset || a.sill - b.sill || a.id.localeCompare(b.id));
+}
+
+export class OpeningEditError extends Error {
+  constructor(
+    public code: string,
+    message: string,
+    public objectIds: string[] = [],
+    public details?: Record<string, unknown>,
+  ) {
+    super(message);
+  }
+}
+
+/** Address a physical aperture by ID from either visible face; never replace its
+ * siblings. The command engine validates the resulting clone before accepting. */
+export function editOpening(
+  scene: Scene,
+  command: Extract<DesignCommand, { type: 'update_opening' | 'remove_opening' }>,
+) {
+  const room = scene.rooms.find((item) => item.id === command.roomId);
+  const selected =
+    room &&
+    roomOpenings(scene, room.id, command.side).find((item) => item.id === command.openingId);
+  if (!room || !selected)
+    throw new OpeningEditError(
+      'opening_not_found',
+      'The selected opening no longer exists on this wall. Select it again.',
+      [command.roomId, command.openingId],
+    );
+  const faceStates = scene.rooms.flatMap((owner) =>
+    (['north', 'south', 'east', 'west'] as const).map((side) => ({
+      room: owner,
+      side,
+      openings: roomOpenings(scene, owner.id, side),
+    })),
+  );
+  const faces = faceStates.filter((face) => face.openings.some((item) => item.id === selected.id));
+  const connection = scene.design?.connections.find((item) => item.id === selected.id);
+  if (command.type === 'remove_opening') {
+    if (connection)
+      scene.design!.connections = scene.design!.connections.filter(
+        (item) => item.id !== selected.id,
+      );
+    else
+      for (const owner of scene.rooms) {
+        if (!owner.wallOpenings?.some((item) => item.id === selected.id)) continue;
+        owner.wallOpenings = owner.wallOpenings.filter((item) => item.id !== selected.id);
+        if (!owner.wallOpenings.length) delete owner.wallOpenings;
+      }
+    for (const face of faces)
+      if (
+        !roomOpenings(scene, face.room.id, face.side).length &&
+        ['door', 'open', 'glass'].includes(face.room[face.side])
+      )
+        face.room[face.side] = 'solid';
+  } else if (connection) {
+    if (
+      command.patch.kind === 'window' ||
+      (command.patch.sill !== undefined && command.patch.sill !== 0)
+    )
+      throw new OpeningEditError(
+        'semantic_opening_kind',
+        'A connected passage must remain a floor-level door or open passage. Remove its connection explicitly before replacing it with a window.',
+        [selected.id],
+      );
+    const patch = command.patch;
+    if (patch.offset !== undefined)
+      connection.center = round((horizontalSide(command.side) ? room.x : room.z) + patch.offset);
+    if (patch.width !== undefined) connection.width = patch.width;
+    if (patch.height !== undefined) connection.height = patch.height;
+    if (patch.kind !== undefined && patch.kind !== 'window') connection.kind = patch.kind;
+    if (connection.kind === 'open') {
+      const height = Math.min(
+        ...scene.rooms
+          .filter((item) => [connection.roomAId, connection.roomBId].includes(item.id))
+          .map((item) => item.height),
+      );
+      if (patch.height !== undefined && Math.abs(patch.height - height) > 0.0001)
+        throw new OpeningEditError(
+          'semantic_opening_height',
+          'An open connected passage follows the room ceiling. Change it to a door to set a separate height.',
+          [selected.id],
+        );
+      connection.height = height;
+    }
+  } else {
+    const owner = scene.rooms.find((item) =>
+      item.wallOpenings?.some((opening) => opening.id === selected.id),
+    )!;
+    const opening = owner.wallOpenings!.find((item) => item.id === selected.id)!;
+    const { offset, sill, ...patch } = command.patch;
+    Object.assign(opening, patch);
+    if (offset !== undefined)
+      opening.offset = round(
+        (horizontalSide(command.side) ? room.x : room.z) +
+          offset -
+          (horizontalSide(opening.side) ? owner.x : owner.z),
+      );
+    if (sill !== undefined) opening.sill = round(room.elevation + sill - owner.elevation);
+  }
+  if (command.type === 'update_opening')
+    for (const face of faceStates) {
+      if (!['door', 'open', 'glass'].includes(face.room[face.side])) continue;
+      const after = roomOpenings(scene, face.room.id, face.side);
+      const lostLast = face.openings.some((item) => item.id === selected.id) && !after.length;
+      const gainedFirst = !face.openings.length && after.some((item) => item.id === selected.id);
+      if (lostLast || gainedFirst)
+        throw new OpeningEditError(
+          'opening_mirror_transition',
+          `Moving or resizing this opening would also change the legacy ${face.room[face.side]} wall on the ${face.side} side of “${face.room.name}”. Keep the opening on the same shared wall, or explicitly replace that whole-wall finish with a solid wall and individual openings first.`,
+          [selected.id, face.room.id],
+          {
+            side: face.side,
+            transition: lostLast ? 'losing_last_aperture' : 'gaining_first_aperture',
+          },
+        );
+    }
+  return [...new Set(faces.map((face) => face.room.id))];
 }
 
 /** Validate physical aperture rectangles, not just legacy whole-wall flags. */
