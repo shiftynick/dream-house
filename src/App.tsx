@@ -1877,6 +1877,43 @@ export default function App() {
                           : `$${lastResult.usage.cost.toFixed(3)}`}
                       </p>
                     )}
+                    {lastResult.visualReview ? (
+                      <div className="request-assessment">
+                        <strong>Rendered view review</strong>
+                        <span
+                          className={
+                            lastResult.visualReview.status === 'passed'
+                              ? 'assessment-met'
+                              : 'assessment-unmet'
+                          }
+                        >
+                          {lastResult.visualReview.status} · agent assessed
+                        </span>
+                        <p>
+                          Reviewed{' '}
+                          {lastResult.visualReview.captures
+                            .map((capture) => {
+                              const room = house.rooms.find((room) => room.id === capture.roomId);
+                              return `${capture.view}${room ? ` of ${room.name}` : ''} (${capture.quality}, ${capture.light})`;
+                            })
+                            .join('; ')}
+                          .
+                        </p>
+                        {lastResult.visualReview.observations.map((observation, index) => (
+                          <p key={`visual-observation-${index}`}>{observation}</p>
+                        ))}
+                        {lastResult.visualReview.limitations.map((limitation, index) => (
+                          <p className="design-warning" key={`visual-limitation-${index}`}>
+                            {limitation}
+                          </p>
+                        ))}
+                        <p>Visual judgments supplement the geometry checks.</p>
+                      </div>
+                    ) : (
+                      <p className="visual-review-note">
+                        No rendered view review was recorded for this change.
+                      </p>
+                    )}
                     {lastResult.assessment?.requirements.map((requirement) => (
                       <div className="request-assessment" key={requirement.id}>
                         <strong>{requirement.request}</strong>

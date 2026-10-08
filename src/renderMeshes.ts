@@ -2,17 +2,23 @@ import * as THREE from 'three';
 import type { Rect } from './renderGeometry';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
-/** Physical-scale UVs keep material grain consistent as rooms are resized. */
-export function physicalUvs(geometry: THREE.BufferGeometry) {
+/** Project a coherent pair of axes in meters. An origin anchors separate
+ * architectural pieces to the same texture, while furniture stays local. */
+export function physicalUvs(
+  geometry: THREE.BufferGeometry,
+  origin: [number, number, number] = [0, 0, 0],
+) {
   const position = geometry.getAttribute('position');
   const normal = geometry.getAttribute('normal');
   const uv = new Float32Array(position.count * 2);
   for (let index = 0; index < position.count; index++) {
     const x = Math.abs(normal.getX(index)),
-      y = Math.abs(normal.getY(index));
-    uv[index * 2] =
-      x > y && x > Math.abs(normal.getZ(index)) ? position.getZ(index) : position.getX(index);
-    uv[index * 2 + 1] = y > 0.5 ? position.getZ(index) : position.getY(index);
+      y = Math.abs(normal.getY(index)),
+      z = Math.abs(normal.getZ(index));
+    const acrossX = x > y && x > z;
+    uv[index * 2] = acrossX ? position.getZ(index) + origin[2] : position.getX(index) + origin[0];
+    uv[index * 2 + 1] =
+      !acrossX && y > z ? position.getZ(index) + origin[2] : position.getY(index) + origin[1];
   }
   geometry.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
   return geometry;
@@ -25,6 +31,7 @@ export function slabGeometry(
   origin: [number, number, number],
   top: (x: number, z: number) => number,
   bottom: (x: number, z: number) => number,
+  roofTextureAxis?: 'x' | 'z',
 ) {
   const corners = [
     [rect.minX, rect.minZ],
@@ -47,7 +54,28 @@ export function slabGeometry(
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(position, 3));
   geometry.computeVertexNormals();
-  return physicalUvs(geometry);
+  physicalUvs(geometry, origin);
+  if (roofTextureAxis) {
+    // Roof seams run down the slope, at the same physical spacing for either
+    // roof direction. World coordinates keep coplanar room patches in phase.
+    const position = geometry.getAttribute('position');
+    const normal = geometry.getAttribute('normal');
+    const uv = geometry.getAttribute('uv');
+    for (let index = 0; index < position.count; index++) {
+      const vertical = Math.abs(normal.getY(index));
+      if (vertical < 0.000001) continue; // Keep the shell's vertical edges projected normally.
+      const alongX = roofTextureAxis === 'x';
+      const slope = alongX ? normal.getX(index) : normal.getZ(index);
+      const metersPerHorizontalMeter = Math.hypot(vertical, slope) / vertical;
+      uv.setXY(
+        index,
+        alongX ? position.getZ(index) + origin[2] : position.getX(index) + origin[0],
+        (alongX ? position.getX(index) + origin[0] : position.getZ(index) + origin[2]) *
+          metersPerHorizontalMeter,
+      );
+    }
+  }
+  return geometry;
 }
 
 /** Clip roof-wall cells to the exact sloped profile and cut raised apertures.
@@ -56,6 +84,7 @@ export function wallCapGeometry(
   profile: [number, number][],
   eave: number,
   openings: { offset: number; width: number; sill: number; height: number }[] = [],
+  textureOrigin: [number, number, number] = [0, 0, 0],
 ) {
   if (!profile.length || profile.every(([, height]) => height <= eave + 0.001)) return null;
   const xs = [
@@ -119,7 +148,7 @@ export function wallCapGeometry(
   if (!pieces.length) return null;
   const geometry = mergeGeometries(pieces, false);
   pieces.forEach((piece) => piece.dispose());
-  return physicalUvs(geometry);
+  return physicalUvs(geometry, textureOrigin);
 }
 
 /** Two draw groups separate an outward wall face from its room-facing finish.

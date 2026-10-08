@@ -104,6 +104,7 @@ export function wallFinishGeometry(house: Scene, room: Room, side: Side) {
  * exactly one outward and one inward draw group, with the original UVs. */
 export function wallSurfaceGeometry(house: Scene, room: Room, side: Side) {
   const groups = new Map<string, THREE.BufferGeometry[]>();
+  const textureOrigin: [number, number, number] = [wallAxis(room, side).center, room.elevation, 0];
   const box = (
     material: string,
     position: [number, number, number],
@@ -112,7 +113,7 @@ export function wallSurfaceGeometry(house: Scene, room: Room, side: Side) {
   ) => {
     const geometry = new THREE.BoxGeometry(...size);
     if (continuous) geometry.translate(...position);
-    physicalUvs(geometry);
+    physicalUvs(geometry, continuous ? textureOrigin : undefined);
     if (!continuous) geometry.translate(...position);
     const parts = groups.get(material) ?? [];
     parts.push(geometry);

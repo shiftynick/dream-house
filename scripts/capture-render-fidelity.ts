@@ -10,6 +10,7 @@ import { cabinScene } from './scenarios.ts';
 import { sceneSchema } from '../shared/model.ts';
 import { sceneFingerprint } from '../server/render-service.ts';
 import { renderCamera, renderRequestSchema } from '../shared/render.ts';
+import { materialStudyCaptures } from './material-study-fixtures.ts';
 
 const args = process.argv.slice(2);
 function option(name: string, fallback: string) {
@@ -31,6 +32,11 @@ const performanceOrder = option('--performance-order', 'live-first');
 if (!['live-first', 'presentation-first'].includes(performanceOrder))
   throw new Error('Use --performance-order live-first or presentation-first.');
 const interiorStudy = args.includes('--interior-study');
+const materialStudy = args.includes('--material-study');
+if (materialStudy && (interiorStudy || lifecycleSmoke || performanceSmoke || refined))
+  throw new Error(
+    '--material-study is a focused capture run; use it without other study/smoke flags.',
+  );
 const gpu = option('--gpu', 'swiftshader');
 if (!['swiftshader', 'hardware'].includes(gpu))
   throw new Error('Use --gpu swiftshader or --gpu hardware.');
@@ -74,6 +80,8 @@ async function rendererSourceHashes() {
     'shared/design.ts',
     'shared/spatial.ts',
     'package-lock.json',
+    'scripts/capture-render-fidelity.ts',
+    'scripts/material-study-fixtures.ts',
   ];
   const result: Record<string, string> = {};
   for (const file of files) {
@@ -191,58 +199,60 @@ try {
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
   if (!ready) throw new Error('Scenario server did not become ready.');
-  const scene = cabinScene();
-  scene.name = 'Render fidelity cabin';
-  scene.rooms.find((room) => room.id === 'living')!.furniture = [
-    {
-      id: 'sofa',
-      name: 'Sofa',
-      kind: 'sofa',
-      x: -1.2,
-      z: -1.5,
-      rotation: 0,
-      width: 2.8,
-      depth: 1,
-      height: 0.85,
-      palette: 'chalk',
-    },
-    {
-      id: 'table',
-      name: 'Coffee table',
-      kind: 'coffee-table',
-      x: -1.2,
-      z: 0,
-      rotation: 0,
-      width: 1.5,
-      depth: 0.8,
-      height: 0.42,
-      palette: 'cedar',
-    },
-    {
-      id: 'rug',
-      name: 'Rug',
-      kind: 'rug',
-      x: -1.2,
-      z: -0.2,
-      rotation: 0,
-      width: 3.6,
-      depth: 2.8,
-      height: 0.025,
-      palette: 'limestone',
-    },
-    {
-      id: 'chair',
-      name: 'Armchair',
-      kind: 'armchair',
-      x: 1.5,
-      z: -1.2,
-      rotation: -30,
-      width: 0.9,
-      depth: 0.9,
-      height: 0.9,
-      palette: 'charcoal',
-    },
-  ];
+  const scene = materialStudy ? materialStudyCaptures()[0].scene : cabinScene();
+  if (!materialStudy) {
+    scene.name = 'Render fidelity cabin';
+    scene.rooms.find((room) => room.id === 'living')!.furniture = [
+      {
+        id: 'sofa',
+        name: 'Sofa',
+        kind: 'sofa',
+        x: -1.2,
+        z: -1.5,
+        rotation: 0,
+        width: 2.8,
+        depth: 1,
+        height: 0.85,
+        palette: 'chalk',
+      },
+      {
+        id: 'table',
+        name: 'Coffee table',
+        kind: 'coffee-table',
+        x: -1.2,
+        z: 0,
+        rotation: 0,
+        width: 1.5,
+        depth: 0.8,
+        height: 0.42,
+        palette: 'cedar',
+      },
+      {
+        id: 'rug',
+        name: 'Rug',
+        kind: 'rug',
+        x: -1.2,
+        z: -0.2,
+        rotation: 0,
+        width: 3.6,
+        depth: 2.8,
+        height: 0.025,
+        palette: 'limestone',
+      },
+      {
+        id: 'chair',
+        name: 'Armchair',
+        kind: 'armchair',
+        x: 1.5,
+        z: -1.2,
+        rotation: -30,
+        width: 0.9,
+        depth: 0.9,
+        height: 0.9,
+        palette: 'charcoal',
+      },
+    ];
+  }
   sceneSchema.parse(scene);
   await writeFile(path.join(output, 'fixture.json'), JSON.stringify(scene, null, 2));
   const reset = await fetch(`${base}/__verification/reset`, {
@@ -321,17 +331,19 @@ try {
   evidence.initialRendererDiagnostics = await canvas.evaluate((element) => ({
     ...(element as HTMLCanvasElement).dataset,
   }));
-  const captureTasks = ['exterior', 'interior'].map((view) => ({
-    filename: `${view}-live.png`,
-    scene,
-    request: renderRequestSchema.parse({
-      view,
-      ...(view === 'interior' ? { roomId: 'living' } : {}),
-      light: 'day',
-      quality: 'live',
-      angle: 'southeast',
-    }),
-  }));
+  const captureTasks = materialStudy
+    ? materialStudyCaptures()
+    : ['exterior', 'interior'].map((view) => ({
+        filename: `${view}-live.png`,
+        scene,
+        request: renderRequestSchema.parse({
+          view,
+          ...(view === 'interior' ? { roomId: 'living' } : {}),
+          light: 'day',
+          quality: 'live',
+          angle: 'southeast',
+        }),
+      }));
   if (interiorStudy) {
     // Interior broker framing intentionally uses angle, not request.camera (ignored for interiors).
     const viewpoints = [
@@ -385,6 +397,11 @@ try {
   }
   for (const task of captureTasks) {
     const { request, filename, scene: captureScene } = task;
+    if (materialStudy)
+      await writeFile(
+        path.join(output, filename.replace('.png', '.scene.json')),
+        JSON.stringify(captureScene, null, 2),
+      );
     const response = await fetch(`${base}/__verification/render`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -418,6 +435,10 @@ try {
     await writeFile(path.join(output, 'metadata.json'), JSON.stringify(evidence, null, 2));
     console.log(path.join(output, filename));
   }
+  if (materialStudy && (pageExceptions.length || browserDiagnostics.length))
+    throw new Error(
+      `Material study browser diagnostics: ${JSON.stringify({ pageExceptions, browserDiagnostics })}`,
+    );
   async function saveCanvas(filename: string) {
     assertStablePage();
     const frame = await canvas.evaluate((element) => {

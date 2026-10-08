@@ -48,11 +48,12 @@ const assessment = () => ({
     },
   ],
 });
-const finish = (value?: unknown) =>
+const finish = (value?: unknown, visualReview?: unknown) =>
   turn('finish_design', {
     mode: 'apply',
     reply: 'I updated the house.',
     ...(value ? { assessment: value } : {}),
+    ...(visualReview ? { visualReview } : {}),
   });
 const results = (history: ModelMessage[]) =>
   history
@@ -182,7 +183,13 @@ test('live geometry replaces repeated snapshots, reviewed pixels retire, and ide
         if (round === 1) return edit();
         if (round === 2 || round === 3) return turn('render_view', { view: 'exterior' });
         if (round === 4) return turn('inspect_design', {});
-        return finish();
+        return finish(undefined, {
+          status: 'passed',
+          captureIds: ['capture-1'],
+          observations: [
+            'The exterior cedar surfaces look coordinated in the supplied color view.',
+          ],
+        });
       },
     },
   });
@@ -246,7 +253,13 @@ test('cached image from a reviewed scene cannot bypass next-round review after a
           return rendered;
         }
         assert.match(results(history).at(-1).error, /examine its image in the next round/);
-        return finish();
+        return finish(undefined, {
+          status: 'passed',
+          captureIds: ['capture-1'],
+          observations: [
+            'The exterior cedar surfaces look coordinated in the supplied color view.',
+          ],
+        });
       },
     },
   });

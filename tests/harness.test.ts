@@ -317,7 +317,17 @@ test('a repair and visual correction can finish beyond six calls with a fresh fi
     (history) => {
       assert.equal(runBudget(history).needsFreshCapture, false);
       assert.equal(runBudget(history).imageAvailableToReviewNow, true);
-      return turn([finish()]);
+      return turn([
+        call('finish_design', {
+          mode: 'apply',
+          reply: 'The kitchen is resized and chalk colored.',
+          visualReview: {
+            status: 'passed',
+            captureIds: ['capture-2'],
+            observations: ['The final kitchen color is coordinated in the supplied exterior view.'],
+          },
+        }),
+      ]);
     },
   ]);
   const result = await runAgent({

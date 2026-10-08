@@ -59,6 +59,8 @@ The **Design brief** keeps confirmed requirements, assumptions, and preferences 
 
 Keep the Terrain browser tab open for visual review and generated previews. The renderer currently runs in the browser; there is no headless render service.
 
+**Latest design check** shows the agent's visual observations and the views it reviewed. Material and roof changes require a Live 3D color view. If the agent finds a visible problem or cannot verify the result, the change is presented for confirmation with its limitations. These visual judgments supplement the geometry checks.
+
 ## Houses and visual alternatives
 
 Open **My houses** to name a new house or return to an existing one. Switching saves your current work first. Each house has its own conversation, design brief, geometry, history, and alternatives. Creating a house starts a fresh conversation and empty site while retaining your previous house in the library. **Alternatives → Start a new house** opens the same chooser.

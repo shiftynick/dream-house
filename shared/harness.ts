@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { EvaluatedVisualReview, VisualCaptureProvenance } from './visual-review.ts';
 import type { Scene, Project } from './model.ts';
 import type { DesignIssue } from './design.ts';
 import { designSelectionSchema } from './selection.ts';
@@ -39,7 +40,7 @@ export type RunEvent = {
   tool?: string;
   issues?: DesignIssue[];
   changes?: string[];
-  render?: { view: string; sceneHash: string; roomId?: string };
+  render?: VisualCaptureProvenance;
 };
 export type AgentUsage = {
   inputTokens: number;
@@ -72,6 +73,7 @@ export type HarnessResult = {
   usage: AgentUsage;
   metrics?: RunMetrics;
   assessment?: EvaluatedAssessment;
+  visualReview?: EvaluatedVisualReview;
 };
 export type RunStatus = {
   id: string;

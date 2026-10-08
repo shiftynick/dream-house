@@ -155,6 +155,13 @@ test(
                 reply:
                   'The cabin has a single-pitch roof, south-facing windows, and connected sleeping and bathroom spaces.',
                 assessment,
+                visualReview: {
+                  status: 'passed',
+                  captureIds: ['capture-1'],
+                  observations: [
+                    'The supplied exterior color view shows the cabin roof and coordinated wall materials.',
+                  ],
+                },
               },
             ],
           ]);
@@ -446,5 +453,77 @@ test(
     assert.equal(status.body.usage.requests, 1);
     assert.equal(status.body.usage.modelCost, 0.004);
     assert.deepEqual(await app.store.read(), app.project);
+  },
+);
+
+test(
+  'negative visual review survives HTTP and blocks DesignService commit until confirmation',
+  { timeout: 10000 },
+  async (t) => {
+    let round = 0;
+    const app = await fixture(t, {
+      modelClient: {
+        async complete() {
+          round++;
+          if (round === 1) return turn([['apply_operations', { operations: cabinOperations() }]]);
+          if (round === 2) return turn([['render_view', { view: 'exterior' }]]);
+          return turn([
+            [
+              'finish_design',
+              {
+                mode: 'apply',
+                reply: 'The cabin draft is ready.',
+                assessment,
+                visualReview: {
+                  status: 'issues',
+                  captureIds: ['capture-1'],
+                  observations: ['The roof panels appear inconsistent.'],
+                  limitations: ['This is a model judgment from one exterior view.'],
+                },
+              },
+            ],
+          ]);
+        },
+      },
+    });
+    const clientId = (await app.http('/api/render/clients', 'POST')).body.clientId;
+    t.after(() => app.renders.disconnect(clientId));
+    const listening = app.http(`/api/render/jobs?clientId=${clientId}&wait=1`);
+    const run = app.http(
+      '/api/agent',
+      'POST',
+      app.agentInput({ context: { allowVisualReview: true, renderClientId: clientId } }),
+    );
+    const job = (await listening).body.job as RenderJob;
+    const { position, target } = renderCamera(job.scene, job.request);
+    await app.http(`/api/render/jobs/${job.id}/result`, 'POST', {
+      clientId,
+      result: {
+        image: 'data:image/png;base64,YWJj',
+        width: 768,
+        height: 576,
+        view: job.request.view,
+        sceneHash: job.sceneHash,
+        camera: { position, target },
+      },
+    });
+    const result = await run;
+    assert.equal(result.status, 200);
+    assert.equal(result.body.visualReview.status, 'issues');
+    assert.equal(result.body.visualReview.captures[0].quality, 'live');
+    assert.equal(result.body.needsConfirmation, true);
+    assert.match(result.body.reply, /roof panels appear inconsistent/);
+    assert.equal(JSON.stringify(result.body.visualReview).includes('base64'), false);
+    const blocked = await app.http(`/api/design/drafts/${result.body.draftId}/commit`, 'POST', {
+      expectedRevision: app.project.revision,
+    });
+    assert.equal(blocked.status, 409);
+    assert.deepEqual(await app.store.read(), app.project);
+    const accepted = await app.http(`/api/design/drafts/${result.body.draftId}/commit`, 'POST', {
+      expectedRevision: app.project.revision,
+      confirm: true,
+    });
+    assert.equal(accepted.status, 200);
+    assert.match(accepted.body.reply, /roof panels appear inconsistent/);
   },
 );

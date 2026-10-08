@@ -264,6 +264,11 @@ function RoomMesh({
   );
   const generated = useMemo(() => {
     const origin: [number, number, number] = [r.x, r.elevation, r.z];
+    const roof = effectiveRoof(house, r);
+    const roofTextureAxis =
+      slabs.roofClipped || roof.style === 'flat' || ['north', 'south'].includes(roof.direction)
+        ? 'z'
+        : 'x';
     const roofY = (x: number, z: number) =>
       slabs.roofClipped ? r.elevation + r.height : roofHeightAt(house, r, x, z);
     const cap = (side: Side) => {
@@ -271,12 +276,13 @@ function RoomMesh({
         wallTopProfile(house, r, side),
         r.height,
         roomOpenings(house, r.id, side),
+        [wallAxis(r, side).center, r.elevation, 0],
       );
       return geometry ? interiorFaceGroups(geometry, side === 'north' || side === 'east') : null;
     };
     return {
       roofs: roofPatches(house, r).map((rect) =>
-        slabGeometry(rect, origin, (x, z) => roofY(x, z) + 0.18, roofY),
+        slabGeometry(rect, origin, (x, z) => roofY(x, z) + 0.18, roofY, roofTextureAxis),
       ),
       soffits: roofPatches(house, r).map((rect) =>
         slabGeometry(
@@ -284,6 +290,7 @@ function RoomMesh({
           origin,
           (x, z) => roofY(x, z) + 0.025,
           (x, z) => roofY(x, z) - 0.035,
+          roofTextureAxis,
         ),
       ),
       foundations: slabs.foundation.map((rect) =>
