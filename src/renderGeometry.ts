@@ -1,6 +1,6 @@
 import type { Room, Scene, Side, Stair } from '../shared/model';
 import { getDesign, oppositeSide, roomOpenings } from '../shared/design';
-import { sharedBoundary } from '../shared/geometry';
+import { outdoor, sharedBoundary } from '../shared/geometry';
 import { effectiveRoof, roofHeightAt } from '../shared/architecture';
 import { stairPlanFootprint } from '../shared/spatial';
 
@@ -70,6 +70,7 @@ export function planWallHitTarget(room: Room, side: Side): Rect {
 }
 
 function rawWallRects(scene: Scene, room: Room, side: Side): Rect[] {
+  if (outdoor(room)) return [];
   const axis = wallAxis(room, side);
   const explicit = roomOpenings(scene, room.id, side);
   if (room[side] === 'open' && !explicit.length) return [];
@@ -207,6 +208,7 @@ export function roofPatches(scene: Scene, room: Room): Rect[] {
 /** Wall-space upper profile; the minimum eave remains the room's usable height. */
 export function wallTopProfile(scene: Scene, room: Room, side: Side): [number, number][] {
   if (
+    outdoor(room) ||
     roomSlabs(scene, room).roofClipped ||
     (room[side] === 'open' && !roomOpenings(scene, room.id, side).length)
   )

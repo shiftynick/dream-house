@@ -10,7 +10,7 @@ import {
   sharedBoundary,
   sides,
 } from './geometry.ts';
-import { effectiveRoof, roofHeightAt, roofMaximumHeight } from './architecture.ts';
+import { effectiveRoof, floorSlabBounds, roofHeightAt, roofMaximumHeight } from './architecture.ts';
 import { roomOpenings, wallOpeningHeightLimit } from './openings.ts';
 import { roomFurniture } from './furniture.ts';
 import { validateDesign, type DesignIssue } from './design.ts';
@@ -121,9 +121,13 @@ function profileHeight(scene: Scene, room: Room, side: Side, coordinate: number)
 }
 function enclosureCuts(scene: Scene, room: Room, side: Side, possibleExposure = false): WallRect[] {
   return scene.rooms.flatMap((other) => {
-    if (other.id === room.id || outdoor(other)) return [];
+    if (other.id === room.id) return [];
     const shared = sharedBoundary(room, other);
     if (!shared || shared.sideA !== side) return [];
+    // An outdoor room's nominal height and wall flags are not an enclosure.
+    // Its actual raised deck can still cover part of a neighboring aperture.
+    if (outdoor(other))
+      return [{ start: shared.start, end: shared.end, ...floorSlabBounds(other) }];
     return [
       {
         start: shared.start,

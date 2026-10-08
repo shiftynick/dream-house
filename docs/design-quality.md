@@ -10,7 +10,7 @@ The application converts the plan into immutable request objectives. Later check
 
 The planner chooses a coherent scheme rather than assigning an unrelated finish to each room. It specifies dimensioned exterior windows for occupied spaces; an open wall or a door cannot stand in for glazing. Interior rooms require an explicit daylight rationale. The model still interprets natural language: the plan is not a deterministic architectural brief parser.
 
-Construction establishes the required room layout before adding dimensioned windows. This lets the builder use final exposed-wall evidence rather than glazing a wall that a later wing will cover. Candidate batches that introduce windows while required program rooms are still missing receive planning feedback without changing the draft. Doors and room connections can establish access during the layout phase. Composition plans choose exactly two required review views so the four-capture allowance can cover both the initial and repaired design.
+Construction establishes the required room layout before adding dimensioned windows. This lets the builder use final exposed-wall evidence rather than glazing a wall that a later wing will cover. Candidate batches that introduce windows while required program rooms are still missing receive planning feedback without changing the draft. Window placement uses complete rectangles from the final exposed-wall slots; standalone replacement inventories preserve semantic doorways, so those occupied regions remain unavailable. Doors and room connections can establish access during the layout phase. Composition plans choose exactly two required review views so the four-capture allowance can cover both the initial and repaired design.
 
 ## Inspect factual quality
 
@@ -22,6 +22,8 @@ Construction establishes the required room layout before adding dimensioned wind
 - Fireplaces, terraces, courtyards and validated stair links.
 
 Inspection lists exposed wall areas, window counts and areas, possible free window rectangles, resolved materials, and feature ownership. Whole-wall legacy open/glass settings are reported separately and do not count as dimensioned windows or safe empty window slots. Material inspection includes exposed roof-shaped wall caps. Outdoor floors without an explicit override use the renderer's deck default; they are not falsely reported as the house palette.
+
+Terraces and courtyards retain the renderer's floor-only representation, including when dormant wall flags contain indoor defaults. They do not create a nominal wall obstruction or mirror indoor apertures. A raised outdoor floor slab still obstructs overlapping glazing and is subtracted from available window regions. Enclosed outdoor walls are not a supported representation.
 
 These are conservative geometry checks. Roof slopes may cause glazing area to be undercounted or possible cladding exposure to be overcounted. They do not certify daylight, material realism, interior functionality, or architectural beauty.
 
@@ -36,6 +38,8 @@ With image inspection disabled, the critic receives numerical evidence only. Vis
 ## Bounds and accounting
 
 Focused runs allow twelve actual model calls. The first accepted composition plan raises the default to sixteen aggregate builder and critic calls; explicit caller limits remain strict. Both retain thirty-two tools, two geometry repair opportunities, one truncation recovery, and a five-minute timeout. Planned compositions allow four distinct captures so two initial views and two repaired views can fit; focused edits allow three. Critique uses the same cancellation, daily request accounting, usage callbacks and provider-reported cost accounting as generation. Images consume model input tokens even when locally cached.
+
+After a mutation fails, remaining non-inspection calls authored in that same model response are deferred with explicit tool results. The builder receives the actual failure before submitting a new repair; multiple calls that repeat the same unresolved errors cannot consume multiple repair opportunities in one turn. Skipped calls remain subject to the tool limit, and each subsequent failing model round remains subject to the existing repair bound.
 
 An incomplete result may be presented with explicit limitations when the run reaches its real bounds or a requirement is unsupported. A proposal remains separate from adoption, and failed/cancelled work preserves the saved house. Larger programs may still exceed a bounded run; this workflow improves the attempt and its honesty rather than promising perfect designs.
 

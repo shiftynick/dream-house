@@ -53,7 +53,7 @@ WORKFLOW
 For an empty-site house or a comprehensive composition, FIRST call plan_design before editing. Declare a complete functional room program, deliberate material strategy, dimensioned exterior windows and purposeful features that fit the owner's actual ambition. The plan is immutable: required objectives cannot vanish during editing, reset, review or finish. Focused edits to an existing house can use the shorter existing workflow without a plan. A grand lodge should be a usable lodge, not just a hall and empty boxes: plan living/gathering, kitchen/dining, sleeping and bathrooms with indoor access, daylight, coherent roof/material composition, and purposeful lodge features. Room kinds and names alone do not establish useful function. After the shell and windows, furnish intended uses purposefully: toilet and vanity in bathrooms, table and chairs for dining, gathering seating around a fireplace, and beds with storage for sleeping. Palette names identify material collections; verify roof appearance in actual renders rather than assuming a cedar palette means cedar shingles. Choose terrace/courtyard, a linked upper level, fireplace or other features only when they serve the intent; unsupported items must be disclosed rather than invented.
 The full builder tool menu is available, including apply_operations, render_view, review_design and critique_design. The empty-site plan gate is a prerequisite, not missing editing capability. A valid plan enables construction batches; correct schema errors and continue the authorized request without asking the owner to enable editing tools or repeat permission. For a genuine empty-site clarification before planning, finish in question mode with questionReason: clarification. Never use question mode to report editing tools unavailable when they are present.
 For the first empty-site response emit ONLY one concise plan_design call, then wait for acceptance and the next round. Do not include construction calls, room geometry, furniture or window inventories in the planning response. RoomProgram automatically generates room/kind/circulation checks; materialStrategy and fenestration generate their own objectives. Features should contain only nonredundant extra intent, not repeat room existence, circulation, materials or windows. Choose exactly two critique views: exterior plus one layout/interior view.
-COMPOSITION PHASES: build all required room massing and semantic indoor connections BEFORE adding dimensioned window inventories. Initially omit wallOpenings windows and detailed furniture from new room records; add roofs and simple doors/connections as coherent shell batches. add_rooms.rooms contains ONLY room records: connect_rooms, set_fireplace and other commands belong as separate siblings in operations, never nested in rooms. After the required program exists and is connected, inspect quality.rooms[].walls[].availableWindowRectangles, then place dimensioned windows within the exposed final wall slots. Later wings can cover an early window, so do not glaze a provisional shell. Keep primary cladding coherent across major wings; accents belong to deliberate bases/features/planes, not arbitrary room-kind patchwork.
+COMPOSITION PHASES: build all required room massing and semantic indoor connections BEFORE adding dimensioned window inventories. Initially omit wallOpenings windows and detailed furniture from new room records; add roofs and simple doors/connections as coherent shell batches. add_rooms.rooms contains ONLY room records: connect_rooms, set_fireplace and other commands belong as separate siblings in operations, never nested in rooms. After the required program exists and is connected, inspect quality.rooms[].walls[].availableWindowRectangles in the live snapshot or tool result, then place dimensioned windows within the exposed final wall slots. Each slot gives room-local offset, width, sill and height: fit the complete window rectangle within one slot, leaving space around existing doorways and windows. An empty slot list means choose another wall or revise the design; do not guess a window there. set_wall_openings preserves semantic doorways, so a replacement window must still avoid them. Later wings can cover an early window, so do not glaze a provisional shell. Keep primary cladding coherent across major wings; accents belong to deliberate bases/features/planes, not arbitrary room-kind patchwork.
 After a planned composition is built, render its exterior and a plan/interior/cutaway view, then call critique_design. This requests a separate skeptical evaluator of the original request, immutable plan, exact geometry and current images. Its feedback can expose an inadequate plan as well as a poor execution. Follow concrete repair advice, then render fresh views and request a new critique. At most four captures are available for a planned composition (two initial and two after a repair); focused edits retain three. Reserve actual model calls for the critic and finish. Do not stop after a small core and ask the owner whether to complete features they already authorized. Required unfinished objectives remain essential while budget permits. A genuinely unsupported feature or exhausted budget may need an honest disclosed proposal, never a false success.
 The current house is a draft. You can inspect it, apply a BATCH of semantic operations, inspect/repair the result, and finish. Nothing you do is saved until the application commits a valid draft. Never output a replacement scene or calculate an entire house as JSON prose. Use apply_operations for changes and finish_design when done. The tools return exact changes and issues; base your final reply on those results. Do not claim rejected or unexecuted operations succeeded.
 Use small changes to existing spaces. Preserve stable IDs, unrelated rooms, and existing relationships. Prefer attach_room/attach_wing, anchored resize_room, move_group, and connect_rooms over guessing new centers. Batch dependent changes together so intermediate overlaps do not fail a coherent edit. Move bathrooms with their bedroom wing when appropriate. New houses may use add_rooms/add_stairs plus semantic connections. Read tool schemas for exact field names and required values.
@@ -63,7 +63,7 @@ CONTEXT AND INTENT
 For matching selected or adjoining surfaces, inspect effectiveSurfacePalettes first, batch exact set_surface_material operations for the requested targets, and include typed material assertions for each target. Preserve unrelated floor, accent and palette choices. Intentional palette differences are not renderer bugs. Global set_material clears room and surface overrides; use it only for a requested whole-house material replacement.
 Material IDs name coordinated palettes, not literal substances on every face. The renderer uses stone-textured walls for limestone/chalk, wood-textured walls for cedar/charcoal, wood floors and flat-roof soffits, and a separate exterior roof color. A limestone palette can therefore have a wood-toned ceiling; do not diagnose that as a rendering error. For a specific timber terrace deck, set its floor surface palette or its room palette explicitly; an outdoor space without either retains its default stone paving.
 Roofs support flat, pitched (symmetric gable), and single-pitch (one sloping plane). Use set_roof with style, pitch in degrees, and direction: direction identifies the HIGH EDGE for single-pitch, not the downhill direction. Room height is the minimum eave; roof rise is additional. Omitted roomIds edits the house default and preserves room overrides; provide roomIds to target specific roofs, or reset_roof to restore inheritance. Inspect effective roofs after editing. A requested single-pitch roof must use single-pitch; do not substitute a gable or flat roof.
-Use set_wall_openings for dimensioned windows and doors together on one wall. It replaces that wall's standalone apertures but preserves semantic connect_rooms doorways. Each opening needs its own stable ID, kind, offset, width, height, and sill; offsets run along +x on north/south walls and +z on east/west walls from the room center. Doors/open passages have sill 0. Windows are not indoor circulation links. Keep existing apertures when the user asks to add another; inspect first, then supply the complete desired standalone set. Use connect_rooms for an indoor doorway between adjacent rooms. A south window is on the south wall, regardless of the camera.
+Use set_wall_openings for dimensioned windows and doors together on one wall. It replaces that wall's standalone apertures but preserves semantic connect_rooms doorways. Each opening needs its own stable ID, kind, offset, width, height, and sill; offsets run along +x on north/south walls and +z on east/west walls from the room center. Doors/open passages have sill 0. For a semantic connected passage, use update_opening with its stable ID; an open passage follows the ceiling, so change its kind to door before setting an independent height. Prefer fitting a window in an available slot over shrinking an intended indoor connection. Windows are not indoor circulation links. Keep existing apertures when the user asks to add another; inspect first, then supply the complete desired standalone set. Use connect_rooms for an indoor doorway between adjacent rooms. A south window is on the south wall, regardless of the camera.
 The selected room or exact surface, view, and camera are supplied. Resolve 'this wall', 'this floor', or 'here' to selection.surface and selection.roomId. For a surface material use set_surface_material, not a whole-room palette. If selection.openingId is supplied, target that individual aperture with update_opening/remove_opening; retain its sibling openings. Use opening_item checks for its exact presence/dimensions and unchanged_opening checks for apertures the owner wants preserved. Move a selected wall with move_wall: positive delta moves outward, negative inward, and the opposite wall stays fixed. For transferring space across an existing partition, use move_shared_wall: positive delta expands roomAId into roomBId while preserving the exterior rectangle. inspect_house.sharedWalls provides the side, normal axis and direction. Use split_room/merge_rooms for explicit partitions and rectangular unions, preserving stable object IDs; these currently support flat roofs and reject unsupported stairs, finishes or cuts atomically. Explain the limitation rather than approximating an unsafe transformation with separate room resizes. Resolve 'this room' to the selection; if none is selected and the reference is ambiguous, ask one short question. Screen-left depends on the camera, while west is world -x. When context.editScope is supplied, the owner selected 'Only selected part'. Keep all fields outside that selection unchanged; if a dependent edit is unavoidable, explain it and propose rather than treating the scope as optional. Context preservationChecks are immutable per-request checks against the starting draft. They survive reset and cannot be weakened by tools. For spoken keep-unchanged clauses, include unchanged_room (optional property groups), unchanged_surface (effective material only), unchanged_furniture (world position/properties), unchanged_opening (physical aperture), or unchanged_except_selection checks in the request assessment. These compare with the original draft, not a later scratch state, and must survive review/finish. Use separate geometry checks when preserving a floor's size or a wall's location. The persistent design brief takes precedence over speculative improvements. Capture explicit ongoing requests as confirmed requirements; label your own assumptions as assumptions. Preferences are soft. Never quietly remove or weaken an existing requirement to make validation pass. If a requirement must change, explain the tradeoff and finish in propose mode. Ask before a major ambiguous decision, but make reasonable small related changes automatically. When 'attached' could mean direct indoor access or via an open courtyard, state the chosen interpretation or clarify if it materially changes the layout.
 
 VISUAL REVIEW
@@ -120,7 +120,7 @@ export const AGENT_TOOLS = [
   {
     name: 'apply_operations',
     description:
-      'Apply a batch of architectural operations to the unsaved draft. Local code computes geometry. Argument/lookup failures roll back the batch; geometry conflicts remain in the draft for repair and are returned as structured issues. No house file is changed.',
+      'Apply a batch of architectural operations to the unsaved draft. Local code computes geometry. Argument/lookup failures roll back the batch; geometry conflicts remain in the draft for repair and are returned as structured issues. A failed mutation defers remaining non-inspection calls until the next model round; inspect feedback before repairing. For windows, use quality.rooms[].walls[].availableWindowRectangles from the live snapshot or result, preserving semantic doorways. No house file is changed.',
     schema: operationsSchema,
   },
   {
@@ -410,6 +410,7 @@ export async function runAgent(options: {
   const maxRepairs = options.maxRepairs ?? AGENT_LIMITS.repairRejections;
   let idleRounds = 0;
   let truncationRecoveries = 0;
+  let rejectedThisRound = false;
   const seenScenes = new Set([sceneFingerprint(draft.scene)]);
   const emit = async (stage: RunEvent['stage'], message: string, extra: Partial<RunEvent> = {}) => {
     const event = { stage, message, at: new Date().toISOString(), ...extra };
@@ -460,11 +461,17 @@ export async function runAgent(options: {
     return undefined;
   };
   const reject = async (issues: DesignIssue[], message: string) => {
+    // A model must receive the failure before another repair can be charged.
+    // Several tool calls authored together are a single attempt, not repairs.
+    if (rejectedThisRound) return;
+    rejectedThisRound = true;
     repairs++;
     await emit('repairing', message, { issues });
     if (repairs > maxRepairs)
       throw new AgentRunError(
-        'I could not resolve the design conflicts within this attempt. Your saved house is unchanged. Try a smaller change or clarify which spaces may move.',
+        startingRoomSummary.roomCount === 0
+          ? 'I could not resolve the new-house geometry conflicts within this attempt. Your saved house is unchanged. Try this build again, or simplify the layout.'
+          : 'I could not resolve the design conflicts within this attempt. Your saved house is unchanged. Try a smaller change or clarify which spaces may move.',
         issues,
       );
   };
@@ -484,6 +491,7 @@ export async function runAgent(options: {
   };
   await emit('starting', 'Reading your house and design brief.');
   for (let round = 0; usage.calls < maxCalls; round++) {
+    rejectedThisRound = false;
     options.signal?.throwIfAborted();
     if (idleRounds >= AGENT_LIMITS.consecutiveIdleRounds)
       throw new AgentRunError(
@@ -631,6 +639,7 @@ export async function runAgent(options: {
       );
     history.push({ role: 'assistant', content: turn.content, tool_calls: turn.calls });
     const images: ModelMessage[] = [];
+    let failedMutationCallId: string | undefined;
     const invalidateVisualReview = () => {
       reviewedHash = undefined;
       awaitingReviewHash = undefined;
@@ -647,6 +656,22 @@ export async function runAgent(options: {
           'This attempt reached its tool limit. Your saved house is unchanged.',
         );
       options.signal?.throwIfAborted();
+      if (failedMutationCallId && call.function.name !== 'inspect_design') {
+        history.push({
+          role: 'tool',
+          tool_call_id: call.id,
+          content: JSON.stringify({
+            ok: false,
+            executed: false,
+            code: 'stale_turn_after_failed_mutation',
+            blockedByToolCallId: failedMutationCallId,
+            error:
+              'This call did not execute because an earlier mutation in this model turn failed. Read its issues and the live draft, then submit a corrected repair in the next round. Do not claim this deferred call succeeded.',
+          }),
+        });
+        metrics.toolMs += performance.now() - toolStartedAt;
+        continue;
+      }
       let args: unknown;
       try {
         args = JSON.parse(call.function.arguments);
@@ -1017,9 +1042,28 @@ export async function runAgent(options: {
             issues: result.issues,
             changes: result.changes,
           });
-          output = { ok: !result.issues.some((i) => i.severity === 'error'), ...result };
-          if (result.issues.some((i) => i.severity === 'error'))
+          const errors = result.issues.filter((issue) => issue.severity === 'error');
+          output = {
+            ok: !errors.length,
+            ...result,
+            ...(plan?.scope === 'composition' || errors.length
+              ? { quality: inspectDesignQuality(draft.scene) }
+              : {}),
+            ...(errors.length
+              ? {
+                  repair: {
+                    draftRetained: result.applied,
+                    errors,
+                    nextStep:
+                      'Repair these blocking errors in the next model round. The live draft is authoritative; applied geometry remains for targeted repair, while rejected arguments leave geometry unchanged. Remaining non-inspection calls from this turn will not execute. For openings, inspect availableWindowRectangles and existing semantic doorways, then move, resize or remove conflicting apertures using their stable IDs. set_wall_openings preserves semantic connections; edit those with update_opening, and change kind to door if a separate height is needed because open passages follow the ceiling. Warnings alone do not require repair.',
+                  },
+                }
+              : {}),
+          };
+          if (errors.length) {
+            failedMutationCallId = call.id;
             await reject(result.issues, 'Adjusting the draft to resolve a geometry conflict.');
+          }
         } else if (name === 'render_view') {
           const request = renderRequestSchema.parse(args);
           if (!visualReviewAvailable) {
@@ -1399,11 +1443,13 @@ export async function runAgent(options: {
               objectIds: [],
             },
           ]);
+          failedMutationCallId = call.id;
           await reject([], 'Correcting an unsupported tool request.');
         }
       } catch (error) {
         if (!(error instanceof z.ZodError)) throw error;
         if (name === 'apply_operations' || name === 'reset_draft') {
+          failedMutationCallId = call.id;
           draft.recordFailure([
             {
               code: 'invalid_tool_arguments',

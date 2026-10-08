@@ -1,6 +1,6 @@
 import type { Room, Scene, Side, WallOpening } from './model.ts';
-import { close, horizontalSide, oppositeSide, round, sharedBoundary } from './geometry.ts';
-import { roofHeightAt } from './architecture.ts';
+import { close, horizontalSide, oppositeSide, outdoor, round, sharedBoundary } from './geometry.ts';
+import { floorSlabBounds, roofHeightAt } from './architecture.ts';
 import type { DesignIssue } from './design.ts';
 import type { DesignCommand } from './design.ts';
 
@@ -45,6 +45,8 @@ export function mirroredOpening(
   opening: WallOpening,
   receiver: Room,
 ): WallOpening | null {
+  // Outdoor rooms render only a deck, never a second face of an indoor wall.
+  if (outdoor(owner) || outdoor(receiver)) return null;
   const boundary = sharedBoundary(owner, receiver);
   if (!boundary || boundary.sideA !== opening.side) return null;
   const center = openingWorldCenter(owner, opening);
@@ -294,6 +296,23 @@ export function validateOpenings(scene: Scene): DesignIssue[] {
         const horizontalOverlap =
           Math.min(center + opening.width / 2, boundary.end) -
           Math.max(center - opening.width / 2, boundary.start);
+        if (outdoor(neighbor)) {
+          const slab = floorSlabBounds(neighbor);
+          const verticalOverlap =
+            Math.min(room.elevation + opening.sill + opening.height, slab.top) -
+            Math.max(room.elevation + opening.sill, slab.bottom);
+          if (horizontalOverlap > 0.02 && verticalOverlap > 0.02)
+            add(
+              'opening_shared_wall_conflict',
+              `“${opening.id}” intersects the floor slab of “${neighbor.name}”. Move the opening clear of the raised outdoor floor.`,
+              [room.id, neighbor.id, opening.id],
+              {
+                horizontalOverlap: round(horizontalOverlap),
+                verticalOverlap: round(verticalOverlap),
+              },
+            );
+          continue;
+        }
         const receiverOffset = center - (horizontalSide(boundary.sideB) ? neighbor.x : neighbor.z);
         const neighborTop =
           neighbor.elevation +

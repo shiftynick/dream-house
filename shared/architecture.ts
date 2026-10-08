@@ -2,6 +2,12 @@ import type { Room, Scene, Side } from './model.ts';
 
 export const DEFAULT_ROOF_PITCH = 20;
 export const DEFAULT_ROOF_DIRECTION: Side = 'north';
+export const FLOOR_SLAB_THICKNESS = 0.22;
+/** The floor's finished surface is at room elevation; outdoor spaces have no
+ * enclosing walls or ceiling, regardless of their dormant wall flags. */
+export function floorSlabBounds(room: Room) {
+  return { bottom: room.elevation - FLOOR_SLAB_THICKNESS, top: room.elevation };
+}
 export type EffectiveRoof = { style: Scene['roof']; pitch: number; direction: Side };
 
 /** Room height is the minimum eave above its floor, never the ridge height.

@@ -471,7 +471,7 @@ test('returning to a previously reviewed scene requires cached image rehydration
   }
 });
 
-test('no-op and rejected operations preserve the review of an unchanged scene', async () => {
+test('no-op and rejected operations preserve unchanged-scene review after next-round repair', async () => {
   let round = 0;
   const visual = {
     status: 'passed',
@@ -494,17 +494,27 @@ test('no-op and rejected operations preserve the review of an unchanged scene', 
       };
     },
     client: {
-      async complete() {
+      async complete(history) {
         round++;
         if (round === 1) return edit();
         if (round === 2) return turn('render_view', { view: 'exterior' });
+        if (round === 4) {
+          assert.ok(
+            results(history)
+              .slice(-2)
+              .every((output) => output.executed === false),
+          );
+          const repaired = edit();
+          repaired.calls.push(...finish(undefined, visual).calls);
+          return repaired;
+        }
         const rejected = turn('apply_operations', { operations: [{ type: 'not_an_operation' }] });
         rejected.calls.push(...edit().calls, ...finish(undefined, visual).calls);
         return rejected;
       },
     },
   });
-  assert.equal(round, 3);
+  assert.equal(round, 4);
   assert.equal(result.visualReview?.status, 'passed');
 });
 

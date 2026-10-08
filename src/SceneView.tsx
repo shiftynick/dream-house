@@ -17,7 +17,7 @@ import {
 } from './renderGeometry';
 import { rasterBudget, RenderActivity, visualSceneKey } from './renderPerformance';
 import { physicalUvs, slabGeometry, wallCapGeometry, interiorFaceGroups } from './renderMeshes';
-import { effectiveRoof, roofHeightAt } from '../shared/architecture';
+import { effectiveRoof, FLOOR_SLAB_THICKNESS, roofHeightAt } from '../shared/architecture';
 import { roomOpenings } from '../shared/openings';
 import { renderCamera, renderRequestSchema } from '../shared/render';
 import { surfacePalette, type DesignSelection, type DesignSurface } from '../shared/selection';
@@ -422,8 +422,8 @@ function RoomMesh({
       {slabs.floor.map((rect, index) =>
         slab(
           rect,
-          -0.11,
-          0.22,
+          -FLOOR_SLAB_THICKNESS / 2,
+          FLOOR_SLAB_THICKNESS,
           outdoor && !r.palette && !r.surfacePalettes?.floor
             ? m.deck
             : outdoor
