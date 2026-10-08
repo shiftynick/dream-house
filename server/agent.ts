@@ -6,7 +6,17 @@ import {
   type EvaluatedVisualReview,
   type VisualCaptureProvenance,
 } from '../shared/visual-review.ts';
-import { commandSchema, executeCommands, type DesignIssue } from '../shared/design.ts';
+import {
+  commandSchema,
+  executeCommands,
+  validateDesignChange,
+  type DesignIssue,
+} from '../shared/design.ts';
+import {
+  composeHouseSchema,
+  composeHouseRecipe,
+  grandLodgeDescriptor,
+} from '../shared/design-recipes.ts';
 import { canonical, DesignDraft } from '../shared/draft.ts';
 import { type Message, type Scene } from '../shared/model.ts';
 import {
@@ -22,6 +32,7 @@ import { validSelection } from '../shared/selection.ts';
 import { sceneFingerprint, validateCapture, type RenderProvider } from './render-service.ts';
 import { historySize, retireReviewedImages } from './agent-context.ts';
 import { compactStaleToolResults } from './agent-history.ts';
+import { projectReviewInspection, projectReviewQuality } from './agent-review-context.ts';
 import {
   assessmentDisclosure,
   designAssessmentSchema,
@@ -53,10 +64,10 @@ import {
 export const SYSTEM_PROMPT = `You are Terrain, a thoughtful architectural design partner. The user has ideas but may not know architectural vocabulary. Interpret their intent, preserve their confirmed brief, and use local geometry tools to make a coherent design.
 
 WORKFLOW
-For an empty-site house or a comprehensive composition, FIRST call plan_design before editing. Declare a complete functional room program, deliberate material strategy, dimensioned exterior windows and purposeful features that fit the owner's actual ambition. The plan is immutable: required objectives cannot vanish during editing, reset, review or finish. Focused edits to an existing house can use the shorter existing workflow without a plan. A grand lodge should be a usable lodge, not just a hall and empty boxes: plan living/gathering, kitchen/dining, sleeping and bathrooms with indoor access, daylight, coherent roof/material composition, and purposeful lodge features. Room kinds and names alone do not establish useful function. After the shell and windows, furnish intended uses purposefully: toilet and vanity in bathrooms, table and chairs for dining, gathering seating around a fireplace, and beds with storage for sleeping. Palette names identify material collections; verify roof appearance in actual renders rather than assuming a cedar palette means cedar shingles. Choose terrace/courtyard, a linked upper level, fireplace or other features only when they serve the intent; unsupported items must be disclosed rather than invented.
+For an empty-site house or a comprehensive composition, FIRST call plan_design before editing, or use compose_house for a matching supported architectural recipe; compose_house internally validates and accepts its application-generated immutable plan before applying a draft scaffold. Declare a complete functional room program, deliberate material strategy, dimensioned exterior windows and purposeful features that fit the owner's actual ambition. The plan is immutable: required objectives cannot vanish during editing, reset, review or finish. Focused edits to an existing house can use the shorter existing workflow without a plan. A grand lodge should be a usable lodge, not just a hall and empty boxes: plan living/gathering, kitchen/dining, sleeping and bathrooms with indoor access, daylight, coherent roof/material composition, and purposeful lodge features. Room kinds and names alone do not establish useful function. After the shell and windows, furnish intended uses purposefully: toilet and vanity in bathrooms, table and chairs for dining, gathering seating around a fireplace, and beds with storage for sleeping. Palette names identify material collections; verify roof appearance in actual renders rather than assuming a cedar palette means cedar shingles. Choose terrace/courtyard, a linked upper level, fireplace or other features only when they serve the intent; unsupported items must be disclosed rather than invented.
 ${ARCHITECTURAL_COMPOSITION_GUIDANCE}
-The full builder tool menu is available, including apply_operations, render_view, review_design and critique_design. The empty-site plan gate is a prerequisite, not missing editing capability. A valid plan enables construction batches; correct schema errors and continue the authorized request without asking the owner to enable editing tools or repeat permission. For a genuine empty-site clarification before planning, finish in question mode with questionReason: clarification. Never use question mode to report editing tools unavailable when they are present.
-For the first empty-site response emit ONLY one concise plan_design call, then wait for acceptance and the next round. Do not include construction calls, room geometry, furniture or window inventories in the planning response. RoomProgram automatically generates room/kind/circulation checks; materialStrategy and fenestration generate their own objectives. Features should contain only nonredundant extra intent, not repeat room existence, circulation, materials or windows. Initial plans allow at most eight generated objectives, including features. Automatic objectives total 1 intent + 1 if materialStrategy exists + 1 if fenestration exists +, for each required/preference room group, ceil((room count + distinct room-kind count + 1 if this is the required group with multiple indoor rooms)/8). Each feature uses one remaining objective slot and can group up to eight related typed checks. Keep the complete intended room program when correcting an oversized plan: group related extra feature checks into the remaining slots; do not drop sleeping rooms or other authorized functions to fit the objective limit. Choose exactly two critique views: exterior plus one layout/interior view.
+On an empty site before a plan, the current menu contains plan_design, compose_house, inspect_design and finish_design. Accepting a plan enables the full editing, capture and review menu. This prerequisite does not require the owner to grant editing permission. Correct schema errors and continue the authorized request. For a genuine empty-site clarification before planning, finish in question mode with questionReason: clarification. Never use question mode to report editing tools unavailable when they are present.
+For the first empty-site response emit ONLY one concise plan_design call or one compose_house call for a recipe that matches the brief, then inspect its result in the next round. A recipe is a starting architectural capability, never proof that the request is fulfilled; refine it with the full editing tools and retain actual rendering, independent critique and truthful canonical finalization. Do not include construction calls, room geometry, furniture or window inventories in the planning response. RoomProgram automatically generates room/kind/circulation checks; materialStrategy and fenestration generate their own objectives. Features should contain only nonredundant extra intent, not repeat room existence, circulation, materials or windows. Initial plans allow at most eight generated objectives, including features. Automatic objectives total 1 intent + 1 if materialStrategy exists + 1 if fenestration exists +, for each required/preference room group, ceil((room count + distinct room-kind count + 1 if this is the required group with multiple indoor rooms)/8). Each feature uses one remaining objective slot and can group up to eight related typed checks. Keep the complete intended room program when correcting an oversized plan: group related extra feature checks into the remaining slots; do not drop sleeping rooms or other authorized functions to fit the objective limit. Choose exactly two critique views: exterior plus one layout/interior view.
 COMPOSITION PHASES: build all required room massing and semantic indoor connections BEFORE adding dimensioned window inventories. Initially omit wallOpenings windows and detailed furniture from new room records; add roofs and simple doors/connections as coherent shell batches. add_rooms.rooms contains ONLY room records: connect_rooms, set_fireplace and other commands belong as separate siblings in operations, never nested in rooms. After the required program exists and is connected, inspect quality.rooms[].walls[].availableWindowRectangles in the live snapshot or tool result, then place dimensioned windows within the exposed final wall slots. Each slot gives room-local offset, width, sill and height: fit the complete window rectangle within one slot, leaving space around existing doorways and windows. An empty slot list means choose another wall or revise the design; do not guess a window there. set_wall_openings preserves semantic doorways, so a replacement window must still avoid them. Later wings can cover an early window, so do not glaze a provisional shell. Keep primary cladding coherent across major wings; accents belong to deliberate bases/features/planes, not arbitrary room-kind patchwork.
 After a planned composition is built, render its exterior and a plan/interior/cutaway view, then call critique_design. This requests a separate skeptical evaluator of the original request, immutable plan, exact geometry and current images. Its feedback can expose an inadequate plan as well as a poor execution. Follow concrete repair advice, then render fresh views and request a new critique. At most six captures are available for a planned composition (an initial pair and fresh pairs after up to two repair rounds); focused edits retain three. A planned composition has at most twenty actual model calls by default, including separate critic calls; focused runs retain twelve and explicit call limits stay strict. Reserve at least seven actual calls for an initial independent critique, all essential repair batches, a fresh paired capture round, a fresh independent critique and the final canonical finish. Complete functional furnishing and windows before the initial pair so the critic can judge the full design. Use finish_design with assessment:"canonical" as a string; use review_design with {assessment:"canonical"}. Do not stop after a small core and ask the owner whether to complete features they already authorized. Required unfinished objectives remain essential while budget permits. A genuinely unsupported feature or exhausted budget may need an honest disclosed proposal, never a false success.
 The current house is a draft. You can inspect it, apply a BATCH of semantic operations, inspect/repair the result, and finish. Nothing you do is saved until the application commits a valid draft. Never output a replacement scene or calculate an entire house as JSON prose. Use apply_operations for changes and finish_design when done. The tools return exact changes and issues; base your final reply on those results. Do not claim rejected or unexecuted operations succeeded.
@@ -117,6 +128,17 @@ const finishSchema = z
   })
   .strict();
 export const AGENT_TOOLS = [
+  {
+    name: 'compose_house',
+    description: `Start an unchanged empty site with the supported grand-lodge architectural scaffold when its descriptor fits the original request. Internally accept its immutable application-owned plan before atomically applying locally validated draft operations; no house is saved. Inspect/refine the result, render its current planned views, independently critique and finish truthfully. Recipe descriptor: ${JSON.stringify(grandLodgeDescriptor)}`,
+    schema: composeHouseSchema,
+  },
+  {
+    name: 'resume_editing',
+    description:
+      'Restore the full editing menu in the next builder round when review reveals a new concern needing a genuine refinement. No geometry changes; later edits require fresh evidence and critique.',
+    schema: z.object({}).strict(),
+  },
   {
     name: 'plan_design',
     description:
@@ -188,9 +210,21 @@ const planObjectiveBudget = (candidate: DesignPlan) => {
     suppliedFeatureObjectives: candidate.features.length,
   };
 };
+export type BuilderProviderPhase = 'empty-site' | 'composition-review';
+const clarificationFinishSchema = z
+  .object({
+    reply: finishSchema.shape.reply,
+    mode: z.literal('question'),
+    questionReason: z.literal('clarification'),
+  })
+  .strict();
+const canonicalReviewSchema = z.object({ assessment: z.literal('canonical') }).strict();
+const canonicalFinishSchema = finishSchema.extend({ assessment: z.literal('canonical') });
 const builderToolNames = AGENT_TOOLS.map((tool): string => tool.name).filter(
   (name) => name !== 'submit_design_critique',
 );
+
+const emptySiteToolNames = ['plan_design', 'compose_house', 'inspect_design', 'finish_design'];
 
 const gatewayToolDefinitions = AGENT_TOOLS.map((tool) => ({
   type: 'function',
@@ -236,6 +270,7 @@ export type AgentModel = {
     signal?: AbortSignal,
     toolNames?: string[],
     criticObjectiveIds?: string[],
+    builderPhase?: BuilderProviderPhase,
   ): Promise<ModelTurn>;
 };
 
@@ -246,7 +281,7 @@ export function gatewayAgentModel(
   fetcher: typeof fetch = fetch,
 ): AgentModel {
   return {
-    async complete(messages, signal, toolNames, criticObjectiveIds) {
+    async complete(messages, signal, toolNames, criticObjectiveIds, builderPhase) {
       const critiqueOnly = toolNames?.length === 1 && toolNames[0] === 'submit_design_critique';
       const validManifest =
         critiqueOnly &&
@@ -277,6 +312,25 @@ export function gatewayAgentModel(
             },
           }
         : criticToolDefinition;
+      const builderTools = gatewayToolDefinitions.map((tool) => {
+        const schema =
+          builderPhase === 'empty-site' && tool.function.name === 'finish_design'
+            ? clarificationFinishSchema
+            : builderPhase === 'composition-review' && tool.function.name === 'finish_design'
+              ? canonicalFinishSchema
+              : builderPhase === 'composition-review' && tool.function.name === 'review_design'
+                ? canonicalReviewSchema
+                : undefined;
+        return schema
+          ? {
+              ...tool,
+              function: {
+                ...tool.function,
+                parameters: z.toJSONSchema(schema, { target: 'draft-7' }),
+              },
+            }
+          : tool;
+      });
       const response = await fetcher(`${GATEWAY_ORIGIN}/v1/chat/completions`, {
         method: 'POST',
         signal,
@@ -284,21 +338,19 @@ export function gatewayAgentModel(
         body: JSON.stringify({
           model,
           max_tokens: 6000,
-          // Adaptive thinking otherwise consumed the critic's entire output
-          // allowance in actual Sonnet 5.5 calls. Shared effort is supported by
-          // Gateway; fixed thinking-token budgets are not valid for this model.
-          ...(model === 'anthropic/claude-sonnet-5.5' &&
-          toolNames?.length === 1 &&
-          toolNames[0] === 'submit_design_critique'
-            ? { reasoning: { effort: 'low' } }
+          // Unspecified adaptive thinking consumed the entire output allowance
+          // in actual Sonnet 5.5 builder and critic calls. Shared effort is a
+          // supported soft control; fixed thinking budgets are invalid here.
+          ...(model === 'anthropic/claude-sonnet-5.5'
+            ? { reasoning: { effort: critiqueOnly ? 'low' : 'medium' } }
             : {}),
           temperature: 0.2,
           messages,
           tools: toolNames
-            ? [...gatewayToolDefinitions, currentCriticTool].filter((tool) =>
+            ? [...builderTools, currentCriticTool].filter((tool) =>
                 toolNames.includes(tool.function.name),
               )
-            : gatewayToolDefinitions,
+            : builderTools,
           tool_choice: 'required',
           parallel_tool_calls: false,
         }),
@@ -483,6 +535,7 @@ export async function runAgent(options: {
   let criticValidationFeedback:
     { error: string; issues?: { path: string; message: string }[] } | undefined;
   let planCompletionFeedback = 0;
+  let editingResumed = false;
   const captureLimit = () =>
     plan?.scope === 'composition' ? AGENT_LIMITS.plannedCaptures : AGENT_LIMITS.captures;
   const hasCurrentPlannedViews = (deliveredOnly = false) =>
@@ -495,7 +548,8 @@ export async function runAgent(options: {
             ? deliveredCaptureIds.has(capture.captureId) &&
               !pendingCaptureIds.has(capture.captureId)
             : deliveredCaptureIds.has(capture.captureId) ||
-              pendingCaptureIds.has(capture.captureId)) &&
+              (pendingCaptureIds.has(capture.captureId) &&
+                history.includes(captureImageMessages.get(capture.captureId)!))) &&
           captureHasPixels(capture.captureId) &&
           capture.view === view &&
           (view !== 'exterior' || capture.quality === 'live') &&
@@ -632,23 +686,58 @@ export async function runAgent(options: {
       visualReviewAvailable &&
       draft.changed &&
       (awaitingReviewHash || reviewedHash) !== currentHash;
+    const currentCritique = critique?.sceneHash === currentHash ? critique : undefined;
+    const currentBuilderToolNames =
+      !startingRoomSummary.roomCount && !plan
+        ? emptySiteToolNames
+        : plan?.scope === 'composition' &&
+            !editingResumed &&
+            errorsBeforeRound === 0 &&
+            hasCurrentPlannedViews()
+          ? !currentCritique
+            ? ['critique_design', 'inspect_design', 'finish_design', 'resume_editing']
+            : currentCritique.critique.intentReview.status === 'adequate' &&
+                currentCritique.assessment.requirements.every(
+                  (item) => item.priority !== 'required' || item.status === 'fulfilled',
+                ) &&
+                plannedEvaluation?.requirements.every(
+                  (item) => item.priority !== 'required' || item.status === 'fulfilled',
+                )
+              ? ['review_design', 'finish_design', 'inspect_design', 'resume_editing']
+              : undefined
+          : undefined;
+    const builderPhase: BuilderProviderPhase | undefined =
+      currentBuilderToolNames === emptySiteToolNames
+        ? 'empty-site'
+        : currentBuilderToolNames?.includes('resume_editing')
+          ? 'composition-review'
+          : undefined;
+    const inspection = draft.inspect();
+    const quality = inspectDesignQuality(draft.scene);
+    const reviewSnapshot = builderPhase === 'composition-review';
     history[1] = {
       role: 'system',
-      content: `Current working house and persistent brief (authoritative live snapshot):\n${JSON.stringify(draft.inspect())}\nRequest starting-room summary (immutable baseline):\n${JSON.stringify(startingRoomSummary)}\n${
+      content: `Current working house and persistent brief (authoritative live snapshot):\n${JSON.stringify(reviewSnapshot ? projectReviewInspection(inspection) : inspection)}\nRequest starting-room summary (immutable baseline):\n${JSON.stringify(startingRoomSummary)}\n${
         startingRoomSummary.roomCount === 0
           ? 'This request began on an empty site. Every room now in the working draft was newly created during this run; do not describe these rooms as pre-existing, restored, or merely restated.\n'
           : 'The starting-room summary records only rooms that existed when this request began. Distinguish them from rooms created during this run.\n'
       }Changes from the saved house:\n${JSON.stringify(draft.changes)}\nInteraction context:\n${JSON.stringify({ ...spatialContext, visualReviewAvailable })}\nPer-request preservation checks against the starting design:\n${JSON.stringify({ editScope: context.editScope ? reviewEditScope(draft.original, draft.scene, context.editScope) : null, checks: context.preservationChecks?.map((check) => evaluatePreservation(draft.original, draft.scene, check)) ?? [] })}`,
     };
-    history[1].content += `\nDesign quality inspection (geometric proxies, not aesthetic certification):\n${JSON.stringify(inspectDesignQuality(draft.scene))}\nImmutable design plan and objective checks:\n${JSON.stringify({ planningRequired: !startingRoomSummary.roomCount, plan: plan || null, assessment: plannedEvaluation || null, critique: critique || null })}`;
+    history[1].content += `\nDesign quality inspection (geometric proxies, not aesthetic certification):\n${JSON.stringify(reviewSnapshot ? projectReviewQuality(quality) : quality)}\nImmutable design plan and objective checks:\n${JSON.stringify({ planningRequired: !startingRoomSummary.roomCount, plan: plan || null, assessment: plannedEvaluation || null, critique: critique || null })}`;
     history[1].content += `\nBuilder tool availability:\n${JSON.stringify({
-      available: builderToolNames,
+      available: currentBuilderToolNames || builderToolNames,
+      availableAfterPlan: builderToolNames,
+      fullEditingMenuAvailable: !currentBuilderToolNames,
+      resumeEditingAvailable: currentBuilderToolNames?.includes('resume_editing') || false,
       editingRequiresPlan: !startingRoomSummary.roomCount && !plan,
       visualReviewAvailable,
+      architecturalRecipes: !startingRoomSummary.roomCount && !plan ? [grandLodgeDescriptor] : [],
     })}\n${
       !startingRoomSummary.roomCount && !plan
-        ? 'All editing tools are available. Submit a valid plan_design, then use apply_operations to build; the plan prerequisite does not mean tools are missing. Repair invalid arguments and continue the authorized build. Only a genuine unresolved user clarification may finish before planning, with questionReason: clarification.'
-        : 'Use the available editing and review tools to complete the request; no additional editing permission is needed.'
+        ? 'The current empty-site menu provides plan_design or compose_house to start, inspect_design, and finish_design for a genuine clarification. Accepting a plan unlocks all editing and review tools; no additional editing permission is needed. Correct invalid inputs and continue the authorized build.'
+        : currentBuilderToolNames
+          ? 'The current scene is in its review/finalization phase. Use the listed review tools next; resume_editing restores the full editing menu in the next round for a genuine concern. No additional editing permission is needed.'
+          : 'Use the available editing and review tools to complete the request; no additional editing permission is needed.'
     }`;
     history[2] = {
       role: 'system',
@@ -730,7 +819,13 @@ export async function runAgent(options: {
     metrics.compactedCharacters += Math.max(0, historySize(history).characters - size.characters);
     const modelStartedAt = performance.now();
     const deliveredThisRound = [...pendingCaptureIds];
-    const turn = await client.complete(modelHistory, options.signal);
+    const turn = await client.complete(
+      modelHistory,
+      options.signal,
+      currentBuilderToolNames,
+      undefined,
+      builderPhase,
+    );
     for (const id of deliveredThisRound) {
       deliveredCaptureIds.add(id);
       pendingCaptureIds.delete(id);
@@ -772,6 +867,7 @@ export async function runAgent(options: {
     const images: ModelMessage[] = [];
     let failedMutationCallId: string | undefined;
     const invalidateVisualReview = () => {
+      editingResumed = false;
       reviewedHash = undefined;
       awaitingReviewHash = undefined;
       pendingCaptureIds.clear();
@@ -812,7 +908,16 @@ export async function runAgent(options: {
       const name = call.function.name;
       let output: unknown;
       try {
-        if (name === 'plan_design') {
+        if (name === 'resume_editing') {
+          z.object({}).strict().parse(args);
+          editingResumed = true;
+          output = {
+            ok: true,
+            availableNextRound: builderToolNames,
+            note: 'The full editing menu will be available next round. Make necessary refinements; changing geometry invalidates current visual and independent review evidence.',
+          };
+          await completionFeedback('Preparing the full editing menu for a refinement.');
+        } else if (name === 'plan_design') {
           const candidate = designPlanSchema.parse(args);
           if (
             (!startingRoomSummary.roomCount &&
@@ -849,6 +954,81 @@ export async function runAgent(options: {
               'thinking',
               'The design program, material strategy and windows are planned.',
             );
+          }
+        } else if (name === 'compose_house') {
+          const input = composeHouseSchema.parse(args);
+          if (startingRoomSummary.roomCount || draft.scene.rooms.length || draft.changed) {
+            output = {
+              ok: false,
+              error:
+                'compose_house starts only on an unchanged empty site. Refine an existing house with apply_operations; this recipe cannot replace it.',
+            };
+            await completionFeedback('Keeping the existing draft for targeted edits.');
+          } else {
+            const recipe = composeHouseRecipe(input, originalRequest, draft.scene);
+            const candidatePlan = designPlanSchema.parse(recipe.plan);
+            if (plan && canonical(plan) !== canonical(candidatePlan)) {
+              output = {
+                ok: false,
+                error:
+                  'The accepted plan is immutable and differs from this recipe. Build its declared program with apply_operations; compose_house cannot replace or weaken it.',
+              };
+              await completionFeedback('Preserving the accepted design program.');
+            } else {
+              const preflight = executeCommands(draft.scene, recipe.operations);
+              const issues = preflight.applied
+                ? validateDesignChange(draft.original, preflight.scene)
+                : preflight.issues;
+              if (!preflight.applied || issues.some((issue) => issue.severity === 'error')) {
+                output = {
+                  ok: false,
+                  applied: false,
+                  error:
+                    'The recipe failed local validation. No part of its blueprint was applied.',
+                  issues,
+                };
+                draft.recordFailure(issues.filter((issue) => issue.severity === 'error'));
+                failedMutationCallId = call.id;
+                await reject(
+                  issues,
+                  'Checking the complete composition before applying its draft.',
+                );
+              } else {
+                // Accept the immutable application-owned plan before any draft edit.
+                plan ||= structuredClone(candidatePlan);
+                plannedObjectives ||= planAssessment(plan);
+                if (options.maxCalls === undefined) maxCalls = AGENT_LIMITS.plannedModelCalls;
+                await emit('thinking', 'The architectural scaffold program is planned.', {
+                  tool: name,
+                });
+                const result = draft.apply(recipe.operations);
+                if (!result.applied || result.issues.some((issue) => issue.severity === 'error')) {
+                  throw new AgentRunError(
+                    'The composition could not be applied as a valid draft. The saved house is unchanged.',
+                    result.issues,
+                  );
+                }
+                invalidateVisualReview();
+                const quality = inspectDesignQuality(draft.scene);
+                output = {
+                  ok: true,
+                  applied: result.applied,
+                  issues: result.issues,
+                  changes: result.changes,
+                  recipe: input.recipe,
+                  plan,
+                  objectiveBudget: planObjectiveBudget(plan),
+                  assessment: evaluatePlan(draft.scene, plannedObjectives, draft.original),
+                  quality: { program: quality.program, features: quality.features },
+                  note: 'This is an unsaved starting scaffold, not a completed or independently reviewed design. Refine it for the original request with apply_operations. Render the planned current pair, receive it, request critique_design, repair consequential findings, then finish using assessment:"canonical" with truthful current visual evidence.',
+                };
+                await emit('checking', 'Checking the unsaved architectural scaffold.', {
+                  tool: name,
+                  issues: result.issues,
+                  changes: result.changes,
+                });
+              }
+            }
           }
         } else if (name === 'critique_design') {
           z.object({}).strict().parse(args);
@@ -920,8 +1100,8 @@ export async function runAgent(options: {
                     instruction:
                       'Submit observations for all listed objective IDs exactly once, including satisfactory objectives. The complete manifest is mandatory, not a selection of highlights.',
                   },
-                  inspection: draft.inspect(),
-                  quality: inspectDesignQuality(draft.scene),
+                  inspection: projectReviewInspection(draft.inspect()),
+                  quality: projectReviewQuality(inspectDesignQuality(draft.scene)),
                   constraints: {
                     editScope: context.editScope,
                     preservationChecks: context.preservationChecks,
@@ -1090,6 +1270,7 @@ export async function runAgent(options: {
                 // Commit the critique and immutable objective additions only after every validation succeeds.
                 plannedObjectives = nextObjectives;
                 critique = nextCritique;
+                editingResumed = false;
                 reviewedAssessment = nextReviewedAssessment;
                 critiqueRound = round;
                 criticValidationFeedback = undefined;
@@ -1108,10 +1289,11 @@ export async function runAgent(options: {
             tool: name,
           });
           const inspection = draft.inspect();
+          const quality = inspectDesignQuality(draft.scene);
           output = {
             ok: true,
-            inspection,
-            quality: inspectDesignQuality(draft.scene),
+            inspection: reviewSnapshot ? projectReviewInspection(inspection) : inspection,
+            quality: reviewSnapshot ? projectReviewQuality(quality) : quality,
             focusRoomIds: input.roomIds || [],
             selectedRoomId: context.selectedRoomId || null,
           };
@@ -1349,7 +1531,7 @@ export async function runAgent(options: {
             output = {
               ok: false,
               error:
-                'All editing tools are available in this session. Submit a corrected plan_design and continue the authorized build, rather than asking for tools or repeated permission. If a genuine user ambiguity prevents planning, use questionReason: clarification and ask that specific question.',
+                'The planning and composition tools are available now, and accepting a plan unlocks editing. Submit a corrected plan_design or a matching compose_house and continue the authorized build, rather than asking for tools or repeated permission. If a genuine user ambiguity prevents planning, use questionReason: clarification and ask that specific question.',
             };
             await completionFeedback(
               'The available editing tools require a valid plan, not additional permission.',
@@ -1612,7 +1794,7 @@ export async function runAgent(options: {
         const schemaProblems = flattenIssues(error.issues).slice(0, 30);
         const structuralPlan =
           name === 'plan_design' ? z.object(designPlanSchema.shape).safeParse(args) : undefined;
-        if (name === 'apply_operations' || name === 'reset_draft') {
+        if (name === 'apply_operations' || name === 'reset_draft' || name === 'compose_house') {
           failedMutationCallId = call.id;
           draft.recordFailure([
             {
@@ -1640,9 +1822,10 @@ export async function runAgent(options: {
             : {}),
           ...(!startingRoomSummary.roomCount && !plan
             ? {
-                availableTools: builderToolNames,
+                availableTools: currentBuilderToolNames || builderToolNames,
+                availableAfterPlan: builderToolNames,
                 nextStep:
-                  'Editing tools are present. Correct plan_design using roomProgram entries {roomId,name,kind,purpose}; composition materialStrategy.checks needs {kind:material_composition,surfaces:[exterior-walls,roof],allowedPalettes:[cedar,limestone],maxDistinct:2}; fenestration needs {description,roomIds,minCountPerRoom,minAreaPerRoom}; reviewViews needs exterior plus plan/interior/cutaway. Use the exact schema and supplied issue paths, keep the initial plan within eight objectives, and then build using apply_operations. Do not end by asking to enable tools.',
+                  'Editing tools unlock after plan_design or compose_house; no permission is needed. Correct plan_design using roomProgram entries {roomId,name,kind,purpose}; composition materialStrategy.checks needs {kind:material_composition,surfaces:[exterior-walls,roof],allowedPalettes:[cedar,limestone],maxDistinct:2}; fenestration needs {description,roomIds,minCountPerRoom,minAreaPerRoom}; reviewViews needs exterior plus plan/interior/cutaway. Use the exact schema and supplied issue paths, keep the initial plan within eight objectives, and then build using apply_operations. Do not end by asking to enable tools.',
               }
             : {}),
         };
@@ -1661,7 +1844,7 @@ export async function runAgent(options: {
             details: { problems: schemaProblems },
           },
         ];
-        if (name === 'apply_operations' || name === 'reset_draft')
+        if (name === 'apply_operations' || name === 'reset_draft' || name === 'compose_house')
           await reject(schemaIssues, 'Correcting the inputs to a geometry operation.');
         else
           await completionFeedback('Correcting the review or finalization tool inputs.', {

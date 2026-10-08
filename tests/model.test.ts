@@ -95,6 +95,7 @@ test('agent gateway adapter sends documented tool contracts and preserves usage'
     assert.equal(init?.signal, signal);
     const body = JSON.parse(String(init?.body));
     assert.equal(body.model, 'anthropic/claude-sonnet-5.5');
+    assert.deepEqual(body.reasoning, { effort: 'medium' });
     assert.equal(body.provider, undefined);
     assert.equal(body.response_format, undefined);
     assert.equal(body.tool_choice, 'required');
@@ -104,12 +105,14 @@ test('agent gateway adapter sends documented tool contracts and preserves usage'
       body.tools.map((tool: { function: { name: string } }) => tool.function.name).sort(),
       [
         'apply_operations',
+        'compose_house',
         'critique_design',
         'finish_design',
         'inspect_design',
         'plan_design',
         'render_view',
         'reset_draft',
+        'resume_editing',
         'review_design',
       ],
     );
@@ -179,18 +182,23 @@ test('agent gateway adapter rejects provider failures without retries or secret 
   assert.equal(calls, 1);
 });
 
-test('Sonnet 5.5 critique-only requests use low adaptive reasoning without changing output allowance or other calls', async () => {
+test('Sonnet 5.5 uses low adaptive effort for critics and medium for builders without changing other model requests', async () => {
   const cases = [
-    { model: 'anthropic/claude-sonnet-5.5', toolNames: ['submit_design_critique'], low: true },
-    { model: 'anthropic/claude-sonnet-5.5', toolNames: undefined, low: false },
-    { model: 'anthropic/claude-sonnet-5.5', toolNames: ['finish_design'], low: false },
+    { model: 'anthropic/claude-sonnet-5.5', toolNames: ['submit_design_critique'], effort: 'low' },
+    { model: 'anthropic/claude-sonnet-5.5', toolNames: undefined, effort: 'medium' },
+    { model: 'anthropic/claude-sonnet-5.5', toolNames: ['finish_design'], effort: 'medium' },
+    { model: 'anthropic/claude-sonnet-5.5', toolNames: ['apply_operations'], effort: 'medium' },
     {
       model: 'anthropic/claude-sonnet-5.5',
       toolNames: ['submit_design_critique', 'apply_operations'],
-      low: false,
+      effort: 'medium',
     },
-    { model: 'anthropic/claude-sonnet-4.5', toolNames: ['submit_design_critique'], low: false },
-    { model: 'test/model', toolNames: ['submit_design_critique'], low: false },
+    {
+      model: 'anthropic/claude-sonnet-4.5',
+      toolNames: ['submit_design_critique'],
+      effort: undefined,
+    },
+    { model: 'test/model', toolNames: ['submit_design_critique'], effort: undefined },
   ];
   for (const item of cases) {
     let requests = 0;
@@ -201,10 +209,10 @@ test('Sonnet 5.5 critique-only requests use low adaptive reasoning without chang
       assert.equal(body.temperature, 0.2);
       assert.equal(body.tool_choice, 'required');
       assert.equal(body.parallel_tool_calls, false);
-      assert.deepEqual(body.reasoning, item.low ? { effort: 'low' } : undefined);
+      assert.deepEqual(body.reasoning, item.effort ? { effort: item.effort } : undefined);
       assert.equal(body.reasoning_effort, undefined);
       assert.equal(body.thinking, undefined);
-      if (item.low)
+      if (item.effort === 'low')
         assert.deepEqual(
           body.tools.map((tool: any) => tool.function.name),
           ['submit_design_critique'],
@@ -322,7 +330,7 @@ test('critic schema falls back safely without a valid bounded manifest and never
     init,
   ) => {
     const body = JSON.parse(String(init?.body));
-    assert.equal(body.reasoning, undefined);
+    assert.deepEqual(body.reasoning, { effort: 'medium' });
     assert.equal(
       body.tools.some((tool: any) => tool.function.name === 'submit_design_critique'),
       false,
@@ -333,4 +341,43 @@ test('critic schema falls back safely without a valid bounded manifest and never
     });
   }) as typeof fetch);
   await client.complete([], undefined, undefined, ['plan-intent']);
+});
+
+test('provider phase projections omit repeated checklist schemas while preserving default contracts', async () => {
+  let defaultFinishSize = 0;
+  let projectedFinishSize = 0;
+  for (const phase of [undefined, 'empty-site', 'composition-review'] as const) {
+    const client = gatewayAgentModel('test-only', 'test/model', (async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      const finish = body.tools.find((tool: any) => tool.function.name === 'finish_design').function
+        .parameters;
+      const review = body.tools.find((tool: any) => tool.function.name === 'review_design')
+        ?.function.parameters;
+      assert.equal(finish.type, 'object');
+      assert.equal(finish.additionalProperties, false);
+      for (const key of ['anyOf', 'oneOf', 'allOf']) assert.equal(key in finish, false);
+      if (!phase) {
+        defaultFinishSize = JSON.stringify(finish).length;
+        assert.ok(finish.properties.assessment.anyOf);
+        assert.ok(review.properties.requirements);
+      } else if (phase === 'empty-site') {
+        assert.equal(finish.properties.mode.const, 'question');
+        assert.equal(finish.properties.questionReason.const, 'clarification');
+        assert.equal(finish.properties.assessment, undefined);
+        assert.equal(finish.properties.visualReview, undefined);
+      } else {
+        projectedFinishSize = JSON.stringify(finish).length;
+        assert.equal(finish.properties.assessment.const, 'canonical');
+        assert.equal(review.properties.assessment.const, 'canonical');
+        assert.equal(review.properties.requirements, undefined);
+        assert.ok(finish.properties.visualReview);
+      }
+      return Response.json({
+        choices: [{ finish_reason: 'stop', message: { content: null } }],
+        usage: { prompt_tokens: 1, completion_tokens: 1, cost: 0 },
+      });
+    }) as typeof fetch);
+    await client.complete([], undefined, undefined, undefined, phase);
+  }
+  assert.ok(projectedFinishSize < defaultFinishSize / 4);
 });

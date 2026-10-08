@@ -142,3 +142,50 @@ test('all outputs from the latest multi-tool model turn remain full, even with l
   assert.notEqual(result[1].content, messages[1].content);
   assert.deepEqual(result.slice(2), messages.slice(2));
 });
+
+test('old compose snapshots compact without changing its plan, checklist, failures or latest tool turn', () => {
+  const plan = { intent: 'Retain the complete architecture.', roomProgram: [{ roomId: 'room-0' }] };
+  const assessment = {
+    requirements: [
+      {
+        id: 'arrival',
+        checks: [{ kind: 'wall_opening', roomId: 'room-0', openingKind: 'door' }],
+        evidence: 'Required route.',
+        status: 'unmet',
+      },
+    ],
+    assumptions: [{ description: 'Confirmed owner condition.', requiresConfirmation: true }],
+  };
+  const issues = [
+    {
+      code: 'clearance',
+      severity: 'warning',
+      message: 'Schematic constraint.',
+      objectIds: ['room-0'],
+    },
+  ];
+  const composed = {
+    ok: true,
+    scene,
+    quality,
+    plan,
+    assessment,
+    issues,
+    changes: ['Added the scaffold.'],
+  };
+  const messages = [
+    assistant('compose', 'compose_house'),
+    output('compose', composed),
+    assistant('latest', 'inspect_design'),
+    output('latest', { inspection, quality, issues }),
+  ];
+  const result = compact(messages);
+  const old = JSON.parse(String(result[1].content));
+  assert.equal(old.scene, undefined);
+  assert.equal(old.quality, undefined);
+  assert.deepEqual(old.plan, plan);
+  assert.deepEqual(old.assessment, assessment);
+  assert.deepEqual(old.issues, issues);
+  assert.deepEqual(old.changes, composed.changes);
+  assert.deepEqual(result[3], messages[3]);
+});

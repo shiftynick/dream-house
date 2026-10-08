@@ -229,7 +229,12 @@ test('planned composition gets separate skeptical critique, refuses early partia
           );
         }
         if (calls === 1) {
-          assert.equal(tools, undefined, 'full builder tools remain visible before planning');
+          assert.deepEqual(tools, [
+            'plan_design',
+            'compose_house',
+            'inspect_design',
+            'finish_design',
+          ]);
           return turn('plan_design', plan);
         }
         if (calls === 2) {
@@ -239,7 +244,10 @@ test('planned composition gets separate skeptical critique, refuses early partia
         }
         if (calls === 3) return renderBoth();
         if (calls === 4 || calls === 8) return turn('critique_design', {});
-        if (calls === 6) return finish(history);
+        if (calls === 6) {
+          assert.equal(tools, undefined, 'needs-work critique restores the full editing menu');
+          return finish(history);
+        }
         if (calls === 7) {
           assert.match(
             toolResults(history).at(-1).error,
@@ -674,7 +682,14 @@ test('invalid empty-site plan exposes available editing tools and cannot end by 
         calls++;
         if (tools?.includes('submit_design_critique'))
           return turn('submit_design_critique', submitted(true, []));
-        assert.equal(tools, undefined, 'builder always receives the complete editing menu');
+        if (calls <= 3)
+          assert.deepEqual(tools, [
+            'plan_design',
+            'compose_house',
+            'inspect_design',
+            'finish_design',
+          ]);
+        else assert.equal(tools, undefined);
         assert.match(
           String(history[1].content),
           /All editing tools are available|no additional editing permission/,
@@ -683,8 +698,9 @@ test('invalid empty-site plan exposes available editing tools and cannot end by 
         if (calls === 2) {
           const feedback = toolResults(history).at(-1);
           assert.ok(feedback.issues.some((issue: any) => issue.path.includes('materialStrategy')));
-          assert.ok(feedback.availableTools.includes('apply_operations'));
-          assert.ok(feedback.availableTools.includes('render_view'));
+          assert.ok(feedback.availableTools.includes('compose_house'));
+          assert.ok(feedback.availableAfterPlan.includes('apply_operations'));
+          assert.ok(feedback.availableAfterPlan.includes('render_view'));
           assert.equal(feedback.availableTools.includes('submit_design_critique'), false);
           assert.match(feedback.nextStep, /Correct plan_design/);
           return turn('finish_design', {
@@ -694,7 +710,10 @@ test('invalid empty-site plan exposes available editing tools and cannot end by 
           });
         }
         if (calls === 3) {
-          assert.match(toolResults(history).at(-1).error, /All editing tools are available/);
+          assert.match(
+            toolResults(history).at(-1).error,
+            /planning and composition tools are available/,
+          );
           return turn('plan_design', plan);
         }
         if (calls === 4) return build(true);
@@ -1157,6 +1176,11 @@ test('cached A-to-B-to-A capture IDs cannot enter critique until a later builder
         }
         if (calls === 5) {
           assert.equal(critics, 0, 'same-turn cached request must not invoke a critic');
+          assert.deepEqual(
+            tools,
+            ['critique_design', 'inspect_design', 'finish_design', 'resume_editing'],
+            'rehydrated current images are included in this outgoing completion',
+          );
           assert.match(toolResults(history).at(-1).error, /Same-round or stale captures/);
           const budget = JSON.parse(String(history[2].content).split('\n')[1]);
           assert.deepEqual(
@@ -1255,4 +1279,50 @@ test('default planned twenty-call bound and focused twelve-call bound remain har
     );
     assert.equal(calls, composition ? 20 : 12);
   }
+});
+
+test('an actually delivered current pair offers a compact critique menu and keeps finish gates intact', async () => {
+  let calls = 0;
+  const result = await runAgent({
+    scene: emptyScene,
+    messages,
+    context: { allowVisualReview: true },
+    render: provider,
+    client: {
+      async complete(history, _signal, tools) {
+        calls++;
+        if (tools?.includes('submit_design_critique'))
+          return turn('submit_design_critique', submitted(true, ['capture-1', 'capture-2']));
+        if (calls === 1) return turn('plan_design', plan);
+        if (calls === 2) return build(true);
+        if (calls === 3) return renderBoth();
+        if (calls === 4) {
+          assert.deepEqual(
+            tools,
+            ['critique_design', 'inspect_design', 'finish_design', 'resume_editing'],
+            'current pair is included in this outgoing completion',
+          );
+          return turn('inspect_design', {});
+        }
+        if (calls === 5) {
+          assert.deepEqual(tools, [
+            'critique_design',
+            'inspect_design',
+            'finish_design',
+            'resume_editing',
+          ]);
+          return turn('critique_design', {});
+        }
+        assert.deepEqual(tools, [
+          'review_design',
+          'finish_design',
+          'inspect_design',
+          'resume_editing',
+        ]);
+        return finish(history);
+      },
+    },
+  });
+  assert.equal(result.usage.calls, 7);
+  assert.equal(result.metrics?.captures, 2);
 });

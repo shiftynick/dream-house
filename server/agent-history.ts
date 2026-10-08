@@ -1,6 +1,11 @@
 import type { ModelMessage } from './agent.ts';
 
-const snapshotTools = new Set(['apply_operations', 'inspect_design', 'reset_draft']);
+const snapshotTools = new Set([
+  'apply_operations',
+  'compose_house',
+  'inspect_design',
+  'reset_draft',
+]);
 const record = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === 'object' && !Array.isArray(value);
 
