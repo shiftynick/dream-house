@@ -450,12 +450,8 @@ test('tool-heavy turns retain an independent cap even within the model-call allo
   assert.equal(inspections, 32);
 });
 
-test('provider errors, truncation and missing tool calls do not trigger retries', async () => {
-  for (const response of [
-    new Error('provider unavailable'),
-    turn([], { truncated: true }),
-    turn([]),
-  ]) {
+test('provider errors and missing tool calls do not trigger retries', async () => {
+  for (const response of [new Error('provider unavailable'), turn([])]) {
     let calls = 0;
     const client: AgentModel = {
       async complete() {

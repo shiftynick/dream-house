@@ -40,6 +40,7 @@ export const SYSTEM_PROMPT = `You are Terrain, a thoughtful architectural design
 WORKFLOW
 The current house is a draft. You can inspect it, apply a BATCH of semantic operations, inspect/repair the result, and finish. Nothing you do is saved until the application commits a valid draft. Never output a replacement scene or calculate an entire house as JSON prose. Use apply_operations for changes and finish_design when done. The tools return exact changes and issues; base your final reply on those results. Do not claim rejected or unexecuted operations succeeded.
 Use small changes to existing spaces. Preserve stable IDs, unrelated rooms, and existing relationships. Prefer attach_room/attach_wing, anchored resize_room, move_group, and connect_rooms over guessing new centers. Batch dependent changes together so intermediate overlaps do not fail a coherent edit. Move bathrooms with their bedroom wing when appropriate. New houses may use add_rooms/add_stairs plus semantic connections. Read tool schemas for exact field names and required values.
+For an ambitious new house, build a coherent composition across concise tool rounds: establish the main hall/core, attach connected wings, then add roofs, openings and requested details. Prefer one short apply_operations batch of at most six operations and at most four newly added rooms per round, keeping dependent edits together. Defer detailed furniture and window inventories to later batches; keep all requested features in the checklist and fulfill them or explicitly disclose anything unfinished. Use schema defaults where appropriate, short names/notes, and no lengthy planning prose. Inspect each result before expanding; do not serialize every room and detail in one response. Preserve the original request and reserve the final capture/review/finish rounds rather than spending the whole budget on optional ornament.
 
 CONTEXT AND INTENT
 For matching selected or adjoining surfaces, inspect effectiveSurfacePalettes first, batch exact set_surface_material operations for the requested targets, and include typed material assertions for each target. Preserve unrelated floor, accent and palette choices. Intentional palette differences are not renderer bugs. Global set_material clears room and surface overrides; use it only for a requested whole-house material replacement.
@@ -178,25 +179,30 @@ export function gatewayAgentModel(
       if (!response.ok) throw new GatewayError('Design request', response.status);
       const body = await response.json();
       const message = body.choices?.[0]?.message;
-      const calls = z
-        .array(
-          z.object({
-            id: z.string().min(1),
-            type: z.literal('function'),
-            function: z.object({ name: z.string(), arguments: z.string().max(200_000) }),
-          }),
-        )
-        .max(12)
-        .parse(message?.tool_calls || []);
+      const truncated = body.choices?.[0]?.finish_reason === 'length';
+      // Partial provider tool envelopes can be malformed as well as incomplete.
+      // Discard them before parsing so runAgent can recover without executing any fragment.
+      const calls = truncated
+        ? []
+        : z
+            .array(
+              z.object({
+                id: z.string().min(1),
+                type: z.literal('function'),
+                function: z.object({ name: z.string(), arguments: z.string().max(200_000) }),
+              }),
+            )
+            .max(12)
+            .parse(message?.tool_calls || []);
       return {
         calls,
-        content: typeof message?.content === 'string' ? message.content : null,
+        content: !truncated && typeof message?.content === 'string' ? message.content : null,
         usage: {
           inputTokens: Number(body.usage?.prompt_tokens) || 0,
           outputTokens: Number(body.usage?.completion_tokens) || 0,
           cost: reportedCost(body),
         },
-        truncated: body.choices?.[0]?.finish_reason === 'length',
+        truncated,
       };
     },
   };
@@ -234,6 +240,7 @@ export const AGENT_LIMITS = {
   captures: 3,
   repairRejections: 2,
   consecutiveIdleRounds: 3,
+  truncationRecoveries: 1,
 } as const;
 
 export async function runAgent(options: {
@@ -267,6 +274,10 @@ export async function runAgent(options: {
     imageBytesSent: 0,
   };
   const draft = options.draft || new DesignDraft(options.scene);
+  const startingRoomSummary = {
+    roomCount: draft.original.rooms.length,
+    rooms: draft.original.rooms.map(({ id, name }) => ({ id, name })),
+  };
   const client =
     options.client || gatewayAgentModel(options.key || '', options.model || '', options.fetcher);
   const context = agentContextSchema.parse(options.context || {});
@@ -333,6 +344,7 @@ export async function runAgent(options: {
   const maxCalls = options.maxCalls ?? AGENT_LIMITS.modelCalls;
   const maxRepairs = options.maxRepairs ?? AGENT_LIMITS.repairRejections;
   let idleRounds = 0;
+  let truncationRecoveries = 0;
   const seenScenes = new Set([sceneFingerprint(draft.scene)]);
   const emit = async (stage: RunEvent['stage'], message: string, extra: Partial<RunEvent> = {}) => {
     const event = { stage, message, at: new Date().toISOString(), ...extra };
@@ -403,7 +415,11 @@ export async function runAgent(options: {
       (awaitingReviewHash || reviewedHash) !== currentHash;
     history[1] = {
       role: 'system',
-      content: `Current working house and persistent brief (authoritative live snapshot):\n${JSON.stringify(draft.inspect())}\nChanges from the saved house:\n${JSON.stringify(draft.changes)}\nInteraction context:\n${JSON.stringify({ ...spatialContext, visualReviewAvailable })}\nPer-request preservation checks against the starting design:\n${JSON.stringify({ editScope: context.editScope ? reviewEditScope(draft.original, draft.scene, context.editScope) : null, checks: context.preservationChecks?.map((check) => evaluatePreservation(draft.original, draft.scene, check)) ?? [] })}`,
+      content: `Current working house and persistent brief (authoritative live snapshot):\n${JSON.stringify(draft.inspect())}\nRequest starting-room summary (immutable baseline):\n${JSON.stringify(startingRoomSummary)}\n${
+        startingRoomSummary.roomCount === 0
+          ? 'This request began on an empty site. Every room now in the working draft was newly created during this run; do not describe these rooms as pre-existing, restored, or merely restated.\n'
+          : 'The starting-room summary records only rooms that existed when this request began. Distinguish them from rooms created during this run.\n'
+      }Changes from the saved house:\n${JSON.stringify(draft.changes)}\nInteraction context:\n${JSON.stringify({ ...spatialContext, visualReviewAvailable })}\nPer-request preservation checks against the starting design:\n${JSON.stringify({ editScope: context.editScope ? reviewEditScope(draft.original, draft.scene, context.editScope) : null, checks: context.preservationChecks?.map((check) => evaluatePreservation(draft.original, draft.scene, check)) ?? [] })}`,
     };
     history[2] = {
       role: 'system',
@@ -466,10 +482,28 @@ export async function runAgent(options: {
     usage.cost = hasUnknownCost ? null : knownCost;
     await options.onUsage?.(turn.usage);
     options.signal?.throwIfAborted();
-    if (turn.truncated)
-      throw new AgentRunError(
-        'The design response exceeded its limit. Your saved house is unchanged. Try a smaller group of changes.',
+    if (turn.truncated) {
+      idleRounds++;
+      if (
+        truncationRecoveries >= AGENT_LIMITS.truncationRecoveries ||
+        remainingCalls <= 1 ||
+        idleRounds >= AGENT_LIMITS.consecutiveIdleRounds
+      )
+        throw new AgentRunError(
+          "The design could not fit within this attempt's response budget. Your saved house is unchanged. Try building the main hall and connected wings first, then add details.",
+        );
+      truncationRecoveries++;
+      history.push({
+        role: 'system',
+        content:
+          'The previous response exceeded the output limit and was discarded in full. None of its tool calls executed. The live working-house snapshot is authoritative. Continue the original user request using one concise connected batch of at most six operations and at most four newly added rooms, short names/notes and schema defaults where appropriate. Build the core and attached wings across rounds; defer detailed furniture and window inventories to later batches, retaining all requested features in the checklist. Do not serialize the entire house at once, repeat lengthy planning prose or claim discarded changes exist. Retain the required final validation and, when enabled, capture/review rounds.',
+      });
+      await emit(
+        'repairing',
+        'The response was too large. Continuing with a smaller design batch.',
       );
+      continue;
+    }
     if (!turn.calls.length)
       throw new AgentRunError(
         'The model did not use the design tools, so no change was applied. Please try again.',
