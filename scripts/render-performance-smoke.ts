@@ -34,6 +34,7 @@ export async function installPerformanceProbe(context: BrowserContext) {
 export async function runPerformanceSmoke(
   page: Page,
   onProgress?: (result: unknown) => Promise<void>,
+  modeOrder: readonly string[] = ['live', 'refined'],
 ) {
   const phases: unknown[] = [];
   const durationMs = 3000;
@@ -172,13 +173,13 @@ export async function runPerformanceSmoke(
       throw new Error(`${name}: input did not move camera`);
     if (name.includes('walk') && Number(result.maxCameraStep) > 1)
       throw new Error(`${name}: unexpected camera teleport`);
-    await onProgress?.({ durationMs, phases });
+    await onProgress?.({ durationMs, modeOrder, phases });
   }
   const quality = page.getByLabel('Render quality', { exact: true });
   const available = await quality
     .locator('option')
     .evaluateAll((options) => options.map((option) => (option as HTMLOptionElement).value));
-  for (const mode of ['live', 'refined'].filter((mode) => available.includes(mode))) {
+  for (const mode of modeOrder.filter((mode) => available.includes(mode))) {
     await releasePointer();
     await page.getByRole('button', { name: 'Explore', exact: true }).click();
     await quality.selectOption(mode);
@@ -236,6 +237,7 @@ export async function runPerformanceSmoke(
   await page.getByRole('button', { name: 'Reset camera', exact: true }).click();
   return {
     durationMs,
+    modeOrder,
     phases,
     interpretation:
       'Browser rAF intervals and WebGL draw submission cadence on the actual browser GPU. These are not completed GPU timings or guaranteed display FPS; monitoring adds one lightweight rAF callback. Idle monitoring itself runs rAF but does not force application draws.',

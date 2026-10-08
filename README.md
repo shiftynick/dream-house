@@ -109,7 +109,7 @@ This is not a CAD/BIM or construction-document system. It does not solve general
 
 ## Checks
 
-For repeatable local browser images and actual draw/frame diagnostics, see [capture tooling](docs/render-fidelity-capture.md) and [performance evidence](docs/render-performance.md). These use an isolated synthetic project and no cloud adapters.
+For repeatable local browser images and actual draw/frame diagnostics, see [capture tooling](docs/render-fidelity-capture.md), [performance evidence](docs/render-performance.md), and the [furniture realism study](docs/furniture-study.md). These use an isolated synthetic project and no cloud adapters.
 
 ```sh
 npm test

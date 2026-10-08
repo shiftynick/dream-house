@@ -67,7 +67,8 @@ test('batched furniture retains each material, triangle, UV and saved local boun
     }
     const batches = furnitureGeometry(item);
     assert.equal(batches.length, expected.size);
-    assert.ok(batches.length < furnitureParts(kind).length || batches.length === 1);
+    assert.ok(batches.length <= furnitureParts(kind).length);
+    assert.ok(batches.length <= 4, 'detail stays in at most four material draw batches');
     for (const { material, geometry } of batches) {
       const positions = geometry.getAttribute('position');
       assert.equal(positions.count, expected.get(material));
@@ -103,7 +104,7 @@ test('local material maps are reproducible and keep color separate from height a
 test('rounded upholstery UVs stay continuous across curved triangles', () => {
   const item = makeFurniture('sofa', 'sofa');
   const cushion = furnitureParts('sofa').find(
-    (part) => part.material === 'fabric' && part.size[1] === 0.13,
+    (part) => part.material === 'fabric' && part.cushion === 'y',
   )!;
   const geometry = furniturePartGeometry(item, cushion);
   const position = geometry.getAttribute('position'),
@@ -124,6 +125,87 @@ test('rounded upholstery UVs stay continuous across curved triangles', () => {
       );
     }
   geometry.dispose();
+});
+
+test('cloth crowns soften the center and welts stay millimeter-scale in the shared material batch', () => {
+  const item = makeFurniture('sofa', 'sofa');
+  const parts = furnitureParts('sofa');
+  const seat = parts.find((part) => part.cushion === 'y')!;
+  const geometry = furniturePartGeometry(item, seat);
+  const positions = geometry.getAttribute('position');
+  const halfWidth = (seat.size[0] * item.width) / 2;
+  const halfHeight = (seat.size[1] * item.height) / 2;
+  let center = -Infinity,
+    shoulder = -Infinity;
+  for (let i = 0; i < positions.count; i++) {
+    if (Math.abs(positions.getZ(i)) > 1e-5) continue;
+    if (Math.abs(positions.getX(i)) < 1e-5) center = Math.max(center, positions.getY(i));
+    if (Math.abs(positions.getX(i)) > halfWidth * 0.7)
+      shoulder = Math.max(shoulder, positions.getY(i));
+  }
+  assert.ok(Math.abs(center - halfHeight) < 1e-5, 'crown reaches the authored cushion height');
+  assert.ok(center - shoulder > halfHeight * 0.08, 'cloth falls toward its tailored edge');
+  geometry.dispose();
+  const welt = furniturePartGeometry(
+    item,
+    parts.find((part) => part.welt === 'y')!,
+  );
+  welt.computeBoundingBox();
+  assert.ok(
+    welt.boundingBox!.max.y - welt.boundingBox!.min.y <= 0.004,
+    'piping is a fine binding rather than an overlay slab',
+  );
+  welt.dispose();
+});
+
+test('binding orientation follows construction even for unusually thin or tall saved pieces', () => {
+  for (const [kind, height] of [
+    ['sofa', 0.02],
+    ['rug', 0.8],
+  ] as const) {
+    const item = makeFurniture(kind, 'piece', { height });
+    const part = furnitureParts(kind).find((part) => part.welt === 'y')!;
+    const geometry = furniturePartGeometry(item, part);
+    geometry.computeBoundingBox();
+    const extent = geometry.boundingBox!.max.y - geometry.boundingBox!.min.y;
+    if (kind === 'rug') assert.equal(extent, 0, 'rug binding lies on its top surface');
+    else assert.ok(extent > 0, 'upholstery seam wraps vertically around the cushion side');
+    geometry.dispose();
+  }
+});
+
+test('furniture detail has deterministic finite geometry and a bounded triangle budget', () => {
+  for (const kind of Object.keys(furnitureCatalog) as FurnitureKind[]) {
+    const item = makeFurniture(kind, 'piece');
+    const first = furnitureGeometry(item),
+      second = furnitureGeometry(item);
+    let triangles = 0;
+    first.forEach(({ material, geometry }, i) => {
+      assert.equal(material, second[i].material);
+      for (const name of ['position', 'normal', 'uv']) {
+        const attribute = geometry.getAttribute(name);
+        assert.deepEqual(
+          attribute.array,
+          second[i].geometry.getAttribute(name).array,
+          `${kind}: deterministic ${name}`,
+        );
+        assert.ok(Array.from(attribute.array).every(Number.isFinite), `${kind}: finite ${name}`);
+      }
+      const normals = geometry.getAttribute('normal');
+      for (let vertex = 0; vertex < normals.count; vertex++) {
+        assert.ok(
+          Math.abs(
+            Math.hypot(normals.getX(vertex), normals.getY(vertex), normals.getZ(vertex)) - 1,
+          ) < 1e-5,
+          `${kind}: unit surface normals`,
+        );
+      }
+      triangles += geometry.getAttribute('position').count / 3;
+      geometry.dispose();
+      second[i].geometry.dispose();
+    });
+    assert.ok(triangles <= 7000, `${kind}: bounded procedural detail`);
+  }
 });
 
 test('HDR daylight places the luminous sky at positive-Y equirectangular coordinates', () => {

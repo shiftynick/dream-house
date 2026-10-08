@@ -27,6 +27,9 @@ const executablePath = option('--chromium', '/usr/bin/chromium');
 const refined = args.includes('--refined');
 const lifecycleSmoke = args.includes('--lifecycle-smoke');
 const performanceSmoke = args.includes('--performance-smoke');
+const performanceOrder = option('--performance-order', 'live-first');
+if (!['live-first', 'presentation-first'].includes(performanceOrder))
+  throw new Error('Use --performance-order live-first or presentation-first.');
 const interiorStudy = args.includes('--interior-study');
 const gpu = option('--gpu', 'swiftshader');
 if (!['swiftshader', 'hardware'].includes(gpu))
@@ -498,10 +501,14 @@ try {
     }
   }
   if (performanceSmoke) {
-    evidence.performanceSmoke = await runPerformanceSmoke(page, async (result) => {
-      evidence.performanceSmoke = result;
-      await writeFile(path.join(output, 'metadata.json'), JSON.stringify(evidence, null, 2));
-    });
+    evidence.performanceSmoke = await runPerformanceSmoke(
+      page,
+      async (result) => {
+        evidence.performanceSmoke = result;
+        await writeFile(path.join(output, 'metadata.json'), JSON.stringify(evidence, null, 2));
+      },
+      performanceOrder === 'presentation-first' ? ['refined', 'live'] : ['live', 'refined'],
+    );
     assertStablePage();
     await writeFile(path.join(output, 'metadata.json'), JSON.stringify(evidence, null, 2));
     console.log('Performance smoke recorded');

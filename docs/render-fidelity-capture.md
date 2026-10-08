@@ -36,6 +36,8 @@ Add `--performance-smoke` to measure actual WebGL draw submissions and browser f
 
 Unexpected main-frame navigation after the initial page load invalidates a run. Avoid writing HTML or editing served source while collecting evidence. Metadata records source hashes and whether renderer files changed during the run.
 
+For a bounded mode-order comparison, add `--performance-order presentation-first` to a fresh `--performance-smoke` run. The default is `live-first`; both use identical reset cameras, orbit input and held-key walkthrough. Recorded `performanceSmoke.modeOrder` preserves the measurement order. Comparing orders can reveal reproducibility or warm-up sensitivity, but does not by itself identify CPU or GPU bottlenecks.
+
 Browser warnings and errors are retained in both `diagnostics.log` and metadata's `browserDiagnostics`. Lifecycle success requires these and page exceptions to be empty, including after context restoration and a subsequent lighting edit. A passed assertion sequence accompanied by console warnings is not an accepted lifecycle run.
 
 To request the browser's actual hardware GPU, use `--gpu hardware` and a separate output directory, optionally `--port 5187` if the default port is occupied. This removes the forced SwiftShader setting and enables GPU acceleration; it does not guarantee that Chromium can use the NVIDIA device. Inspect `metadata.json`'s `webgl.unmaskedRenderer` before claiming hardware rendering. Compare before/after with the same GPU setting and actual renderer; never compare hardware timing to the SwiftShader baseline as a code speedup.

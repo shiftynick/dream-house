@@ -1,4 +1,4 @@
-Current renderer update, October 7, 2026: progressive path tracing was superseded by demand-driven WebGL2 PBR and single-frame Presentation. See [current browser performance evidence](render-performance.md) and [the rendering decision](browser-rendering-approach.md). The dated results below remain truthful historical records; tracing sample/build timings no longer describe the current renderer.
+Current renderer update, October 8, 2026: progressive path tracing was superseded by demand-driven WebGL2 PBR and single-frame Presentation. The reviewed furniture refinement passes 221 tests and the production build, with source-matched images and clean graphics recovery. See [the furniture study](furniture-study.md), [current browser performance evidence](render-performance.md), and [the rendering decision](browser-rendering-approach.md). The dated results below remain truthful historical records; tracing sample/build timings no longer describe the current renderer.
 
 # Editable furniture — September 29, 2026
 
