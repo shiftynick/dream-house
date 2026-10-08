@@ -20,7 +20,8 @@ import { GATEWAY_ORIGIN, GatewayError, reportedCost } from './gateway.ts';
 import { renderRequestSchema } from '../shared/render.ts';
 import { validSelection } from '../shared/selection.ts';
 import { sceneFingerprint, validateCapture, type RenderProvider } from './render-service.ts';
-import { compactAgentHistory, historySize, retireReviewedImages } from './agent-context.ts';
+import { historySize, retireReviewedImages } from './agent-context.ts';
+import { compactStaleToolResults } from './agent-history.ts';
 import {
   assessmentDisclosure,
   designAssessmentSchema,
@@ -89,11 +90,16 @@ const inspectSchema = z
   .strict();
 const operationsSchema = z.object({ operations: z.array(commandSchema).min(1).max(40) }).strict();
 const resetSchema = z.object({}).strict();
+const assessmentInputSchema = z.union([designAssessmentSchema, z.literal('canonical')]);
+const reviewInputSchema = z.union([
+  designAssessmentSchema,
+  z.object({ assessment: z.literal('canonical') }).strict(),
+]);
 const finishSchema = z
   .object({
     reply: z.string().min(1).max(1200),
     mode: z.enum(['apply', 'propose', 'question']),
-    assessment: designAssessmentSchema.optional(),
+    assessment: assessmentInputSchema.optional(),
     visualReview: visualReviewSchema.optional(),
     questionReason: z.enum(['clarification', 'tools_unavailable']).optional(),
   })
@@ -138,16 +144,16 @@ export const AGENT_TOOLS = [
   {
     name: 'review_design',
     description:
-      'Evaluate an explicit request checklist against the working geometry. Returns exact assertion results and unfulfilled items without saving anything. Preserve the checklist and checks when finishing; correct failed geometry or disclose the limitation.',
-    schema: designAssessmentSchema,
+      'Evaluate an explicit request checklist against the working geometry. Returns exact assertion results and unfulfilled items without saving anything. Use {assessment:"canonical"} to evaluate the application-owned planned or previously reviewed checklist without retranscribing its immutable checks. Preserve the checklist and checks when finishing; correct failed geometry or disclose the limitation.',
+    schema: reviewInputSchema,
   },
   {
     name: 'finish_design',
     description:
-      'Finish only after checking tool results. apply or propose requires actual valid draft changes; question requires no changes. Application enforces final validation and user confirmation independently.',
+      'Finish only after checking tool results. apply or propose requires actual valid draft changes; question requires no changes. Use assessment:"canonical" to reuse the application-owned planned or reviewed checklist; local checks are reevaluated and independent critique remains required. Application enforces final validation and user confirmation independently.',
     // Real providers must supply an assessment. Runtime parsing stays compatible
     // with existing in-process adapters while requiring a previously reviewed checklist.
-    schema: finishSchema.extend({ assessment: designAssessmentSchema }),
+    schema: finishSchema.extend({ assessment: assessmentInputSchema }),
   },
 ] as const;
 const builderToolNames = AGENT_TOOLS.map((tool): string => tool.name).filter(
@@ -159,7 +165,9 @@ const gatewayToolDefinitions = AGENT_TOOLS.map((tool) => ({
   function: {
     name: tool.name,
     description: tool.description,
-    parameters: z.toJSONSchema(tool.schema, { target: 'draft-7' }),
+    // Every tool accepts an object, including review's two object variants.
+    // Keep an explicit root type for provider tool-schema compatibility.
+    parameters: { type: 'object', ...z.toJSONSchema(tool.schema, { target: 'draft-7' }) },
   },
 }));
 const criticToolDefinition = {
@@ -392,6 +400,10 @@ export async function runAgent(options: {
   const captureMetadata = new Map<string, VisualCaptureProvenance>();
   const captureIdsByKey = new Map<string, string>();
   const captureImageMessages = new Map<string, ModelMessage>();
+  const captureHasPixels = (id: string) => {
+    const content = captureImageMessages.get(id)?.content;
+    return Array.isArray(content) && content.some((part) => part.type === 'image_url');
+  };
   const deliveredCaptureIds = new Set<string>();
   const pendingCaptureIds = new Set<string>();
   let reviewedAssessment: z.infer<typeof designAssessmentSchema> | undefined;
@@ -417,6 +429,13 @@ export async function runAgent(options: {
     events.push(event);
     await options.onEvent?.(event, draft.preview);
   };
+  const canonicalAssessment = () => {
+    // These records already passed the immutable-checklist guard. Reevaluate
+    // their checks at review/finish; never copy a prior evaluated success result.
+    return reviewedAssessment || plannedObjectives;
+  };
+  const resolveAssessment = (input: z.infer<typeof assessmentInputSchema>) =>
+    input === 'canonical' ? designAssessmentSchema.parse(canonicalAssessment()) : input;
   const checklistError = (assessment?: z.infer<typeof designAssessmentSchema>) => {
     if (plannedObjectives) {
       if (!assessment)
@@ -485,9 +504,9 @@ export async function runAgent(options: {
     await options.onUsage?.(turn.usage);
     options.signal?.throwIfAborted();
   };
-  const completionFeedback = async (message: string) => {
+  const completionFeedback = async (message: string, extra: Partial<RunEvent> = {}) => {
     planCompletionFeedback++;
-    await emit('checking', message);
+    await emit('checking', message, extra);
   };
   await emit('starting', 'Reading your house and design brief.');
   for (let round = 0; usage.calls < maxCalls; round++) {
@@ -551,6 +570,21 @@ export async function runAgent(options: {
         remainingModelCalls: remainingCalls,
         remainingToolCalls: AGENT_LIMITS.toolCalls - toolCalls,
         remainingCaptures: captureLimit() - captures,
+        missingCurrentCritiqueViews:
+          visualReviewAvailable && plan
+            ? plan.reviewViews.filter(
+                (view) =>
+                  ![...captureMetadata.values()].some(
+                    (capture) =>
+                      capture.sceneHash === currentHash &&
+                      deliveredCaptureIds.has(capture.captureId) &&
+                      captureHasPixels(capture.captureId) &&
+                      capture.view === view &&
+                      (view !== 'exterior' || capture.quality === 'live') &&
+                      (plan?.scope !== 'composition' || view === 'interior' || !capture.roomId),
+                  ),
+              )
+            : [],
         planCompletionFeedback,
         unmetRequiredPlanObjectives:
           pendingPlanObjectives?.map((item) => ({
@@ -574,7 +608,7 @@ export async function runAgent(options: {
         remainingCalls <= 3
           ? 'FINALIZATION WINDOW: prioritize unfinished required planned objectives and consequential critic findings; these are essential, not optional polish. Reserve the final validation/review/finish calls. If the actual call/capture budget cannot complete them, finish a truthful partial proposal with explicit limitations; do not claim completion.'
           : plan
-            ? 'Complete unfinished required plan objectives before optional additions. Reserve calls for render, critique_design, its separately accounted critic call, and finish. Repair concrete critic findings while budget permits.'
+            ? 'Complete unfinished required plan objectives before optional additions. Use assessment:"canonical" at finish or {assessment:"canonical"} at review to preserve the application-owned checks without repeating them. Reserve calls for render, critique_design, its separately accounted critic call, and finish. After repairs invalidate images, capture every missing current planned view together; repeated exterior captures cannot replace a missing plan/interior view. Reserve remaining captures for that complete set. If insufficient captures remain, finish a truthful partial proposal with visual and independent-review limitations. Repair concrete critic findings while budget permits.'
             : 'Preserve two model rounds and a capture for final visual review when enabled. Once the request is met, finish; advisory warnings do not require more editing.'
       }${
         pendingPlanObjectives?.length
@@ -592,7 +626,7 @@ export async function runAgent(options: {
     );
     await options.beforeModelCall?.();
     options.signal?.throwIfAborted();
-    const modelHistory = compactAgentHistory(history);
+    const modelHistory = compactStaleToolResults(history, { authoritativeSnapshotAvailable: true });
     const size = historySize(modelHistory);
     metrics.contextCharacters += size.characters;
     metrics.imageBytesSent += size.imageBytes;
@@ -725,13 +759,7 @@ export async function runAgent(options: {
             (capture) =>
               capture.sceneHash === currentHash &&
               deliveredCaptureIds.has(capture.captureId) &&
-              Array.isArray(captureImageMessages.get(capture.captureId)?.content) &&
-              (
-                captureImageMessages.get(capture.captureId)!.content as Exclude<
-                  ModelMessage['content'],
-                  string | null
-                >
-              ).some((part) => part.type === 'image_url'),
+              captureHasPixels(capture.captureId),
           );
           const missingViews =
             visualReviewAvailable && plan
@@ -1157,7 +1185,11 @@ export async function runAgent(options: {
             });
           }
         } else if (name === 'review_design') {
-          const input = designAssessmentSchema.parse(args);
+          const parsed =
+            args && typeof args === 'object' && 'assessment' in args
+              ? reviewInputSchema.parse(args)
+              : designAssessmentSchema.parse(args);
+          const input = 'assessment' in parsed ? resolveAssessment(parsed.assessment) : parsed;
           const error = checklistError(input);
           if (error) {
             output = { ok: false, error };
@@ -1186,7 +1218,12 @@ export async function runAgent(options: {
           await emit('editing', 'Trying a fresh draft from the original house.', { tool: name });
           output = { ok: true, inspection: draft.inspect() };
         } else if (name === 'finish_design') {
-          const input = finishSchema.parse(args);
+          const parsed = finishSchema.parse(args);
+          const input = {
+            ...parsed,
+            assessment:
+              parsed.assessment === undefined ? undefined : resolveAssessment(parsed.assessment),
+          };
           if (
             !startingRoomSummary.roomCount &&
             !plan &&
@@ -1448,6 +1485,13 @@ export async function runAgent(options: {
         }
       } catch (error) {
         if (!(error instanceof z.ZodError)) throw error;
+        const flattenIssues = (issues: z.core.$ZodIssue[]): { path: string; message: string }[] =>
+          issues.flatMap((issue) =>
+            issue.code === 'invalid_union'
+              ? flattenIssues(issue.errors.flat())
+              : [{ path: issue.path.join('.'), message: issue.message }],
+          );
+        const schemaProblems = flattenIssues(error.issues).slice(0, 30);
         if (name === 'apply_operations' || name === 'reset_draft') {
           failedMutationCallId = call.id;
           draft.recordFailure([
@@ -1458,7 +1502,7 @@ export async function runAgent(options: {
                 'The last draft operation did not execute because its arguments were invalid. Correct the operation or reset the draft before finishing.',
               objectIds: [],
               details: {
-                problems: error.issues.map((i) => ({ path: i.path.join('.'), message: i.message })),
+                problems: schemaProblems,
               },
             },
           ]);
@@ -1466,7 +1510,7 @@ export async function runAgent(options: {
         output = {
           ok: false,
           error: 'Invalid tool arguments. Correct them using the schema.',
-          issues: error.issues.map((i) => ({ path: i.path.join('.'), message: i.message })),
+          issues: schemaProblems,
           ...(!startingRoomSummary.roomCount && !plan
             ? {
                 availableTools: builderToolNames,
@@ -1479,13 +1523,24 @@ export async function runAgent(options: {
           criticValidationFeedback = {
             error:
               'Invalid independent critique submission. Correct these schema paths in your next submission.',
-            issues: error.issues.map((i) => ({ path: i.path.join('.'), message: i.message })),
+            issues: schemaProblems,
           };
-        if (name === 'plan_design' || name === 'critique_design')
-          await completionFeedback(
-            'Correcting the bounded plan or independent critique submission.',
-          );
-        else await reject([], 'Correcting the inputs to a geometry operation.');
+        const schemaIssues: DesignIssue[] = [
+          {
+            code: 'invalid_tool_arguments',
+            severity: 'error',
+            message: 'Tool arguments did not match the required schema.',
+            objectIds: [],
+            details: { problems: schemaProblems },
+          },
+        ];
+        if (name === 'apply_operations' || name === 'reset_draft')
+          await reject(schemaIssues, 'Correcting the inputs to a geometry operation.');
+        else
+          await completionFeedback('Correcting the review or finalization tool inputs.', {
+            tool: name,
+            issues: schemaIssues,
+          });
       }
       metrics.toolMs += performance.now() - toolStartedAt;
       history.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(output) });

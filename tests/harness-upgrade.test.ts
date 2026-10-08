@@ -216,8 +216,9 @@ test('current capture pixels survive review_design through finish and cached req
   assert.ok(result.metrics!.elapsedMs >= result.metrics!.modelMs);
   assert.ok(result.metrics!.imageBytesSent > 0);
   assert.match(String(histories[1][1].content), /"palette":"cedar"/);
-  assert.ok(results(histories[1])[0].snapshot);
-  assert.equal(results(histories[1])[0].scene, undefined);
+  assert.ok(results(histories[1])[0].scene, 'the latest tool result remains complete');
+  assert.ok(results(histories[2])[0].historicalSnapshotOmitted);
+  assert.equal(results(histories[2])[0].scene, undefined);
   assert.ok(results(histories[1])[0].changes.length, 'operation evidence is retained');
   for (const history of histories) {
     const calls = history.flatMap((message) => message.tool_calls || []);
