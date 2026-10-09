@@ -5,3 +5,4 @@ export const DEFAULT_MODELS = {
   transcription: 'spacexai/grok-stt',
 } as const;
 export const DEFAULT_SPEECH_VOICE = 'Kore';
+export const DEFAULT_CODEX_MODEL = 'gpt-6.1-sol';

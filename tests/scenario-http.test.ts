@@ -139,7 +139,7 @@ async function fixture(
   const modelClient = applicationOptions.modelClient;
   const application = await createApplication({
     directory,
-    env: { AI_GATEWAY_API_KEY: 'synthetic-test-only' },
+    env: { AI_GATEWAY_API_KEY: 'synthetic-test-only', VOICE_ENABLED: 'true' },
     ...applicationOptions,
     ...(seedLiving && modelClient
       ? {

@@ -1,7 +1,11 @@
 import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
-import { DEFAULT_MODELS, DEFAULT_SPEECH_VOICE } from '../shared/connections.ts';
+import {
+  DEFAULT_MODELS,
+  DEFAULT_SPEECH_VOICE,
+  DEFAULT_CODEX_MODEL,
+} from '../shared/connections.ts';
 
 const modelId = z
   .string()
@@ -27,6 +31,19 @@ export const connectionSettingsSchema = z.object({
   dailyLimit: connectionFields.dailyLimit.default(60),
 });
 export type ConnectionSettings = z.infer<typeof connectionSettingsSchema>;
+
+/** Local testing switches never overwrite saved Gateway credentials/models. */
+export function resolveTestingBackend(env: NodeJS.ProcessEnv) {
+  return {
+    designBackend: z.enum(['gateway', 'codex-cli']).parse(env.DESIGN_BACKEND?.trim() || 'gateway'),
+    codexModel: z
+      .string()
+      .regex(/^[A-Za-z0-9._-]{3,100}$/)
+      .parse(env.CODEX_MODEL?.trim() || DEFAULT_CODEX_MODEL),
+    codexBinary: env.CODEX_BINARY?.trim() || 'codex',
+    voiceEnabled: z.enum(['true', 'false']).parse(env.VOICE_ENABLED?.trim() || 'false') === 'true',
+  };
+}
 
 export function resolveConnections(
   settings: ConnectionSettings,

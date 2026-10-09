@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { providerTools, providerToolDefinitions } from './agent-provider-tools.ts';
 import {
   visualReviewSchema,
   evaluateVisualReview,
@@ -217,38 +218,11 @@ const planObjectiveBudget = (candidate: DesignPlan) => {
   };
 };
 export type BuilderProviderPhase = 'empty-site' | 'composition-review';
-const clarificationFinishSchema = z
-  .object({
-    reply: finishSchema.shape.reply,
-    mode: z.literal('question'),
-    questionReason: z.literal('clarification'),
-  })
-  .strict();
-const canonicalReviewSchema = z.object({ assessment: z.literal('canonical') }).strict();
-const canonicalFinishSchema = finishSchema.extend({ assessment: z.literal('canonical') });
 const builderToolNames = AGENT_TOOLS.map((tool): string => tool.name).filter(
   (name) => name !== 'submit_design_critique',
 );
 
 const emptySiteToolNames = ['plan_design', 'compose_house', 'inspect_design', 'finish_design'];
-
-const gatewayToolDefinitions = AGENT_TOOLS.map((tool) => ({
-  type: 'function',
-  function: {
-    name: tool.name,
-    description: tool.description,
-    parameters: z.toJSONSchema(tool.schema, { target: 'draft-7' }),
-  },
-}));
-const criticToolDefinition = {
-  type: 'function',
-  function: {
-    name: 'submit_design_critique',
-    description:
-      'Submit a skeptical per-objective critique of the design and adequacy against the original request. Report specific targeted repairs and missing objectives; never edit the design.',
-    parameters: z.toJSONSchema(designCritiqueSchema, { target: 'draft-7' }),
-  },
-};
 
 export type ToolCall = {
   id: string;
@@ -289,54 +263,9 @@ export function gatewayAgentModel(
   return {
     async complete(messages, signal, toolNames, criticObjectiveIds, builderPhase) {
       const critiqueOnly = toolNames?.length === 1 && toolNames[0] === 'submit_design_critique';
-      const validManifest =
-        critiqueOnly &&
-        criticObjectiveIds &&
-        criticObjectiveIds.length >= 1 &&
-        criticObjectiveIds.length <= 12 &&
-        new Set(criticObjectiveIds).size === criticObjectiveIds.length &&
-        criticObjectiveIds.every(
-          (id) => typeof id === 'string' && id.length >= 1 && id.length <= 60,
-        );
-      const currentCriticTool = validManifest
-        ? {
-            ...criticToolDefinition,
-            function: {
-              ...criticToolDefinition.function,
-              parameters: z.toJSONSchema(
-                designCritiqueSchema.extend({
-                  observations: z
-                    .array(
-                      designCritiqueSchema.shape.observations.element.extend({
-                        objectiveId: z.enum(criticObjectiveIds),
-                      }),
-                    )
-                    .length(criticObjectiveIds.length),
-                }),
-                { target: 'draft-7' },
-              ),
-            },
-          }
-        : criticToolDefinition;
-      const builderTools = gatewayToolDefinitions.map((tool) => {
-        const schema =
-          builderPhase === 'empty-site' && tool.function.name === 'finish_design'
-            ? clarificationFinishSchema
-            : builderPhase === 'composition-review' && tool.function.name === 'finish_design'
-              ? canonicalFinishSchema
-              : builderPhase === 'composition-review' && tool.function.name === 'review_design'
-                ? canonicalReviewSchema
-                : undefined;
-        return schema
-          ? {
-              ...tool,
-              function: {
-                ...tool.function,
-                parameters: z.toJSONSchema(schema, { target: 'draft-7' }),
-              },
-            }
-          : tool;
-      });
+      const tools = providerToolDefinitions(
+        providerTools(AGENT_TOOLS, toolNames, criticObjectiveIds, builderPhase),
+      );
       const response = await fetcher(`${GATEWAY_ORIGIN}/v1/chat/completions`, {
         method: 'POST',
         signal,
@@ -352,11 +281,7 @@ export function gatewayAgentModel(
             : {}),
           temperature: 0.2,
           messages,
-          tools: toolNames
-            ? [...builderTools, currentCriticTool].filter((tool) =>
-                toolNames.includes(tool.function.name),
-              )
-            : builderTools,
+          tools,
           tool_choice: 'required',
           parallel_tool_calls: false,
         }),

@@ -34,6 +34,9 @@ export type Status = {
   keySource: 'saved' | 'environment' | 'none';
   modelConnected: boolean;
   voiceConnected: boolean;
+  voiceEnabled: boolean;
+  designBackend: 'gateway' | 'codex-cli';
+  gatewayModel: string;
   model: string;
   speechModel: string;
   transcriptionModel: string;

@@ -18,7 +18,8 @@ import { DesignService, DesignServiceError } from './design-service.ts';
 import { inheritedPreservationContext } from './refinement-review.ts';
 import { AlternativeService } from './alternative-service.ts';
 import { RenderBroker, RenderUnavailable } from './render-service.ts';
-import { ConnectionStore, resolveConnections } from './connections.ts';
+import { ConnectionStore, resolveConnections, resolveTestingBackend } from './connections.ts';
+import { codexCliAgentModel, codexCliStatus } from './codex-cli.ts';
 import {
   GatewayError,
   normalizeAudioMediaType,
@@ -41,6 +42,8 @@ export async function createApplication(options: {
   env?: NodeJS.ProcessEnv;
   modelClient?: AgentModel;
   audioFetcher?: typeof fetch;
+  codexClient?: AgentModel;
+  codexStatus?: () => Promise<{ connected: boolean; reason?: string }>;
 }) {
   const { directory } = options;
   const store = new ProjectStore(directory);
@@ -51,6 +54,37 @@ export async function createApplication(options: {
   const connections = new ConnectionStore(directory);
   await connections.load();
   const gateway = () => resolveConnections(connections.get(), options.env || process.env);
+  const environment = options.env || process.env;
+  const testing = resolveTestingBackend(environment);
+  const codex =
+    testing.designBackend === 'codex-cli'
+      ? options.codexClient ||
+        codexCliAgentModel({
+          model: testing.codexModel,
+          reasoningEffort: 'medium',
+          binary: testing.codexBinary,
+          env: environment,
+        })
+      : undefined;
+  let lastCodexStatus: { at: number; value: { connected: boolean; reason?: string } } | undefined;
+  const cliStatus = async () => {
+    if (lastCodexStatus && Date.now() - lastCodexStatus.at < 15_000) return lastCodexStatus.value;
+    const value = await (
+      options.codexStatus ||
+      (() => codexCliStatus({ binary: testing.codexBinary, env: environment }))
+    )();
+    lastCodexStatus = { at: Date.now(), value };
+    return value;
+  };
+  const designReady = async (config: ReturnType<typeof gateway>) =>
+    testing.designBackend === 'codex-cli' ? (await cliStatus()).connected : !!config.key;
+  const designClient = () => options.modelClient || codex;
+  const designModel = (config: ReturnType<typeof gateway>) =>
+    testing.designBackend === 'codex-cli' ? testing.codexModel : config.model;
+  const designUnavailable = () =>
+    testing.designBackend === 'codex-cli'
+      ? 'Codex CLI is unavailable or not signed in with ChatGPT. Run codex login on this computer, then retry. No Gateway fallback was used.'
+      : 'Add a Vercel AI Gateway key in Connections or AI_GATEWAY_API_KEY in .env to begin.';
   let usage: Usage = { day: new Date().toISOString().slice(0, 10), requests: 0, modelCost: 0 };
   try {
     usage = z
@@ -123,15 +157,18 @@ export async function createApplication(options: {
     next();
   });
   app.use(express.json({ limit: '24mb' }));
-  app.get('/api/status', (_req, res) => {
+  app.get('/api/status', async (_req, res) => {
     resetDay();
     const config = gateway();
     res.json({
       gatewayConnected: !!config.key,
-      modelConnected: !!config.key,
-      voiceConnected: !!config.key,
+      modelConnected: await designReady(config),
+      voiceConnected: testing.voiceEnabled && !!config.key,
+      voiceEnabled: testing.voiceEnabled,
+      designBackend: testing.designBackend,
+      gatewayModel: config.model,
       keySource: config.keySource,
-      model: config.model,
+      model: designModel(config),
       speechModel: config.speechModel,
       transcriptionModel: config.transcriptionModel,
       speechVoice: config.speechVoice,
@@ -277,11 +314,7 @@ export async function createApplication(options: {
     ['/api/agent', '/api/design/drafts/:id/refine', '/api/alternatives/refine'],
     async (req, res, next) => {
       const config = gateway();
-      if (!config.key)
-        return res.status(428).json({
-          error:
-            'Add a Vercel AI Gateway key in Connections or AI_GATEWAY_API_KEY in .env to begin.',
-        });
+      if (!(await designReady(config))) return res.status(428).json({ error: designUnavailable() });
       if (agentBusy)
         return res.status(409).json({
           error: 'A design is already in progress. Please wait for it to finish or cancel it.',
@@ -409,18 +442,21 @@ export async function createApplication(options: {
         });
         let answer = await runAgent({
           key: config.key,
-          model: config.model,
+          model: designModel(config),
           scene: startingScene,
           messages: refinementMessages,
           context: input.context,
           draft,
-          client: options.modelClient,
+          client: designClient(),
           render: input.context?.allowVisualReview
             ? renders.provider(input.context.renderClientId!)
             : undefined,
-          signal: AbortSignal.any([run.controller.signal, AbortSignal.timeout(300_000)]),
+          signal: AbortSignal.any([
+            run.controller.signal,
+            AbortSignal.timeout(testing.designBackend === 'codex-cli' ? 600_000 : 300_000),
+          ]),
           beforeModelCall: async () => {
-            await chargeRequest();
+            if (testing.designBackend === 'gateway') await chargeRequest();
             runUsage.calls++;
           },
           onUsage: async (cost) => {
@@ -542,12 +578,12 @@ export async function createApplication(options: {
         .status(409)
         .json({ error: 'Another design request is in progress. Finish or cancel it first.' });
     const config = gateway();
-    if (!config.key)
-      return res
-        .status(428)
-        .json({ error: 'Add a Vercel AI Gateway key to explore alternatives.' });
+    if (!(await designReady(config))) return res.status(428).json({ error: designUnavailable() });
     const controller = new AbortController();
-    const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(600_000)]);
+    const signal = AbortSignal.any([
+      controller.signal,
+      AbortSignal.timeout(testing.designBackend === 'codex-cli' ? 1_200_000 : 600_000),
+    ]);
     res.on('close', () => {
       if (!res.writableEnded) controller.abort();
     });
@@ -577,8 +613,8 @@ export async function createApplication(options: {
         build: async (index, previous) =>
           runAgent({
             key: config.key,
-            model: config.model,
-            client: options.modelClient,
+            model: designModel(config),
+            client: designClient(),
             scene: project.scene,
             messages: [
               ...project.messages.slice(-8),
@@ -593,7 +629,7 @@ export async function createApplication(options: {
               ? renders.provider(input.renderClientId)
               : undefined,
             signal,
-            beforeModelCall: chargeRequest,
+            beforeModelCall: testing.designBackend === 'gateway' ? chargeRequest : undefined,
             onUsage: async (cost) => {
               if (cost.cost !== null) {
                 resetDay();
@@ -662,6 +698,8 @@ export async function createApplication(options: {
       limit: '12mb',
     }),
     async (req, res) => {
+      if (!testing.voiceEnabled)
+        return res.status(409).json({ error: 'Voice is disabled during testing.' });
       const config = gateway();
       if (!config.key)
         return res
@@ -695,6 +733,8 @@ export async function createApplication(options: {
     },
   );
   app.post('/api/speak', async (req, res) => {
+    if (!testing.voiceEnabled)
+      return res.status(409).json({ error: 'Voice is disabled during testing.' });
     const config = gateway();
     if (!config.key)
       return res

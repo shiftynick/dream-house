@@ -1,6 +1,6 @@
 # Terrain
 
-A local, voice-first architectural concept studio. Keep separate houses, start on an empty hillside, and describe what you imagine. The design agent uses architectural operations, checks geometry and locally rendered views, and can repair an unsaved draft before applying it.
+A local architectural concept studio. Keep separate houses, start on an empty hillside, and describe what you imagine. The design agent uses architectural operations, checks geometry and locally rendered views, and can repair an unsaved draft before applying it.
 
 For the current development checkpoint and next-session context, see [HANDOFF.md](HANDOFF.md).
 
@@ -26,9 +26,19 @@ npm start
 
 ## Connect the AI
 
-Open **Connections and settings**, enter one **Vercel AI Gateway key**, and click **Save connections**. The panel identifies whether a saved or environment key is configured; this does not verify provider access.
+For subscription-backed local testing, install Codex CLI and sign in using `codex login` with ChatGPT. Copy `.env.example` to `.env` and use:
 
-The editable defaults live in [`shared/connections.ts`](shared/connections.ts):
+```dotenv
+DESIGN_BACKEND=codex-cli
+CODEX_MODEL=gpt-6.1-sol
+VOICE_ENABLED=false
+```
+
+Restart the server after changing these settings. Both the builder and independent image critic use **Sol 6.1 with medium reasoning**. The backend launches headless Codex for each model turn and returns architectural commands to Terrain. Terrain owns geometry, rendering, validation and saves. Codex does not receive shell, file-editing or browser tools. Its saved ChatGPT authentication supplies subscription quota; API-key login is rejected. Missing login, exhausted quota or invalid responses fail explicitly without switching to Gateway.
+
+Voice is disabled by default during testing: recording controls and speech playback are off, and audio endpoints reject requests. Set `VOICE_ENABLED=true` to enable the existing voice features.
+
+For API-backed use, set `DESIGN_BACKEND=gateway`, then enter a **Vercel AI Gateway key** in **Connections and settings** or set `AI_GATEWAY_API_KEY`. Gateway defaults remain:
 
 | Purpose                 | Model / voice                      |
 | ----------------------- | ---------------------------------- |
@@ -37,17 +47,13 @@ The editable defaults live in [`shared/connections.ts`](shared/connections.ts):
 | Speech voice            | `Kore`                             |
 | Transcription           | `spacexai/grok-stt`                |
 
-Use Gateway model IDs. The design model must support function/tool calling and image input for visual review. Choose a voice supported by the speech model. Replies default to **AI voice · Vercel Gateway**. **System voice** uses browser speech synthesis when available; replies can also be turned off.
+Gateway models and credentials remain saved separately while using Codex. A saved key takes precedence over the environment key. Optional `AI_GATEWAY_MODEL`, `AI_GATEWAY_SPEECH_MODEL`, `AI_GATEWAY_TRANSCRIPTION_MODEL` and `AI_GATEWAY_SPEECH_VOICE` override saved model choices. Keys persist in `.data/connections.json` with owner-only permissions and are never returned to the browser or exported. Leave the key field blank when saving other settings to preserve it. `.env` and `.data/` are ignored by Git.
 
-Keys and settings persist across restarts in `.data/connections.json`, written with an atomic rename and owner-only `0600` permissions. Credentials are plaintext in that local file; the server never returns them to the browser or includes them in project exports. Leave the key field blank when saving other settings to preserve the existing key.
-
-Alternatively, copy `.env.example` to `.env`, set `AI_GATEWAY_API_KEY`, and restart. A key saved in Connections takes precedence. Optional `AI_GATEWAY_MODEL`, `AI_GATEWAY_SPEECH_MODEL`, `AI_GATEWAY_TRANSCRIPTION_MODEL`, and `AI_GATEWAY_SPEECH_VOICE` environment settings override UI model choices; unset them and restart to use UI settings. `.env` and `.data/` are ignored by Git. Keep any custom data directory out of source control too.
-
-Legacy OpenRouter and direct OpenAI keys are not reused as Gateway credentials. Existing saved model choices are preserved; select Sonnet in Connections if an older installation uses a different model. No credentials ship with the project. Local editing, rendering, history, and manually saved alternatives work without a key. AI design and generated alternatives need a key.
+Codex usage reports tokens and **Subscription quota**, with no invented dollar charge. Gateway daily request/cost counters exclude Codex calls. Local editing and rendering work without either provider. See [testing backend details](docs/testing-backend.md).
 
 ## Designing with the agent
 
-1. Type an instruction, or hold **Space** outside text fields/the microphone button and release to transcribe. Enter sends typed text; Shift+Enter adds a line.
+1. Type an instruction. When voice is enabled, hold **Space** outside text fields/the microphone button and release to transcribe. Enter sends typed text; Shift+Enter adds a line.
 2. The agent receives the current house and brief, its last ten messages, your selected room, surface or furniture piece, and the active view/camera. Point to a wall, floor, roof, room or piece before saying “make this cedar,” “move this wall outward,” or “rotate this sofa.” The space inspector also provides selection controls.
 3. It uses local commands to attach wings, resize rooms from an edge, move a selected wall or group, connect doorways or floors, set roofs, place dimensioned windows and doors, change particular surface materials, and preserve requirements. The geometry engine calculates coordinates and related movements.
 4. Edits happen in an unsaved draft. The interface shows progress, changes, issues, and valid previews. Structured validation errors can trigger a bounded repair pass. **Cancel** stops the run and discards its draft.
@@ -55,7 +61,7 @@ Legacy OpenRouter and direct OpenAI keys are not reused as Gateway credentials. 
 
 New houses start with an explicit room program, material scheme, real exterior-window intent and important features. These become immutable objectives. A separate skeptical model call checks the original request, current geometry and rendered views, then gives the builder specific repair targets. Unfinished planned requirements remain essential while budget permits; a small core cannot quietly stand in for the complete house. Existing focused edits keep the shorter workflow. See [planned designs and critique](docs/design-quality.md) for contracts and limits.
 
-The current scaffold and recovery workflow passed 443 tests/build and independent Sol/Astra reviews of all six local rendered views. `render_planned_views` captures the declared view pair with real provenance; critique and finish remain separate. Stacked-volume inspection distinguishes actual clipped roof visibility from the nominal roof profile. The latest live case captured the correct pair, but stopped in prose after a real roof repair; no completed fresh outcome is claimed. Bounded recovery and a broader centered arrival pavilion are reviewed locally; full fresh prompt success remains unverified. See [current verification status](docs/design-quality.md#verification).
+The current backend and design workflow pass **457 tests and the production build**. A fresh isolated Codex subscription run of the exact grand-lodge prompt completed in ten actual calls: eleven spaces, real windows and entrance, coordinated materials, critic-guided repairs and fresh exterior/plan captures, followed by an accepting current critique and reviewable proposal. The saved house was unchanged. This is one successful sample, not a general reliability benchmark; earlier Gateway failures remain recorded. See [current verification status](docs/design-quality.md#verification).
 
 Ambitious houses are built across concise batches. If a response hits its output limit, the application discards all incomplete calls and allows one smaller response within the existing run budget. Earlier valid draft work is retained; final geometry and visual checks still apply.
 
@@ -98,10 +104,10 @@ While exploring an option, send a refinement to create a revised option without 
 - No background model calls. Focused designs can make **up to twelve model calls**; planned compositions allow **up to twenty**, including independent critique, with up to two repair opportunities and thirty-two tool calls. Local geometry operations and image rendering do not make provider calls. Sending rendered evidence to the model uses image tokens and another model round. Provider failures are not automatically retried. One truncated response can recover with a smaller batch; it counts against the same model-call and no-progress limits. Recovery and geometry repair can require additional paid model calls.
 - The model receives its remaining budget each round and instructions to finish during its last three rounds. Three consecutive rounds without a new draft state, fewer blocking errors, a successful capture, or new image review stop the run before another model call. Repeated inspections and unchanged edits do not count as progress; stopping leaves the saved house unchanged.
 - Generated alternatives run this bounded loop for each of two or three options, up to forty or sixty model calls in total when each is a planned composition (twenty-four or thirty-six for focused options). Refinements start another bounded run. Each model response is capped at 6,000 output tokens. The working house and brief are refreshed each round; older duplicate scene payloads are omitted while operation results and errors remain. Current-draft review images remain available through final review; stale images retire. Repeating an identical view reuses its local capture, although sending image pixels in another model call still uses input tokens.
-- The default daily cap is **60 cloud requests**, shared across every design round, transcription, and speech. It persists across restarts and resets at UTC midnight. A spoken exchange uses a variable number of requests. This is a request cap, not a dollar budget.
+- The default daily cap is **60 Gateway requests**, shared across Gateway design rounds, transcription, and speech. Codex subscription turns are excluded. It persists across restarts and resets at UTC midnight. A spoken exchange uses a variable number of requests. This is a request cap, not a dollar budget.
 - Daily usage includes reported design and audio charges. Unreported charges are excluded; check Vercel AI Gateway for complete spending. Each design run reports only its own model cost; a run with any unknown model charge reports its total as unknown.
 - Recordings are capped at 60 seconds and sent after release. Audio is processed in memory, not stored as a project asset.
-- Prompts, geometry, brief/context, requested review images when enabled, recorded speech, and spoken-reply text go through Vercel AI Gateway to the selected providers. Rendering, saved projects, history, alternative thumbnails, and exports stay local.
+- Prompts, geometry, brief/context, requested review images when enabled, recorded speech, and spoken-reply text go to the selected backend. Codex receives text, geometry and requested images through headless CLI; enabled audio and Gateway designs use Vercel AI Gateway. Rendering, saved projects, history, alternative thumbnails, and exports stay local.
 - Local run summaries retain stages, issues, changes, model name, and available usage for diagnosis. They omit keys, viewport images, raw audio, and private model reasoning. There are no remote fonts, telemetry, rendering services, or cloud project storage.
 
 ## Local files and existing projects

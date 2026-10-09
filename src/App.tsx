@@ -133,7 +133,7 @@ function Connections({
   onError: (text: string) => void;
 }) {
   const [gatewayKey, setGatewayKey] = useState(''),
-    [model, setModel] = useState(status?.model || DEFAULT_MODELS.design),
+    [model, setModel] = useState(status?.gatewayModel || DEFAULT_MODELS.design),
     [speechModel, setSpeechModel] = useState(status?.speechModel || DEFAULT_MODELS.speech),
     [transcriptionModel, setTranscriptionModel] = useState(
       status?.transcriptionModel || DEFAULT_MODELS.transcription,
@@ -141,6 +141,8 @@ function Connections({
     [speechVoice, setSpeechVoice] = useState(status?.speechVoice || DEFAULT_SPEECH_VOICE),
     [limit, setLimit] = useState(status?.dailyLimit || 60),
     [saving, setSaving] = useState(false);
+  const codexBackend = status?.designBackend === 'codex-cli';
+  const voiceEnabled = status?.voiceEnabled === true;
   const keyLabel =
     status?.keySource === 'saved'
       ? 'Saved key configured'
@@ -174,6 +176,31 @@ function Connections({
           }
         }}
       >
+        {codexBackend && (
+          <>
+            <div className="connection-section">
+              <span className="section-icon">
+                <Sparkles size={19} />
+              </span>
+              <div>
+                <h3>
+                  Codex CLI{' '}
+                  <span className={`pill ${status?.modelConnected ? 'green' : ''}`}>
+                    {status?.modelConnected ? 'Signed in' : 'Sign-in needed'}
+                  </span>
+                </h3>
+                <p>Headless Codex CLI · ChatGPT subscription · builder and critic</p>
+              </div>
+            </div>
+            <label className="field-label">
+              Design model
+              <input value={status?.model || 'gpt-6.1-sol'} readOnly />
+              <small>
+                Medium reasoning. Configure the design backend and model in the server environment.
+              </small>
+            </label>
+          </>
+        )}
         <div className="connection-section">
           <span className="section-icon">
             <Sparkles size={19} />
@@ -181,9 +208,16 @@ function Connections({
           <div>
             <h3>
               AI Gateway{' '}
-              <span className={`pill ${status?.gatewayConnected ? 'green' : ''}`}>{keyLabel}</span>
+              <span className={`pill ${status?.gatewayConnected ? 'green' : ''}`}>
+                {codexBackend && !status?.gatewayConnected ? 'Optional' : keyLabel}
+              </span>
             </h3>
-            <p>Vercel AI Gateway · design, transcription, and speech</p>
+            <p>
+              {codexBackend
+                ? 'Optional Gateway backend · saved separately from Codex CLI'
+                : 'Vercel AI Gateway · design'}
+              {voiceEnabled ? ' · transcription and speech' : ''}
+            </p>
           </div>
         </div>
         <label className="field-label">
@@ -202,40 +236,59 @@ function Connections({
           <small>Leave blank to keep your current key. Saving does not test the connection.</small>
         </label>
         <label className="field-label">
-          Design model
+          {codexBackend ? 'Saved Gateway design model' : 'Design model'}
           <input value={model} onChange={(e) => setModel(e.target.value)} required />
           <small>
             Use a Gateway model ID that supports structured outputs. You can change it any time.
           </small>
         </label>
-        <div className="connection-section">
-          <span className="section-icon">
-            <AudioLines size={19} />
-          </span>
-          <div>
-            <h3>Voice</h3>
-            <p>Push-to-talk transcription and optional AI speech, using the same key</p>
-          </div>
-        </div>
+        {voiceEnabled ? (
+          <>
+            <div className="connection-section">
+              <span className="section-icon">
+                <AudioLines size={19} />
+              </span>
+              <div>
+                <h3>Voice</h3>
+                <p>Push-to-talk transcription and optional AI speech, using the same key</p>
+              </div>
+            </div>
+            <label className="field-label">
+              Speech model
+              <input
+                value={speechModel}
+                onChange={(e) => setSpeechModel(e.target.value)}
+                required
+              />
+            </label>
+            <label className="field-label">
+              Voice name
+              <input
+                value={speechVoice}
+                onChange={(e) => setSpeechVoice(e.target.value)}
+                required
+              />
+              <small>
+                Choose a voice supported by your speech model. Gemini voices include Kore.
+              </small>
+            </label>
+            <label className="field-label">
+              Transcription model
+              <input
+                value={transcriptionModel}
+                onChange={(e) => setTranscriptionModel(e.target.value)}
+                required
+              />
+            </label>
+          </>
+        ) : (
+          <p className="visual-review-note">
+            Voice is disabled during testing. Enable VOICE_ENABLED in the server environment to
+            restore voice controls.
+          </p>
+        )}
         <label className="field-label">
-          Speech model
-          <input value={speechModel} onChange={(e) => setSpeechModel(e.target.value)} required />
-        </label>
-        <label className="field-label">
-          Voice name
-          <input value={speechVoice} onChange={(e) => setSpeechVoice(e.target.value)} required />
-          <small>Choose a voice supported by your speech model. Gemini voices include Kore.</small>
-        </label>
-        <label className="field-label">
-          Transcription model
-          <input
-            value={transcriptionModel}
-            onChange={(e) => setTranscriptionModel(e.target.value)}
-            required
-          />
-        </label>
-        <label className="field-label">
-          Daily cloud request limit
+          Daily Gateway request limit
           <input
             type="number"
             min="1"
@@ -245,15 +298,17 @@ function Connections({
             required
           />
           <small>
-            Counts model, transcription, and cloud speech calls. This is a request cap, not a dollar
-            cap. Set a spending limit with your provider too.
+            Counts Gateway model, transcription, and cloud speech calls. Codex subscription runs do
+            not count toward this Gateway request cap.
           </small>
         </label>
         <div className="local-note">
           <House size={17} />
           <span>
-            Your key is saved on this computer, outside the browser. Design requests, recorded
-            speech, and AI spoken replies use Vercel AI Gateway and your selected providers.
+            Your Gateway key is saved on this computer, outside the browser.{' '}
+            {codexBackend
+              ? 'Design requests use your local Codex CLI login and ChatGPT subscription.'
+              : 'Design requests use Vercel AI Gateway and your selected provider.'}
           </span>
         </div>
         <button className="primary full" disabled={saving}>
@@ -291,7 +346,7 @@ export default function App() {
     [versionName, setVersionName] = useState(''),
     [compareId, setCompareId] = useState<string | null>(null),
     [compareSide, setCompareSide] = useState<'current' | 'saved'>('current');
-  const [speech, setSpeech] = useState<'browser' | 'cloud' | 'off'>('cloud');
+  const [speech, setSpeech] = useState<'browser' | 'cloud' | 'off'>('off');
   const inputRef = useRef<HTMLTextAreaElement>(null),
     chatEnd = useRef<HTMLDivElement>(null),
     audio = useRef<HTMLAudioElement | null>(null),
@@ -363,11 +418,17 @@ export default function App() {
     }
   }, []);
   useEffect(() => () => stopSpeech(), [stopSpeech]);
+  useEffect(() => {
+    if (!status?.voiceEnabled) {
+      stopSpeech();
+      setSpeech('off');
+    }
+  }, [status?.voiceEnabled, stopSpeech]);
   const speak = useCallback(
     async (text: string, designApplied = false) => {
       stopSpeech();
       const run = speechRun.current;
-      if (speech === 'off') return;
+      if (!status?.voiceEnabled || speech === 'off') return;
       // Detailed geometry disclosures stay visible in chat; keep speech within
       // the provider route's limit without another model call to summarize it.
       if (text.length > 1500) {
@@ -410,7 +471,7 @@ export default function App() {
         );
       }
     },
-    [speech, notify, refreshStatus, stopSpeech],
+    [speech, status?.voiceEnabled, notify, refreshStatus, stopSpeech],
   );
   const alternativeModel = useVisualAlternatives({
     flush,
@@ -848,7 +909,7 @@ export default function App() {
     scopeKey: `${project?.projectId}:${pending?.draftId || alternativeModel.preview?.id || 'saved'}:${selection?.roomId ?? ''}:${selection?.surface ?? ''}:${selection?.furnitureId ?? ''}:${selection?.openingId ?? ''}:${onlySelectedPart}`,
     onText: send,
     onError: notify,
-    enabled: !!status?.voiceConnected,
+    enabled: status?.voiceEnabled === true && status.voiceConnected,
     busy: busy || !!modal || !!compareId || saved === 'conflict',
   });
   useEffect(() => {
@@ -1812,7 +1873,9 @@ export default function App() {
             {pending && (
               <div className="proposal-bar">
                 <Sparkles size={17} />
-                <span>Unsaved proposal · type or speak to refine</span>
+                <span>
+                  Unsaved proposal · {status?.voiceEnabled ? 'type or speak' : 'type'} to refine
+                </span>
                 {proposalVersions.length > 1 && (
                   <select
                     aria-label="Proposal version"
@@ -1851,7 +1914,10 @@ export default function App() {
               <div className="alternative-preview-stack">
                 <div className="proposal-bar alternative-preview-bar">
                   <Eye size={16} />
-                  <span>Preview: {alternativeModel.preview.name} · type or speak to refine</span>
+                  <span>
+                    Preview: {alternativeModel.preview.name} ·{' '}
+                    {status?.voiceEnabled ? 'type or speak' : 'type'} to refine
+                  </span>
                   {alternativeModel.preview.parentOptionId && (
                     <button
                       className="text-button"
@@ -1983,7 +2049,13 @@ export default function App() {
                 <h2>Design chat</h2>
                 <p>
                   <span className={status?.modelConnected ? 'online-dot' : 'offline-dot'} />
-                  {status?.modelConnected ? 'Gateway key configured' : 'API key required'}
+                  {status?.designBackend === 'codex-cli'
+                    ? status.modelConnected
+                      ? 'Codex CLI · ChatGPT subscription'
+                      : 'Codex CLI sign-in required'
+                    : status?.modelConnected
+                      ? 'Gateway key configured'
+                      : 'Gateway key required'}
                 </p>
               </div>
               <IconButton label="Hide design chat" onClick={() => setPartner(false)}>
@@ -2069,7 +2141,9 @@ export default function App() {
                         {(lastResult.metrics.elapsedMs / 1000).toFixed(1)} s ·{' '}
                         {lastResult.usage.calls} model calls ·{' '}
                         {lastResult.usage.cost === null
-                          ? 'Cost unavailable'
+                          ? status?.designBackend === 'codex-cli'
+                            ? 'Subscription quota'
+                            : 'Cost unavailable'
                           : `$${lastResult.usage.cost.toFixed(3)}`}
                       </p>
                     )}
@@ -2213,45 +2287,51 @@ export default function App() {
                   rows={3}
                 />
                 <div className="composer-actions">
-                  <button
-                    type="button"
-                    aria-label="Hold to talk"
-                    className={`mic-button ${voice.state === 'recording' ? 'recording' : ''}`}
-                    disabled={
-                      busy || !!compareId || saved === 'conflict' || voice.state === 'transcribing'
-                    }
-                    onPointerDown={(e) => {
-                      e.preventDefault();
-                      e.currentTarget.setPointerCapture(e.pointerId);
-                      stopSpeech();
-                      void voice.start();
-                    }}
-                    onPointerUp={voice.stop}
-                    onPointerCancel={voice.stop}
-                    onKeyDown={(e) => {
-                      if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) {
+                  {status?.voiceEnabled && (
+                    <button
+                      type="button"
+                      aria-label="Hold to talk"
+                      className={`mic-button ${voice.state === 'recording' ? 'recording' : ''}`}
+                      disabled={
+                        !status?.voiceConnected ||
+                        busy ||
+                        !!compareId ||
+                        saved === 'conflict' ||
+                        voice.state === 'transcribing'
+                      }
+                      onPointerDown={(e) => {
                         e.preventDefault();
+                        e.currentTarget.setPointerCapture(e.pointerId);
                         stopSpeech();
                         void voice.start();
-                      }
-                    }}
-                    onKeyUp={voice.stop}
-                  >
-                    {voice.state === 'transcribing' ? (
-                      <LoaderCircle size={16} className="spin" />
-                    ) : (
-                      <Mic size={16} />
-                    )}
-                    <span>
-                      {voice.state === 'recording'
-                        ? 'Listening…'
-                        : voice.state === 'transcribing'
-                          ? 'Transcribing…'
-                          : voice.state === 'requesting'
-                            ? 'Opening mic…'
-                            : 'Hold to talk'}
-                    </span>
-                  </button>
+                      }}
+                      onPointerUp={voice.stop}
+                      onPointerCancel={voice.stop}
+                      onKeyDown={(e) => {
+                        if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) {
+                          e.preventDefault();
+                          stopSpeech();
+                          void voice.start();
+                        }
+                      }}
+                      onKeyUp={voice.stop}
+                    >
+                      {voice.state === 'transcribing' ? (
+                        <LoaderCircle size={16} className="spin" />
+                      ) : (
+                        <Mic size={16} />
+                      )}
+                      <span>
+                        {voice.state === 'recording'
+                          ? 'Listening…'
+                          : voice.state === 'transcribing'
+                            ? 'Transcribing…'
+                            : voice.state === 'requesting'
+                              ? 'Opening mic…'
+                              : 'Hold to talk'}
+                      </span>
+                    </button>
+                  )}
                   <button
                     className="send-button"
                     aria-label="Send description"
@@ -2261,34 +2341,40 @@ export default function App() {
                   </button>
                 </div>
               </form>
-              <div className="composer-caption">
-                <span>
-                  Or hold <kbd>space</kbd> to speak
-                </span>
-                <button
-                  className="tiny-button"
-                  title="Stop spoken reply"
-                  aria-label="Stop spoken reply"
-                  onClick={stopSpeech}
-                >
-                  <VolumeX size={12} />
-                </button>
-              </div>
-              <label className="voice-select">
-                <Volume2 size={12} />
-                <select
-                  aria-label="Spoken replies"
-                  value={speech}
-                  onChange={(e) => {
-                    stopSpeech();
-                    setSpeech(e.target.value as typeof speech);
-                  }}
-                >
-                  <option value="browser">System voice · no API cost</option>
-                  <option value="cloud">AI voice · Vercel Gateway</option>
-                  <option value="off">Spoken replies off</option>
-                </select>
-              </label>
+              {status?.voiceEnabled ? (
+                <>
+                  <div className="composer-caption">
+                    <span>
+                      Or hold <kbd>space</kbd> to speak
+                    </span>
+                    <button
+                      className="tiny-button"
+                      title="Stop spoken reply"
+                      aria-label="Stop spoken reply"
+                      onClick={stopSpeech}
+                    >
+                      <VolumeX size={12} />
+                    </button>
+                  </div>
+                  <label className="voice-select">
+                    <Volume2 size={12} />
+                    <select
+                      aria-label="Spoken replies"
+                      value={speech}
+                      onChange={(e) => {
+                        stopSpeech();
+                        setSpeech(e.target.value as typeof speech);
+                      }}
+                    >
+                      <option value="browser">System voice · no API cost</option>
+                      <option value="cloud">AI voice · Vercel Gateway</option>
+                      <option value="off">Spoken replies off</option>
+                    </select>
+                  </label>
+                </>
+              ) : (
+                <p className="visual-review-note">Voice is disabled during testing.</p>
+              )}
               <label className="view-context-control">
                 <input
                   type="checkbox"
@@ -2322,7 +2408,9 @@ export default function App() {
               )}
               {!contextSelectedRoom && contextScene.rooms.length > 0 && (
                 <p className="selected-context">
-                  Select a room, surface, or furniture piece, then hold Space to speak.
+                  {status?.voiceEnabled
+                    ? 'Select a room, surface, or furniture piece, then hold Space to speak.'
+                    : 'Select a room, surface, or furniture piece to focus your request.'}
                 </p>
               )}
             </div>
@@ -2546,10 +2634,12 @@ export default function App() {
       {modal === 'help' && (
         <Modal title="Help and shortcuts" onClose={closeModal}>
           <div className="help-list">
-            <p>
-              <kbd>Space</kbd>
-              <span>Hold to speak when you’re not typing. Release to send.</span>
-            </p>
+            {status?.voiceEnabled && (
+              <p>
+                <kbd>Space</kbd>
+                <span>Hold to speak when you’re not typing. Release to send.</span>
+              </p>
+            )}
             <p>
               <kbd>↵</kbd>
               <span>Send a message. Shift + Enter adds a new line.</span>
@@ -2583,9 +2673,11 @@ export default function App() {
               movement.
             </p>
             <p>
-              {status?.usage.requests || 0} / {status?.dailyLimit || 60} cloud requests today.
-              Reported design cost: ${(status?.usage.modelCost || 0).toFixed(4)}. This may omit
-              unreported charges and voice usage. Check Vercel AI Gateway for total spending.
+              {status?.usage.requests || 0} / {status?.dailyLimit || 60} Gateway requests today.
+              Reported Gateway cost: ${(status?.usage.modelCost || 0).toFixed(4)}. Unreported
+              charges may be omitted. Check Vercel AI Gateway for total spending.{' '}
+              {status?.designBackend === 'codex-cli' &&
+                'Codex design runs use your ChatGPT subscription and are not included here.'}
             </p>
           </div>
         </Modal>

@@ -51,6 +51,7 @@ export function useVoice({
     session.current!.synchronize();
   }, [enabled, busy, scopeKey]);
   useEffect(() => {
+    if (!enabled) return;
     const down = (event: KeyboardEvent) => {
       const target = event.target;
       if (
@@ -74,7 +75,7 @@ export function useVoice({
       window.removeEventListener('keyup', up);
       window.removeEventListener('blur', stop);
     };
-  }, [start, stop]);
+  }, [enabled, start, stop]);
   useEffect(() => () => session.current!.cancel(false), []);
   return { state, start, stop, cancel };
 }
