@@ -58,7 +58,12 @@ import {
 } from '../shared/selection';
 import { useVoice } from './useVoice';
 import SceneView, { type CameraContext, type Light, type Quality, type View } from './SceneView';
-import { DEFAULT_MODELS, DEFAULT_SPEECH_VOICE } from '../shared/connections';
+import {
+  CODEX_MODELS,
+  DEFAULT_MODELS,
+  DEFAULT_SPEECH_VOICE,
+  type CodexModel,
+} from '../shared/connections';
 import { hillsideHouse } from '../shared/examples';
 import type { DraftCommitResult, HarnessResult, RunStatus } from '../shared/harness';
 import {
@@ -196,7 +201,8 @@ function Connections({
               Design model
               <input value={status?.model || 'gpt-6.1-sol'} readOnly />
               <small>
-                Medium reasoning. Configure the design backend and model in the server environment.
+                {status?.reasoningEffort === 'high' ? 'High' : 'Medium'} reasoning for builder and
+                critic. Change the model above the design chat composer.
               </small>
             </label>
           </>
@@ -322,6 +328,8 @@ function Connections({
 
 export default function App() {
   const [status, setStatus] = useState<Status | null>(null);
+  const [modelSaving, setModelSaving] = useState(false);
+  const modelSavingRef = useRef(false);
   const [selection, setSelection] = useState<DesignSelection | null>(null);
   const selected = selection?.roomId ?? null;
   const setSelected = useCallback(
@@ -385,10 +393,14 @@ export default function App() {
   const [requirementSource, setRequirementSource] =
     useState<DesignRequirement['source']>('confirmed');
   const notify = useCallback((text: string) => setError(text), []);
-  const refreshStatus = useCallback(() => {
-    api<Status>('status')
-      .then(setStatus)
-      .catch(() => {});
+  const refreshStatus = useCallback(async () => {
+    try {
+      const next = await api<Status>('status');
+      setStatus(next);
+      return next;
+    } catch {
+      return null;
+    }
   }, []);
   const {
     project,
@@ -503,6 +515,42 @@ export default function App() {
       setModal(null);
     },
   });
+  const changeCodexModel = async (codexModel: CodexModel) => {
+    if (
+      status?.designBackend !== 'codex-cli' ||
+      status.codexModel === codexModel ||
+      busyRef.current ||
+      alternativeModel.busy ||
+      modelSavingRef.current
+    )
+      return;
+    modelSavingRef.current = true;
+    setModelSaving(true);
+    try {
+      const saved = await api<{ ok: true; codexModel: CodexModel }>('connections', {
+        method: 'PUT',
+        body: JSON.stringify({ codexModel }),
+      });
+      // Show the server-confirmed choice even if the following status request fails.
+      setStatus(
+        (current) =>
+          current && {
+            ...current,
+            codexModel: saved.codexModel,
+            model: saved.codexModel,
+            reasoningEffort: CODEX_MODELS[saved.codexModel].reasoningEffort,
+          },
+      );
+      if (!(await refreshStatus())) {
+        notify('Model saved, but connection status could not refresh.');
+      }
+    } catch (error) {
+      notify((error as Error).message);
+    } finally {
+      modelSavingRef.current = false;
+      setModelSaving(false);
+    }
+  };
   useEffect(() => {
     const scene = alternativeModel.preview?.scene || pending?.scene || project?.scene;
     if (!scene || (selection && !validSelection(scene, selection))) {
@@ -675,7 +723,7 @@ export default function App() {
     async (text: string) => {
       text = text.trim();
       const current = projectRef.current;
-      if (!text || !current || busyRef.current) return;
+      if (!text || !current || busyRef.current || modelSavingRef.current) return;
       if (compareId) {
         notify('Exit comparison before asking for a change to your current house.');
         return;
@@ -910,7 +958,7 @@ export default function App() {
     onText: send,
     onError: notify,
     enabled: status?.voiceEnabled === true && status.voiceConnected,
-    busy: busy || !!modal || !!compareId || saved === 'conflict',
+    busy: busy || modelSaving || !!modal || !!compareId || saved === 'conflict',
   });
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
@@ -2252,6 +2300,34 @@ export default function App() {
               <div ref={chatEnd} />
             </div>
             <div className="composer-area">
+              {status?.designBackend === 'codex-cli' && (
+                <div className="codex-model-control" aria-busy={modelSaving}>
+                  <div
+                    className="codex-model-buttons"
+                    role="group"
+                    aria-label="Builder and critic model"
+                  >
+                    {(Object.keys(CODEX_MODELS) as CodexModel[]).map((model) => (
+                      <button
+                        key={model}
+                        type="button"
+                        aria-label={`Use ${CODEX_MODELS[model].label} for builder and critic`}
+                        aria-pressed={status.codexModel === model}
+                        title={`${CODEX_MODELS[model].reasoningEffort === 'high' ? 'High' : 'Medium'} reasoning for builder and critic`}
+                        disabled={busy || !!alternativeModel.busy || modelSaving}
+                        onClick={() => void changeCodexModel(model)}
+                      >
+                        {CODEX_MODELS[model].label}
+                      </button>
+                    ))}
+                  </div>
+                  <small aria-live="polite">
+                    {modelSaving
+                      ? 'Saving…'
+                      : `${status.reasoningEffort === 'high' ? 'High' : 'Medium'} reasoning`}
+                  </small>
+                </div>
+              )}
               {!status?.modelConnected && (
                 <button className="connect-nudge" onClick={() => setModal('connections')}>
                   <span>
@@ -2295,6 +2371,7 @@ export default function App() {
                       disabled={
                         !status?.voiceConnected ||
                         busy ||
+                        modelSaving ||
                         !!compareId ||
                         saved === 'conflict' ||
                         voice.state === 'transcribing'
@@ -2335,7 +2412,9 @@ export default function App() {
                   <button
                     className="send-button"
                     aria-label="Send description"
-                    disabled={!input.trim() || busy || !!compareId || saved === 'conflict'}
+                    disabled={
+                      !input.trim() || busy || modelSaving || !!compareId || saved === 'conflict'
+                    }
                   >
                     {busy ? <LoaderCircle className="spin" size={15} /> : <ArrowRight size={17} />}
                   </button>
@@ -2476,7 +2555,12 @@ export default function App() {
           <VisualAlternatives
             model={alternativeModel}
             disabled={
-              busy || !!pending || !!comparison || saved === 'conflict' || !status?.modelConnected
+              busy ||
+              modelSaving ||
+              !!pending ||
+              !!comparison ||
+              saved === 'conflict' ||
+              !status?.modelConnected
             }
             renderReady={!!renderBridge.clientId && renderBridge.state !== 'unavailable'}
             onPreview={() => {

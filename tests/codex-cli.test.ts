@@ -20,7 +20,11 @@ const disabledHostWarning = {
       'Code Mode is unavailable because code-mode host is disabled. Code mode will fail closed; enable `features.code_mode_host` and install `codex-code-mode-host`.',
   },
 };
-async function mock(body: unknown, behavior = '') {
+async function mock(
+  body: unknown,
+  behavior = '',
+  model: 'gpt-6.1-sol' | 'gpt-6-astra' = 'gpt-6.1-sol',
+) {
   const directory = await mkdtemp(join(tmpdir(), 'terrain-cli-test-'));
   const binary = join(directory, 'codex'),
     report = join(directory, 'report.json');
@@ -28,7 +32,7 @@ async function mock(body: unknown, behavior = '') {
     binary,
     `#!${process.execPath}\nconst fs=require('node:fs');
 const a=process.argv.slice(2); const value=k=>a[a.indexOf(k)+1];
-if(a[0]==='debug'){console.log(JSON.stringify({models:[{slug:'gpt-6.1-sol',shell_type:'unified_exec',apply_patch_tool_type:'freeform'}]}));process.exit(0)}
+if(a[0]==='debug'){console.log(JSON.stringify({models:[{slug:'gpt-6.1-sol',shell_type:'unified_exec',apply_patch_tool_type:'freeform'},{slug:'gpt-6-astra',shell_type:'unified_exec',apply_patch_tool_type:'freeform'}]}));process.exit(0)}
 if(a[0]==='login'){console.error(${JSON.stringify(behavior === 'api' ? 'Logged in using API key SECRET' : 'Logged in using ChatGPT')});process.exit(0)}
 let prompt='';process.stdin.on('data',d=>prompt+=d);process.stdin.on('end',()=>{
 const imagePaths=a.flatMap((v,i)=>v==='--image'?[a[i+1]]:[]);
@@ -42,8 +46,8 @@ ${behavior.startsWith('trailing-') ? `process.stdout.write(${JSON.stringify(beha
     { mode: 0o700 },
   );
   const client = codexCliAgentModel({
-    model: 'gpt-6.1-sol',
-    reasoningEffort: 'medium',
+    model,
+    reasoningEffort: model === 'gpt-6-astra' ? 'high' : 'medium',
     binary,
     timeoutMs: 1000,
     env: {
@@ -270,7 +274,7 @@ test('Codex login probe accepts ChatGPT and rejects API-key login; model and ima
   }
   assert.throws(
     () => codexCliAgentModel({ model: 'other', reasoningEffort: 'medium' }),
-    /requires gpt-6.1-sol/,
+    /requires a supported model/,
   );
 });
 
@@ -373,4 +377,31 @@ test('Every builder phase and critic schema uses the strict provider subset with
     () => strictOutputSchema({ type: 'object', properties: {}, not: {} }),
     /unsupported structured output schema keyword/,
   );
+});
+
+test('Astra uses its exact model and high reasoning with sanitized native capabilities', async () => {
+  const fixture = await mock(inspection, '', 'gpt-6-astra');
+  try {
+    const result = await fixture.client.complete(messages, undefined, ['inspect_design']);
+    assert.equal(result.calls[0].function.name, 'inspect_design');
+    assert.equal(result.usage.cost, null);
+    const report = JSON.parse(await readFile(fixture.report, 'utf8'));
+    assert.equal(report.args[report.args.indexOf('--model') + 1], 'gpt-6-astra');
+    assert.ok(report.args.includes('model_reasoning_effort="high"'));
+    assert.equal(report.catalog.models.length, 1);
+    assert.equal(report.catalog.models[0].slug, 'gpt-6-astra');
+    assert.equal(report.catalog.models[0].shell_type, 'disabled');
+    assert.equal(report.catalog.models[0].apply_patch_tool_type, null);
+    assert.deepEqual(report.catalog.models[0].experimental_supported_tools, []);
+    assert.ok(report.args.includes('forced_login_method="chatgpt"'));
+    assert.equal(report.env.OPENAI_API_KEY, undefined);
+    await assert.rejects(stat(report.cwd), /ENOENT/);
+  } finally {
+    await fixture.cleanup();
+  }
+  for (const pair of [
+    { model: 'gpt-6-astra', reasoningEffort: 'medium' as const },
+    { model: 'gpt-6.1-sol', reasoningEffort: 'high' as const },
+  ])
+    assert.throws(() => codexCliAgentModel(pair), /configured reasoning effort/);
 });

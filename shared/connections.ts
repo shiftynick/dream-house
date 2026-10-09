@@ -6,3 +6,10 @@ export const DEFAULT_MODELS = {
 } as const;
 export const DEFAULT_SPEECH_VOICE = 'Kore';
 export const DEFAULT_CODEX_MODEL = 'gpt-6.1-sol';
+export const CODEX_MODEL_IDS = ['gpt-6.1-sol', 'gpt-6-astra'] as const;
+export type CodexModel = (typeof CODEX_MODEL_IDS)[number];
+export const CODEX_MODELS = {
+  'gpt-6.1-sol': { label: 'Sol 6.1', reasoningEffort: 'medium' },
+  'gpt-6-astra': { label: 'Astra', reasoningEffort: 'high' },
+} as const;
+export type CodexReasoningEffort = (typeof CODEX_MODELS)[CodexModel]['reasoningEffort'];

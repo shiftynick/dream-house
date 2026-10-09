@@ -5,6 +5,7 @@ import {
   DEFAULT_MODELS,
   DEFAULT_SPEECH_VOICE,
   DEFAULT_CODEX_MODEL,
+  CODEX_MODEL_IDS,
 } from '../shared/connections.ts';
 
 const modelId = z
@@ -20,6 +21,7 @@ export const connectionFields = {
   transcriptionModel: modelId,
   speechVoice: z.string().trim().min(1).max(100),
   dailyLimit: z.number().int().min(1).max(1000),
+  codexModel: z.enum(CODEX_MODEL_IDS),
 };
 export const connectionPatchSchema = z.object(connectionFields).partial().strict();
 export const connectionSettingsSchema = z.object({
@@ -29,6 +31,7 @@ export const connectionSettingsSchema = z.object({
   transcriptionModel: modelId.default(DEFAULT_MODELS.transcription),
   speechVoice: connectionFields.speechVoice.default(DEFAULT_SPEECH_VOICE),
   dailyLimit: connectionFields.dailyLimit.default(60),
+  codexModel: connectionFields.codexModel.optional(),
 });
 export type ConnectionSettings = z.infer<typeof connectionSettingsSchema>;
 
@@ -36,10 +39,7 @@ export type ConnectionSettings = z.infer<typeof connectionSettingsSchema>;
 export function resolveTestingBackend(env: NodeJS.ProcessEnv) {
   return {
     designBackend: z.enum(['gateway', 'codex-cli']).parse(env.DESIGN_BACKEND?.trim() || 'gateway'),
-    codexModel: z
-      .string()
-      .regex(/^[A-Za-z0-9._-]{3,100}$/)
-      .parse(env.CODEX_MODEL?.trim() || DEFAULT_CODEX_MODEL),
+    codexModel: z.enum(CODEX_MODEL_IDS).parse(env.CODEX_MODEL?.trim() || DEFAULT_CODEX_MODEL),
     codexBinary: env.CODEX_BINARY?.trim() || 'codex',
     voiceEnabled: z.enum(['true', 'false']).parse(env.VOICE_ENABLED?.trim() || 'false') === 'true',
   };

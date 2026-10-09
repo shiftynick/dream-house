@@ -625,6 +625,44 @@ button.primary,
   padding: 14px 15px 13px;
   border-top: 1px solid #edeee5;
 }
+.codex-model-control {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 11px;
+}
+.codex-model-buttons {
+  display: flex;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid #dce1d1;
+  border-radius: 7px;
+  background: #f4f6ed;
+}
+.codex-model-buttons button {
+  padding: 5px 9px;
+  border-radius: 4px;
+  color: #738365;
+  font-size: 10px;
+}
+.codex-model-buttons button[aria-pressed='true'] {
+  color: #405731;
+  background: #e2ead7;
+}
+.codex-model-buttons button:focus-visible {
+  outline: 2px solid #839b6c;
+  outline-offset: 1px;
+}
+.codex-model-buttons button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.codex-model-control small {
+  color: #839273;
+  font-size: 9px;
+  white-space: nowrap;
+}
 .connect-nudge {
   font-size: 9px;
   display: flex;

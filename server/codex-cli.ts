@@ -4,12 +4,13 @@ import { mkdtemp, writeFile, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
+import { CODEX_MODELS, type CodexModel, type CodexReasoningEffort } from '../shared/connections.ts';
 import { AGENT_TOOLS, type AgentModel, type ModelMessage } from './agent.ts';
 import { providerTools, providerToolDefinitions } from './agent-provider-tools.ts';
 
 export type CodexCliOptions = {
   model: string;
-  reasoningEffort: 'medium';
+  reasoningEffort: CodexReasoningEffort;
   binary?: string;
   env?: NodeJS.ProcessEnv;
   timeoutMs?: number;
@@ -307,8 +308,13 @@ async function prepareMessages(messages: ModelMessage[], directory: string) {
 }
 
 export function codexCliAgentModel(options: CodexCliOptions): AgentModel {
-  if (options.model !== 'gpt-6.1-sol' || options.reasoningEffort !== 'medium')
-    throw new CodexCliError('The Codex backend requires gpt-6.1-sol with medium reasoning.');
+  if (
+    !Object.hasOwn(CODEX_MODELS, options.model) ||
+    CODEX_MODELS[options.model as CodexModel].reasoningEffort !== options.reasoningEffort
+  )
+    throw new CodexCliError(
+      'The Codex backend requires a supported model and its configured reasoning effort.',
+    );
   const binary = options.binary || 'codex';
   const env = codexChildEnvironment(options.env);
   return {

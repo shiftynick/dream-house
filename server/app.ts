@@ -20,6 +20,7 @@ import { AlternativeService } from './alternative-service.ts';
 import { RenderBroker, RenderUnavailable } from './render-service.ts';
 import { ConnectionStore, resolveConnections, resolveTestingBackend } from './connections.ts';
 import { codexCliAgentModel, codexCliStatus } from './codex-cli.ts';
+import { CODEX_MODELS, type CodexModel } from '../shared/connections.ts';
 import {
   GatewayError,
   normalizeAudioMediaType,
@@ -43,6 +44,7 @@ export async function createApplication(options: {
   modelClient?: AgentModel;
   audioFetcher?: typeof fetch;
   codexClient?: AgentModel;
+  codexClientFactory?: typeof codexCliAgentModel;
   codexStatus?: () => Promise<{ connected: boolean; reason?: string }>;
 }) {
   const { directory } = options;
@@ -51,21 +53,16 @@ export async function createApplication(options: {
   const alternatives = new AlternativeService(store);
   const renders = new RenderBroker();
   let agentBusy = false;
+  let modelChanging = false;
   const connections = new ConnectionStore(directory);
   await connections.load();
-  const gateway = () => resolveConnections(connections.get(), options.env || process.env);
   const environment = options.env || process.env;
   const testing = resolveTestingBackend(environment);
-  const codex =
-    testing.designBackend === 'codex-cli'
-      ? options.codexClient ||
-        codexCliAgentModel({
-          model: testing.codexModel,
-          reasoningEffort: 'medium',
-          binary: testing.codexBinary,
-          env: environment,
-        })
-      : undefined;
+  const gateway = () => ({
+    ...resolveConnections(connections.get(), environment),
+    codexModel: connections.get().codexModel || testing.codexModel,
+  });
+  const codexClients = new Map<CodexModel, AgentModel>();
   let lastCodexStatus: { at: number; value: { connected: boolean; reason?: string } } | undefined;
   const cliStatus = async () => {
     if (lastCodexStatus && Date.now() - lastCodexStatus.at < 15_000) return lastCodexStatus.value;
@@ -78,9 +75,24 @@ export async function createApplication(options: {
   };
   const designReady = async (config: ReturnType<typeof gateway>) =>
     testing.designBackend === 'codex-cli' ? (await cliStatus()).connected : !!config.key;
-  const designClient = () => options.modelClient || codex;
+  const designClient = (config: ReturnType<typeof gateway>) => {
+    if (options.modelClient) return options.modelClient;
+    if (testing.designBackend !== 'codex-cli') return undefined;
+    if (options.codexClient) return options.codexClient;
+    if (!codexClients.has(config.codexModel))
+      codexClients.set(
+        config.codexModel,
+        (options.codexClientFactory || codexCliAgentModel)({
+          model: config.codexModel,
+          reasoningEffort: CODEX_MODELS[config.codexModel].reasoningEffort,
+          binary: testing.codexBinary,
+          env: environment,
+        }),
+      );
+    return codexClients.get(config.codexModel)!;
+  };
   const designModel = (config: ReturnType<typeof gateway>) =>
-    testing.designBackend === 'codex-cli' ? testing.codexModel : config.model;
+    testing.designBackend === 'codex-cli' ? config.codexModel : config.model;
   const designUnavailable = () =>
     testing.designBackend === 'codex-cli'
       ? 'Codex CLI is unavailable or not signed in with ChatGPT. Run codex login on this computer, then retry. No Gateway fallback was used.'
@@ -167,6 +179,11 @@ export async function createApplication(options: {
       voiceEnabled: testing.voiceEnabled,
       designBackend: testing.designBackend,
       gatewayModel: config.model,
+      codexModel: config.codexModel,
+      reasoningEffort:
+        testing.designBackend === 'codex-cli'
+          ? CODEX_MODELS[config.codexModel].reasoningEffort
+          : null,
       keySource: config.keySource,
       model: designModel(config),
       speechModel: config.speechModel,
@@ -177,8 +194,21 @@ export async function createApplication(options: {
     });
   });
   app.put('/api/connections', async (req, res) => {
-    await connections.save(req.body);
-    res.json({ ok: true });
+    const changesModel = Object.hasOwn(req.body || {}, 'codexModel');
+    if (changesModel && testing.designBackend !== 'codex-cli')
+      throw new DesignServiceError('Model selection requires the Codex backend.');
+    if (changesModel && (agentBusy || modelChanging))
+      throw new DesignServiceError(
+        'Finish or cancel the current design before changing models.',
+        409,
+      );
+    if (changesModel) modelChanging = true;
+    try {
+      await connections.save(req.body);
+      res.json({ ok: true, codexModel: gateway().codexModel });
+    } finally {
+      if (changesModel) modelChanging = false;
+    }
   });
   app.get('/api/project', async (_req, res) => res.json(await store.read()));
   app.get('/api/projects', async (_req, res) => res.json(await store.list()));
@@ -313,12 +343,13 @@ export async function createApplication(options: {
   app.post(
     ['/api/agent', '/api/design/drafts/:id/refine', '/api/alternatives/refine'],
     async (req, res, next) => {
-      const config = gateway();
+      let config = gateway();
       if (!(await designReady(config))) return res.status(428).json({ error: designUnavailable() });
-      if (agentBusy)
+      if (agentBusy || modelChanging)
         return res.status(409).json({
           error: 'A design is already in progress. Please wait for it to finish or cancel it.',
         });
+      config = gateway();
       let run: Run | undefined, draftId: string | undefined, result: HarnessResult | undefined;
       const runUsage: AgentUsage = { inputTokens: 0, outputTokens: 0, cost: 0, calls: 0 };
       let reportedCalls = 0;
@@ -447,7 +478,7 @@ export async function createApplication(options: {
           messages: refinementMessages,
           context: input.context,
           draft,
-          client: designClient(),
+          client: designClient(config),
           render: input.context?.allowVisualReview
             ? renders.provider(input.context.renderClientId!)
             : undefined,
@@ -550,7 +581,7 @@ export async function createApplication(options: {
               JSON.stringify(
                 {
                   id: run.state.id,
-                  model: config.model,
+                  model: designModel(config),
                   status: run.state.status,
                   events: run.state.events,
                   error: run.state.error,
@@ -573,12 +604,15 @@ export async function createApplication(options: {
     },
   );
   app.post('/api/alternatives/generate', async (req, res, next) => {
-    if (agentBusy)
+    if (agentBusy || modelChanging)
       return res
         .status(409)
         .json({ error: 'Another design request is in progress. Finish or cancel it first.' });
-    const config = gateway();
+    let config = gateway();
     if (!(await designReady(config))) return res.status(428).json({ error: designUnavailable() });
+    if (agentBusy || modelChanging)
+      return res.status(409).json({ error: 'A design or model change is already in progress.' });
+    config = gateway();
     const controller = new AbortController();
     const signal = AbortSignal.any([
       controller.signal,
@@ -614,7 +648,7 @@ export async function createApplication(options: {
           runAgent({
             key: config.key,
             model: designModel(config),
-            client: designClient(),
+            client: designClient(config),
             scene: project.scene,
             messages: [
               ...project.messages.slice(-8),

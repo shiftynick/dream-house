@@ -1,3 +1,5 @@
+import type { CodexModel } from '../shared/connections';
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -36,6 +38,8 @@ export type Status = {
   voiceConnected: boolean;
   voiceEnabled: boolean;
   designBackend: 'gateway' | 'codex-cli';
+  codexModel: CodexModel;
+  reasoningEffort: 'medium' | 'high' | null;
   gatewayModel: string;
   model: string;
   speechModel: string;
