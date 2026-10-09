@@ -110,6 +110,7 @@ test('agent gateway adapter sends documented tool contracts and preserves usage'
         'finish_design',
         'inspect_design',
         'plan_design',
+        'render_planned_views',
         'render_view',
         'reset_draft',
         'resume_editing',

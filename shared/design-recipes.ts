@@ -9,7 +9,7 @@ export const grandLodgeDescriptor = {
   id: 'grand-lodge' as const,
   name: 'Timber Ridge Lodge',
   description:
-    'A reviewable timber lodge seed with a dominant hall, two continuous subordinate wing roofs, a stone entry and linked upper reading gallery, public and private bathrooms, generous glazing and a furnished terrace.',
+    'A reviewable timber lodge seed with a dominant hall, two continuous subordinate wing roofs, a broad, centered stone arrival pavilion and timber upper reading gallery, public and private bathrooms, generous glazing and a furnished terrace.',
   roomIds: [
     'great-hall',
     'entry',
@@ -90,18 +90,22 @@ export function composeHouseRecipe(
       'Compose a lodge only on an empty draft. Existing architecture requires scoped editing.',
     );
 
+  // Widen the arrival without raising its ridge into the hall roof volume.
+  const arrivalWidth = 10;
+  const arrivalPitch =
+    (Math.atan((4 * Math.tan((24 * Math.PI) / 180)) / (arrivalWidth / 2)) * 180) / Math.PI;
   const wingPitch = 22;
   const galleryHeight = 3.8 + 6 * Math.tan((wingPitch * Math.PI) / 180);
   const rooms: Room[] = [
     room('great-hall', 'Great Hall', 'living', 0, 0, 14, 12, 7.2, {
       roof: { style: 'pitched', pitch: 30, direction: 'north' },
-      surfacePalettes: { north: 'limestone', roof: 'charcoal', floor: 'cedar' },
+      surfacePalettes: { north: 'cedar', roof: 'charcoal', floor: 'cedar' },
       wallOpenings: [
         window('hall-north-west', 'north', -5.3, 2.5, 4.8, 0.7),
         window('hall-north-center', 'north', 0.4, 2.4, 4.8, 0.7),
         window('hall-north-east', 'north', 5.9, 1.3, 4.8, 0.7),
-        window('hall-south-west', 'south', -5.5, 2, 5, 0.8),
-        window('hall-south-east', 'south', 5.5, 2, 5, 0.8),
+        window('hall-south-west', 'south', -6, 1.5, 5, 0.8),
+        window('hall-south-east', 'south', 6, 1.5, 5, 0.8),
         window('hall-east-gable', 'east', 0, 4, 1.5, 7.6),
         window('hall-west-gable', 'west', 0, 4, 1.5, 7.6),
       ],
@@ -119,7 +123,7 @@ export function composeHouseRecipe(
         }),
       ],
     }),
-    room('entry', 'Stone Arrival Hall', 'hall', 0, 9, 8, 6, 2.8, {
+    room('entry', 'Stone Arrival Hall', 'hall', 0, 9.5, arrivalWidth, 7, 2.8, {
       palette: 'limestone',
       roof: { style: 'flat' },
       wallOpenings: [
@@ -127,20 +131,29 @@ export function composeHouseRecipe(
           id: 'front-door',
           side: 'south',
           kind: 'door',
-          offset: -2.3,
+          offset: 0,
           width: 1.8,
           height: 2.5,
           sill: 0,
         },
-        window('entry-south-window', 'south', 1.6, 2.8, 1.8, 0.7),
+        window('entry-south-window', 'south', 3, 2.8, 1.8, 0.7),
+        window('entry-south-window-west', 'south', -3, 2.8, 1.8, 0.7),
         window('entry-west-window', 'west', 0, 3.2, 1.8, 0.7),
         window('entry-east-window', 'east', 0, 3.2, 1.8, 0.7),
       ],
     }),
-    room('upper-gallery', 'Upper Reading Gallery', 'hall', 0, 9, 8, 6, 2.6, {
+    room('upper-gallery', 'Upper Reading Gallery', 'hall', 0, 9.5, arrivalWidth, 7, 2.6, {
       elevation: 2.8,
       palette: 'limestone',
-      roof: { style: 'pitched', pitch: 24, direction: 'east' },
+      surfacePalettes: {
+        north: 'cedar',
+        south: 'cedar',
+        east: 'cedar',
+        west: 'cedar',
+        floor: 'cedar',
+        roof: 'charcoal',
+      },
+      roof: { style: 'pitched', pitch: arrivalPitch, direction: 'east' },
       wallOpenings: [
         window('gallery-front-glazing', 'south', -1.8, 3.4, 2, 0.5),
         window('gallery-front-stair-glazing', 'south', 2.1, 2.6, 2, 0.5),
@@ -330,7 +343,7 @@ export function composeHouseRecipe(
     })),
     materialStrategy: {
       description:
-        'Predominant timber, stone entry/hearth planes, and one coordinated charcoal roof over a dominant hall, two continuous subordinate wings and a stone entry.',
+        'Predominant timber with a stone arrival base and timber upper gallery; coordinated charcoal roofs over the dominant hall, two continuous subordinate wings and arrival pavilion.',
       checks: [
         {
           kind: 'material_composition' as const,

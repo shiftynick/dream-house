@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { roomSlabs, stairFootprint } from '../src/renderGeometry';
 import {
   composeHouseRecipe,
   composeHouseSchema,
@@ -147,4 +148,56 @@ test('every indoor room has actual exposed glazing and arrival retains an exteri
         (wall.roomBId === 'entry' && wall.sideB === 'south'),
     ),
   );
+});
+
+test('arrival is reported as a two-level pitched pavilion with stone base and timber upper walls', () => {
+  const { scene, plan } = recipe();
+  const quality = inspectDesignQuality(scene);
+  const stack = quality.stackedVolumes.find((stack) => stack.roomIds.includes('entry'))!;
+  assert.deepEqual(stack.roomIds, ['entry', 'upper-gallery']);
+  assert.equal(stack.topVisibleRoof?.style, 'pitched');
+  assert.ok(stack.totalHeight > 7.18 && stack.totalHeight < 7.19);
+  assert.deepEqual(new Set(Object.values(stack.lowerBase.palettes)), new Set(['limestone']));
+  assert.deepEqual(new Set(Object.values(stack.topWalls.palettes)), new Set(['cedar']));
+  assert.equal(
+    scene.rooms.find((room) => room.id === 'great-hall')!.surfacePalettes?.north,
+    'cedar',
+  );
+  assert.ok(!plan.materialStrategy.description.includes('hearth planes'));
+});
+
+test('broader centered arrival preserves hall clearance and the supported gallery stair opening', () => {
+  const { scene } = recipe();
+  const entry = scene.rooms.find((room) => room.id === 'entry')!;
+  const gallery = scene.rooms.find((room) => room.id === 'upper-gallery')!;
+  const hall = scene.rooms.find((room) => room.id === 'great-hall')!;
+  const door = entry.wallOpenings!.find((opening) => opening.id === 'front-door')!;
+  const flanks = entry.wallOpenings!.filter(
+    (opening) => opening.side === 'south' && opening.kind === 'window',
+  );
+  assert.equal(door.offset, 0);
+  assert.equal(flanks.length, 2);
+  assert.equal(flanks[0].offset, -flanks[1].offset);
+  for (const opening of flanks)
+    assert.ok(Math.abs(opening.offset) - opening.width / 2 > door.width / 2);
+  assert.equal(entry.z - entry.depth / 2, hall.z + hall.depth / 2);
+  for (const opening of hall.wallOpenings!.filter((opening) => opening.side === 'south')) {
+    assert.ok(Math.abs(opening.offset) - opening.width / 2 > entry.width / 2);
+    assert.ok(Math.abs(opening.offset) + opening.width / 2 < hall.width / 2);
+  }
+  const slabs = roomSlabs(scene, gallery);
+  assert.equal(slabs.roofClipped, false);
+  assert.deepEqual(slabs.foundation, []);
+  assert.ok(roofMaximumHeight(scene, gallery) < hall.elevation + hall.height);
+  const stair = scene.stairs.find((stair) => stair.id === 'gallery-stair')!;
+  const hole = stairFootprint(stair);
+  const holeOverlap = slabs.floor.reduce(
+    (area, rect) =>
+      area +
+      Math.max(0, Math.min(rect.maxX, hole.maxX) - Math.max(rect.minX, hole.minX)) *
+        Math.max(0, Math.min(rect.maxZ, hole.maxZ) - Math.max(rect.minZ, hole.minZ)),
+    0,
+  );
+  assert.equal(holeOverlap, 0);
+  assert.equal(stair.elevation + stair.rise, gallery.elevation);
 });

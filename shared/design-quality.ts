@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { roomSlabs } from '../src/renderGeometry.ts';
 import { paletteSchema, roomSchema, type Room, type Scene, type Side } from './model.ts';
 import {
   bounds,
@@ -304,6 +305,104 @@ function verifiedStairLinks(scene: Scene, issues: DesignIssue[]) {
 
 /** Factual evidence for planning and critique. This does not certify style,
  * comfort, code compliance, daylight, weatherproofing, or render visibility. */
+/** Conservative architectural grouping, not a structural or circulation check.
+ * Only a flat lower ceiling with a coincident upper footprint is counted as a
+ * covered core. Roof perimeter overhangs can remain visible in the renderer. */
+function stackedVolumeEvidence(scene: Scene) {
+  const enclosed = scene.rooms.filter((room) => !outdoor(room));
+  const roomBounds = new Map(scene.rooms.map((room) => [room, bounds(room)]));
+  const above = new Map(enclosed.map((room) => [room, [] as Room[]]));
+  const below = new Map(enclosed.map((room) => [room, [] as Room[]]));
+  for (const lower of enclosed) {
+    if (effectiveRoof(scene, lower).style !== 'flat') continue;
+    for (const upper of enclosed) {
+      if (upper === lower || !close(lower.elevation + lower.height, upper.elevation, EPSILON))
+        continue;
+      if (
+        !sides.every((side) =>
+          close(roomBounds.get(lower)![side], roomBounds.get(upper)![side], EPSILON),
+        )
+      )
+        continue;
+      above.get(lower)!.push(upper);
+      below.get(upper)!.push(lower);
+    }
+  }
+  return enclosed
+    .filter((room) => below.get(room)!.length === 0)
+    .flatMap((base) => {
+      const layers = [base];
+      while (true) {
+        const candidates = above.get(layers[layers.length - 1])!;
+        if (candidates.length !== 1 || below.get(candidates[0])!.length !== 1) break;
+        layers.push(candidates[0]);
+      }
+      if (layers.length < 2) return [];
+      const top = layers[layers.length - 1];
+      const footprint = roomBounds.get(top)!;
+      const higherOverlappingRooms = scene.rooms.filter((other) => {
+        if (layers.includes(other) || other.elevation <= top.elevation + EPSILON) return false;
+        const otherBounds = roomBounds.get(other)!;
+        return (
+          Math.min(footprint.east, otherBounds.east) - Math.max(footprint.west, otherBounds.west) >
+            EPSILON &&
+          Math.min(footprint.south, otherBounds.south) -
+            Math.max(footprint.north, otherBounds.north) >
+            EPSILON
+        );
+      });
+      const wallFacts = (room: Room) => ({
+        roomId: room.id,
+        baseElevation: room.elevation,
+        eaveElevation: room.elevation + room.height,
+        height: room.height,
+        palettes: Object.fromEntries(
+          sides.map((side) => [
+            side,
+            room.surfacePalettes?.[side] ?? room.palette ?? scene.palette,
+          ]),
+        ),
+      });
+      const roofClipped = roomSlabs(scene, top).roofClipped;
+      const topRoof = {
+        profileBasis: 'nominal unclipped architectural roof',
+        roomId: top.id,
+        ...effectiveRoof(scene, top),
+        palette: top.surfacePalettes?.roof ?? top.palette ?? scene.palette,
+        eaveElevation: top.elevation + top.height,
+        maximumElevation: roofMaximumHeight(scene, top),
+      };
+      return [
+        {
+          roomIds: layers.map((room) => room.id),
+          footprint: { x: base.x, z: base.z, width: base.width, depth: base.depth },
+          lowerBase: wallFacts(base),
+          layers: layers.map(wallFacts),
+          topWalls: wallFacts(top),
+          topRoof,
+          topVisibleRoof: roofClipped || higherOverlappingRooms.length ? null : topRoof,
+          roofClipped,
+          roofVisibility: roofClipped
+            ? 'renderer clips this roof into flat exposed patches; nominal roof profile is not the rendered roof'
+            : higherOverlappingRooms.length
+              ? 'qualified by higher overlapping room footprints'
+              : 'top roof core has no higher overlapping room footprint; camera visibility is not assessed',
+          higherOverlappingRoomIds: higherOverlappingRooms.map((room) => room.id),
+          totalHeight:
+            (roofClipped ? top.elevation + top.height : roofMaximumHeight(scene, top)) -
+            base.elevation,
+          coveredLowerRoofs: layers.slice(0, -1).map((room, index) => ({
+            roomId: room.id,
+            style: effectiveRoof(scene, room).style,
+            elevation: room.elevation + room.height,
+            coveredByRoomId: layers[index + 1].id,
+            coverage: 'coincident footprint core; perimeter roof overhangs may remain visible',
+          })),
+        },
+      ];
+    });
+}
+
 export function inspectDesignQuality(scene: Scene) {
   const rooms = scene.rooms.map((room) => {
     const walls = sides.map((side) => wallEvidence(scene, room, side));
@@ -359,6 +458,7 @@ export function inspectDesignQuality(scene: Scene) {
     : [];
   return {
     rooms,
+    stackedVolumes: stackedVolumeEvidence(scene),
     program: Object.fromEntries(
       roomSchema.shape.kind.options.map((kind) => [
         kind,
@@ -374,6 +474,7 @@ export function inspectDesignQuality(scene: Scene) {
       stairLinkIssues,
     },
     limitations: [
+      'Stacked volumes group only coincident enclosed footprints with adjacent elevations and flat covered lower roofs at 0.0001 m tolerance. Offset or partial stacks are omitted. Roof profiles are nominal architectural geometry; overhang ledges, camera visibility, structural support and circulation are not certified.',
       'Exterior glazing is a geometric exposure proxy, not measured daylight or a code check. Only explicit dimensioned windows count; doors, open gaps, shared indoor glazing and legacy whole-wall glass do not count as windows.',
       'Adjacent enclosed volumes block exposure regardless of wall flags. Maximum neighboring roof height is conservative near slopes; overhangs, distant obstructions, orientation and transmission are not modeled.',
       'Wall placement rectangles stop at nominal eaves and exclude whole-wall open/glass faces. Material evidence includes raised/gable caps; possible exposure uses a conservative minimum neighboring roof edge, so uncertain palettes cannot silently pass. Roof/floor palettes are assigned surfaces, not proof those surfaces are visible in a capture.',

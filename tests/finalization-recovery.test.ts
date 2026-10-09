@@ -197,3 +197,82 @@ test('published object schema does not weaken mutually exclusive review variants
   );
   assert.deepEqual(result.assessment?.requirements[0].checks, checklist.requirements[0].checks);
 });
+
+const proseOnly = (): ModelTurn => ({
+  content: 'Finishing the draft now.',
+  calls: [],
+  truncated: false,
+  usage: { inputTokens: 1, outputTokens: 1, cost: 0 },
+});
+
+test('a changed valid draft recovers a no-tool response through an actual finish tool', async () => {
+  const turns = [paint(), turn('review_design', checklist), proseOnly(), finish('canonical')];
+  const result = await runAgent({
+    scene,
+    messages,
+    maxCalls: 4,
+    context: { allowVisualReview: false },
+    client: {
+      async complete(history) {
+        if (turns.length === 1)
+          assert.match(String(history.at(-1)?.content), /Text alone cannot finish/);
+        return turns.shift()!;
+      },
+    },
+  });
+  assert.equal(result.usage.calls, 4);
+  assert.equal(result.needsConfirmation, true);
+  assert.equal(result.assessment?.requirements[0].status, 'fulfilled');
+});
+
+test('no-tool recovery retains the unchanged-site failure and strict idle and call bounds', async () => {
+  let calls = 0;
+  await assert.rejects(
+    runAgent({
+      scene,
+      messages,
+      client: {
+        async complete() {
+          calls++;
+          return proseOnly();
+        },
+      },
+    }),
+    /did not use the design tools/,
+  );
+  assert.equal(calls, 1);
+  calls = 0;
+  await assert.rejects(
+    runAgent({
+      scene,
+      messages,
+      maxCalls: 10,
+      context: { allowVisualReview: false },
+      client: {
+        async complete() {
+          calls++;
+          return calls === 1 ? paint() : proseOnly();
+        },
+      },
+    }),
+    /did not use the design tools/,
+  );
+  assert.equal(calls, 4);
+  calls = 0;
+  await assert.rejects(
+    runAgent({
+      scene,
+      messages,
+      maxCalls: 2,
+      context: { allowVisualReview: false },
+      client: {
+        async complete() {
+          calls++;
+          return calls === 1 ? paint() : proseOnly();
+        },
+      },
+    }),
+    /did not use the design tools/,
+  );
+  assert.equal(calls, 2);
+});

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { roomSlabs } from '../src/renderGeometry';
 import { emptyScene, makeRoom, type Room, type Scene } from '../shared/model';
 import { validateDesign } from '../shared/design';
 import {
@@ -398,4 +399,143 @@ test('quality schemas bound explicit commitments and inspection remains determin
   const assertion: QualityAssertion = qualityAssertionSchema.parse(glazing());
   evaluateQualityAssertion(source, assertion);
   assert.deepEqual(source, before);
+});
+
+test('stacked-volume evidence reports the full pavilion and distinguishes its covered lower flat roof', () => {
+  const lower = room({ id: 'entry', height: 2.8, palette: 'limestone' });
+  const upper = room({
+    id: 'gallery',
+    elevation: 2.8,
+    height: 2.6,
+    palette: 'cedar',
+    roof: { style: 'pitched', pitch: 24, direction: 'east' },
+  });
+  const source = house(lower, upper);
+  const evidence = inspectDesignQuality(source).stackedVolumes;
+  assert.equal(evidence.length, 1);
+  const stack = evidence[0];
+  assert.deepEqual(stack.roomIds, ['entry', 'gallery']);
+  assert.equal(stack.lowerBase.baseElevation, 0);
+  assert.equal(stack.lowerBase.height, 2.8);
+  assert.equal(stack.topWalls.eaveElevation, 5.4);
+  assert.equal(stack.topVisibleRoof?.style, 'pitched');
+  assert.equal(stack.totalHeight, 5.4 + 4 * Math.tan((24 * Math.PI) / 180));
+  assert.equal(stack.topVisibleRoof?.maximumElevation, stack.totalHeight);
+  assert.equal(stack.coveredLowerRoofs[0].style, 'flat');
+  assert.equal(stack.coveredLowerRoofs[0].coveredByRoomId, 'gallery');
+  assert.equal(stack.lowerBase.palettes.north, 'limestone');
+  assert.equal(stack.topWalls.palettes.north, 'cedar');
+});
+
+test('stacked grouping excludes partial footprints, adjacent rooms, elevation gaps and nonflat lower roofs', () => {
+  const lower = room({ id: 'lower', height: 3 });
+  const upper = room({ id: 'upper', elevation: 3 });
+  for (const patch of [
+    { x: 0.001 },
+    { width: 7.9 },
+    { x: 8 },
+    { elevation: 3.001 },
+    { kind: 'terrace' as const },
+  ]) {
+    assert.deepEqual(
+      inspectDesignQuality(house(lower, { ...upper, ...patch })).stackedVolumes,
+      [],
+      JSON.stringify(patch),
+    );
+  }
+  assert.deepEqual(
+    inspectDesignQuality(house({ ...lower, roof: { style: 'pitched', pitch: 20 } }, upper))
+      .stackedVolumes,
+    [],
+  );
+  assert.deepEqual(
+    inspectDesignQuality(house(lower, room({ id: 'neighbor', x: 8 }))).stackedVolumes,
+    [],
+  );
+});
+
+test('stacked evidence uses directional roof profiles and qualifies higher partial coverage', () => {
+  for (const direction of ['north', 'south', 'east', 'west'] as const) {
+    const lower = room({ id: 'lower', elevation: 4, height: 3 });
+    const upper = room({
+      id: 'upper',
+      elevation: 7,
+      height: 3,
+      roof: { style: 'single-pitch', pitch: 20, direction },
+    });
+    const source = house(lower, upper);
+    const stack = inspectDesignQuality(source).stackedVolumes[0];
+    const span = direction === 'east' || direction === 'west' ? 8 : 6;
+    assert.equal(stack.totalHeight, 6 + span * Math.tan((20 * Math.PI) / 180));
+    const qualified = inspectDesignQuality(
+      house(lower, upper, room({ id: 'higher', elevation: 15, width: 4 })),
+    ).stackedVolumes[0];
+    assert.equal(qualified.topVisibleRoof, null);
+    assert.deepEqual(qualified.higherOverlappingRoomIds, ['higher']);
+    assert.equal(qualified.topRoof.maximumElevation, stack.topRoof.maximumElevation);
+  }
+});
+
+test('stacked architectural evidence does not validate or repair an illegal stair link', () => {
+  const source = house(room({ id: 'lower' }), room({ id: 'upper', elevation: 3 }));
+  source.stairs = [
+    { id: 'bad-stair', x: 20, z: 0, elevation: 0, rise: 3, width: 1.2, run: 4, rotation: 0 },
+  ];
+  source.design = {
+    groups: [],
+    connections: [],
+    requirements: [],
+    stairLinks: [{ stairId: 'bad-stair', lowerRoomId: 'lower', upperRoomId: 'upper' }],
+  };
+  const before = structuredClone(source);
+  const errors = validateDesign(source).filter((issue) => issue.severity === 'error');
+  assert.ok(errors.length > 0);
+  const quality = inspectDesignQuality(source);
+  assert.equal(quality.stackedVolumes.length, 1);
+  assert.equal(quality.features.verifiedStairLinks.length, 0);
+  assert.ok(quality.features.stairLinkIssues.length > 0);
+  assert.deepEqual(
+    validateDesign(source).filter((issue) => issue.severity === 'error'),
+    errors,
+  );
+  assert.deepEqual(source, before);
+});
+
+test('stacked evidence supports unambiguous multilevel chains without merging duplicate branches', () => {
+  const lower = room({ id: 'lower' });
+  const middle = room({ id: 'middle', elevation: 3 });
+  const upper = room({ id: 'upper', elevation: 6 });
+  assert.deepEqual(
+    inspectDesignQuality(house(lower, middle, upper)).stackedVolumes.map((stack) => stack.roomIds),
+    [['lower', 'middle', 'upper']],
+  );
+  assert.deepEqual(
+    inspectDesignQuality(house(lower, middle, { ...middle, id: 'duplicate' })).stackedVolumes,
+    [],
+  );
+});
+
+test('renderer-tolerated near-eave roof clipping qualifies the nominal stacked roof profile', () => {
+  const lower = room({ id: 'lower', height: 3 });
+  const upper = room({
+    id: 'upper',
+    elevation: 3,
+    height: 3,
+    roof: { style: 'pitched', pitch: 24, direction: 'east' },
+  });
+  const partial = room({ id: 'partial', elevation: 5.99, width: 4, depth: 4 });
+  const source = house(lower, upper, partial);
+  assert.deepEqual(
+    validateDesign(source).filter((issue) => issue.severity === 'error'),
+    [],
+  );
+  assert.equal(roomSlabs(source, upper).roofClipped, true);
+  const stack = inspectDesignQuality(source).stackedVolumes[0];
+  assert.equal(stack.roofClipped, true);
+  assert.equal(stack.topVisibleRoof, null);
+  assert.equal(stack.totalHeight, 6);
+  assert.equal(stack.topRoof.maximumElevation, 6 + 4 * Math.tan((24 * Math.PI) / 180));
+  assert.match(stack.topRoof.profileBasis, /nominal unclipped/);
+  assert.deepEqual(stack.higherOverlappingRoomIds, ['partial']);
+  assert.match(stack.roofVisibility, /renderer clips/);
 });
