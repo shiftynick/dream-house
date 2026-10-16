@@ -129,6 +129,7 @@ function roomProperties(scene: Scene, room: Room) {
       effective: effectiveSurfacePalettes(scene, room),
       palette: room.palette,
       overrides: room.surfacePalettes,
+      furnitureFinishes: room.furnitureFinishes,
     },
     furniture: worldFurniture(scene, room),
   };

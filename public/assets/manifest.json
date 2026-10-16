@@ -12,13 +12,17 @@
         1.0229,
         0.9866
       ],
+      "slots": [
+        "upholstery",
+        "wood"
+      ],
       "upholstery": {
         "mean": 0.35,
         "shade": 0.62
       },
       "triangles": 8916,
       "textureSize": 1024,
-      "bytes": 737772,
+      "bytes": 743144,
       "source": {
         "library": "Poly Haven",
         "id": "modern_arm_chair_01",
@@ -41,6 +45,10 @@
         0.39,
         0.6
       ],
+      "slots": [
+        "stone",
+        "wood"
+      ],
       "stretch": {
         "x": [
           -0.32,
@@ -53,7 +61,7 @@
       },
       "triangles": 4504,
       "textureSize": 1024,
-      "bytes": 320152,
+      "bytes": 325792,
       "source": {
         "library": "Poly Haven",
         "id": "modern_coffee_table_01",
@@ -76,6 +84,10 @@
         0.7095,
         0.8178
       ],
+      "slots": [
+        "upholstery",
+        "wood"
+      ],
       "stretch": {
         "x": [
           -0.34,
@@ -88,7 +100,7 @@
       },
       "triangles": 2728,
       "textureSize": 1024,
-      "bytes": 499004,
+      "bytes": 504620,
       "source": {
         "library": "Poly Haven",
         "id": "sofa_02",
@@ -313,6 +325,770 @@
         ],
         "license": "CC0-1.0",
         "url": "https://polyhaven.com/a/aerial_grass_rock"
+      }
+    },
+    {
+      "id": "charred-siding",
+      "surface": "charred",
+      "albedo": "luminance",
+      "url": "/assets/textures/charred-siding",
+      "size": [
+        1.6,
+        1.6
+      ],
+      "meanLinear": [
+        0.0119,
+        0.0119,
+        0.0119
+      ],
+      "bytes": 383049,
+      "source": {
+        "library": "Poly Haven",
+        "id": "black_painted_planks",
+        "name": "Black Painted Planks",
+        "authors": [
+          "Dimitrios Savva"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/black_painted_planks"
+      }
+    },
+    {
+      "id": "ashlar",
+      "surface": "ashlar",
+      "albedo": "luminance",
+      "url": "/assets/textures/ashlar",
+      "size": [
+        2,
+        2
+      ],
+      "meanLinear": [
+        0.3855,
+        0.3855,
+        0.3855
+      ],
+      "bytes": 608668,
+      "source": {
+        "library": "Poly Haven",
+        "id": "white_sandstone_blocks_02",
+        "name": "White Sandstone Blocks 02",
+        "authors": [
+          "Rob Tuytel"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/white_sandstone_blocks_02"
+      }
+    },
+    {
+      "id": "stucco",
+      "surface": "stucco",
+      "albedo": "luminance",
+      "url": "/assets/textures/stucco",
+      "size": [
+        1.998,
+        1.998
+      ],
+      "meanLinear": [
+        0.6576,
+        0.6576,
+        0.6576
+      ],
+      "bytes": 419622,
+      "source": {
+        "library": "Poly Haven",
+        "id": "white_stucco",
+        "name": "White Stucco",
+        "authors": [
+          "Amal Kumar"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/white_stucco"
+      }
+    },
+    {
+      "id": "concrete",
+      "surface": "concrete",
+      "albedo": "luminance",
+      "url": "/assets/textures/concrete",
+      "size": [
+        2,
+        2
+      ],
+      "meanLinear": [
+        0.0521,
+        0.0521,
+        0.0521
+      ],
+      "bytes": 349206,
+      "source": {
+        "library": "Poly Haven",
+        "id": "smooth_concrete_floor",
+        "name": "Smooth Concrete Floor",
+        "authors": [
+          "Dimitrios Savva"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/smooth_concrete_floor"
+      }
+    },
+    {
+      "id": "metal-roof",
+      "surface": "metal",
+      "albedo": "luminance",
+      "url": "/assets/textures/metal-roof",
+      "size": [
+        2,
+        2
+      ],
+      "meanLinear": [
+        0.0333,
+        0.0333,
+        0.0333
+      ],
+      "bytes": 289091,
+      "source": {
+        "library": "Poly Haven",
+        "id": "box_profile_metal_sheet",
+        "name": "Box Profile Metal Sheet",
+        "authors": [
+          "Amal Kumar"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/box_profile_metal_sheet"
+      }
+    }
+  ],
+  "materials": [
+    {
+      "id": "linen",
+      "name": "Linen",
+      "category": "fabric",
+      "albedo": "luminance",
+      "url": "/assets/textures/linen",
+      "size": [
+        0.271,
+        0.271
+      ],
+      "meanLinear": [
+        0.3938,
+        0.3938,
+        0.3938
+      ],
+      "bytes": 0,
+      "source": {
+        "library": "Poly Haven",
+        "id": "rough_linen",
+        "name": "Rough Linen",
+        "authors": [
+          "colormass",
+          "Rico Cilliers"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/rough_linen"
+      }
+    },
+    {
+      "id": "velvet",
+      "name": "Velvet",
+      "category": "fabric",
+      "albedo": "luminance",
+      "url": "/assets/materials/velvet",
+      "size": [
+        0.284,
+        0.273
+      ],
+      "meanLinear": [
+        0.0692,
+        0.0692,
+        0.0692
+      ],
+      "bytes": 137975,
+      "source": {
+        "library": "Poly Haven",
+        "id": "velour_velvet",
+        "name": "Velour Velvet",
+        "authors": [
+          "colormass",
+          "Rico Cilliers"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/velour_velvet"
+      }
+    },
+    {
+      "id": "boucle",
+      "name": "Bouclé",
+      "category": "fabric",
+      "albedo": "luminance",
+      "url": "/assets/materials/boucle",
+      "size": [
+        0.134,
+        0.132
+      ],
+      "meanLinear": [
+        0.6723,
+        0.6723,
+        0.6723
+      ],
+      "bytes": 204799,
+      "source": {
+        "library": "Poly Haven",
+        "id": "curly_teddy_natural",
+        "name": "Curly Teddy Natural",
+        "authors": [
+          "colormass",
+          "Rico Cilliers"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/curly_teddy_natural"
+      }
+    },
+    {
+      "id": "corduroy",
+      "name": "Corduroy",
+      "category": "fabric",
+      "albedo": "luminance",
+      "url": "/assets/materials/corduroy",
+      "size": [
+        0.266,
+        0.267
+      ],
+      "meanLinear": [
+        0.2828,
+        0.2828,
+        0.2828
+      ],
+      "bytes": 192373,
+      "source": {
+        "library": "Poly Haven",
+        "id": "ribbed_corduroy",
+        "name": "Ribbed Corduroy",
+        "authors": [
+          "colormass",
+          "Rico Cilliers"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/ribbed_corduroy"
+      }
+    },
+    {
+      "id": "herringbone-wool",
+      "name": "Herringbone wool",
+      "category": "fabric",
+      "albedo": "luminance",
+      "url": "/assets/textures/wool-rug",
+      "size": [
+        0.27,
+        0.276
+      ],
+      "meanLinear": [
+        0.1829,
+        0.1829,
+        0.1829
+      ],
+      "bytes": 0,
+      "source": {
+        "library": "Poly Haven",
+        "id": "poly_wool_herringbone",
+        "name": "Poly Wool Herringbone",
+        "authors": [
+          "colormass",
+          "Rico Cilliers"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/poly_wool_herringbone"
+      }
+    },
+    {
+      "id": "jute",
+      "name": "Jute weave",
+      "category": "fabric",
+      "albedo": "luminance",
+      "url": "/assets/materials/jute",
+      "size": [
+        1.369,
+        1.369
+      ],
+      "meanLinear": [
+        0.2993,
+        0.2993,
+        0.2993
+      ],
+      "bytes": 198415,
+      "source": {
+        "library": "Poly Haven",
+        "id": "hessian_380",
+        "name": "Hessian 380",
+        "authors": [
+          "colormass",
+          "Rico Cilliers"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/hessian_380"
+      }
+    },
+    {
+      "id": "plaid-wool",
+      "name": "Plaid wool",
+      "category": "fabric",
+      "albedo": "photo",
+      "url": "/assets/materials/plaid-wool",
+      "size": [
+        0.315,
+        0.39
+      ],
+      "meanLinear": [
+        0.2383,
+        0.203,
+        0.1639
+      ],
+      "bytes": 233293,
+      "source": {
+        "library": "Poly Haven",
+        "id": "wool_boucle",
+        "name": "Wool Boucle",
+        "authors": [
+          "colormass",
+          "Rico Cilliers"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/wool_boucle"
+      }
+    },
+    {
+      "id": "leather-cognac",
+      "name": "Cognac leather",
+      "category": "leather",
+      "albedo": "photo",
+      "url": "/assets/materials/leather-cognac",
+      "size": [
+        0.5,
+        0.5
+      ],
+      "meanLinear": [
+        0.2231,
+        0.0787,
+        0.0118
+      ],
+      "bytes": 829812,
+      "source": {
+        "library": "Poly Haven",
+        "id": "fabric_leather_02",
+        "name": "Fabric Leather 02",
+        "authors": [
+          "Rob Tuytel"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/fabric_leather_02"
+      }
+    },
+    {
+      "id": "leather-espresso",
+      "name": "Espresso leather",
+      "category": "leather",
+      "albedo": "photo",
+      "url": "/assets/materials/leather-espresso",
+      "size": [
+        0.4,
+        0.4
+      ],
+      "meanLinear": [
+        0.0832,
+        0.0273,
+        0.0056
+      ],
+      "bytes": 1243861,
+      "source": {
+        "library": "Poly Haven",
+        "id": "brown_leather",
+        "name": "Brown Leather",
+        "authors": [
+          "Rob Tuytel"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/brown_leather"
+      }
+    },
+    {
+      "id": "leather-dyed",
+      "name": "Leather, palette colour",
+      "category": "leather",
+      "albedo": "luminance",
+      "url": "/assets/materials/leather-dyed",
+      "size": [
+        0.3,
+        0.3
+      ],
+      "meanLinear": [
+        0.2867,
+        0.2867,
+        0.2867
+      ],
+      "bytes": 517305,
+      "source": {
+        "library": "Poly Haven",
+        "id": "leather_white",
+        "name": "Leather White",
+        "authors": [
+          "Rob Tuytel"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/leather_white"
+      }
+    },
+    {
+      "id": "oak",
+      "name": "Natural oak",
+      "category": "wood",
+      "albedo": "photo",
+      "url": "/assets/textures/oak-veneer",
+      "size": [
+        1.83,
+        1.83
+      ],
+      "meanLinear": [
+        0.2276,
+        0.2276,
+        0.2276
+      ],
+      "bytes": 0,
+      "source": {
+        "library": "Poly Haven",
+        "id": "oak_veneer_01",
+        "name": "Oak Veneer 01",
+        "authors": [
+          "Jenelle van Heerden"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/oak_veneer_01"
+      }
+    },
+    {
+      "id": "walnut",
+      "name": "Walnut",
+      "category": "wood",
+      "albedo": "photo",
+      "url": "/assets/materials/walnut",
+      "size": [
+        1.8,
+        1.8
+      ],
+      "meanLinear": [
+        0.2557,
+        0.1428,
+        0.0826
+      ],
+      "bytes": 318801,
+      "source": {
+        "library": "Poly Haven",
+        "id": "walnut_veneer",
+        "name": "Walnut Veneer",
+        "authors": [
+          "Jenelle van Heerden"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/walnut_veneer"
+      }
+    },
+    {
+      "id": "pale-oak",
+      "name": "Pale oak",
+      "category": "wood",
+      "albedo": "photo",
+      "url": "/assets/materials/pale-oak",
+      "size": [
+        1,
+        1
+      ],
+      "meanLinear": [
+        0.7207,
+        0.5194,
+        0.3447
+      ],
+      "bytes": 216829,
+      "source": {
+        "library": "Poly Haven",
+        "id": "silver_oak_veneer_01",
+        "name": "Silver Oak Veneer 01",
+        "authors": [
+          "Jenelle van Heerden"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/silver_oak_veneer_01"
+      }
+    },
+    {
+      "id": "teak",
+      "name": "Teak",
+      "category": "wood",
+      "albedo": "photo",
+      "url": "/assets/materials/teak",
+      "size": [
+        1,
+        1
+      ],
+      "meanLinear": [
+        0.4326,
+        0.2241,
+        0.0954
+      ],
+      "bytes": 360737,
+      "source": {
+        "library": "Poly Haven",
+        "id": "teak_veneer",
+        "name": "Teak Veneer",
+        "authors": [
+          "Jenelle van Heerden"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/teak_veneer"
+      }
+    },
+    {
+      "id": "ebonised-oak",
+      "name": "Ebonised oak",
+      "category": "wood",
+      "albedo": "photo",
+      "url": "/assets/materials/ebonised-oak",
+      "size": [
+        1,
+        1
+      ],
+      "meanLinear": [
+        0.092,
+        0.0811,
+        0.0752
+      ],
+      "bytes": 204369,
+      "source": {
+        "library": "Poly Haven",
+        "id": "flamed_black_veneer",
+        "name": "Flamed Black Veneer",
+        "authors": [
+          "Jenelle van Heerden"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/flamed_black_veneer"
+      }
+    },
+    {
+      "id": "brushed-steel",
+      "name": "Brushed steel",
+      "category": "metal",
+      "albedo": "photo",
+      "url": "/assets/materials/brushed-steel",
+      "size": [
+        0.5,
+        0.5
+      ],
+      "meanLinear": [
+        0.2916,
+        0.2982,
+        0.3153
+      ],
+      "metal": true,
+      "bytes": 327256,
+      "source": {
+        "library": "ambientCG",
+        "id": "Metal009",
+        "name": "Metal 009",
+        "authors": [
+          "ambientCG (Lennart Demes)"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://ambientcg.com/a/Metal009"
+      }
+    },
+    {
+      "id": "brass",
+      "name": "Satin brass",
+      "category": "metal",
+      "albedo": "photo",
+      "url": "/assets/materials/brass",
+      "size": [
+        0.5,
+        0.5
+      ],
+      "meanLinear": [
+        0.8946,
+        0.6723,
+        0.2849
+      ],
+      "metal": true,
+      "bytes": 128714,
+      "source": {
+        "library": "ambientCG",
+        "id": "Metal042A",
+        "name": "Metal 042 A",
+        "authors": [
+          "ambientCG (Lennart Demes)"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://ambientcg.com/a/Metal042A"
+      }
+    },
+    {
+      "id": "blackened-steel",
+      "name": "Blackened steel",
+      "category": "metal",
+      "albedo": "photo",
+      "url": "/assets/materials/blackened-steel",
+      "size": [
+        0.5,
+        0.5
+      ],
+      "meanLinear": [
+        0.1082,
+        0.1082,
+        0.1131
+      ],
+      "metal": true,
+      "bytes": 339111,
+      "source": {
+        "library": "ambientCG",
+        "id": "Metal046A",
+        "name": "Metal 046 A",
+        "authors": [
+          "ambientCG (Lennart Demes)"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://ambientcg.com/a/Metal046A"
+      }
+    },
+    {
+      "id": "copper",
+      "name": "Copper",
+      "category": "metal",
+      "albedo": "photo",
+      "url": "/assets/materials/copper",
+      "size": [
+        0.5,
+        0.5
+      ],
+      "meanLinear": [
+        0.4253,
+        0.1666,
+        0.0422
+      ],
+      "metal": true,
+      "bytes": 91151,
+      "source": {
+        "library": "ambientCG",
+        "id": "Metal035",
+        "name": "Metal 035",
+        "authors": [
+          "ambientCG (Lennart Demes)"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://ambientcg.com/a/Metal035"
+      }
+    },
+    {
+      "id": "white-marble",
+      "name": "White marble",
+      "category": "stone",
+      "albedo": "photo",
+      "url": "/assets/materials/white-marble",
+      "size": [
+        1.5,
+        1.5
+      ],
+      "meanLinear": [
+        0.7445,
+        0.7241,
+        0.6831
+      ],
+      "bytes": 514045,
+      "source": {
+        "library": "ambientCG",
+        "id": "Marble001",
+        "name": "Marble 001",
+        "authors": [
+          "ambientCG (Lennart Demes)"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://ambientcg.com/a/Marble001"
+      }
+    },
+    {
+      "id": "black-marble",
+      "name": "Black marble",
+      "category": "stone",
+      "albedo": "photo",
+      "url": "/assets/materials/black-marble",
+      "size": [
+        1.5,
+        1.5
+      ],
+      "meanLinear": [
+        0.0541,
+        0.0579,
+        0.056
+      ],
+      "bytes": 374167,
+      "source": {
+        "library": "ambientCG",
+        "id": "Marble016",
+        "name": "Marble 016",
+        "authors": [
+          "ambientCG (Lennart Demes)"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://ambientcg.com/a/Marble016"
+      }
+    },
+    {
+      "id": "travertine",
+      "name": "Travertine",
+      "category": "stone",
+      "albedo": "photo",
+      "url": "/assets/materials/travertine",
+      "size": [
+        1.2,
+        1.2
+      ],
+      "meanLinear": [
+        0.7399,
+        0.5983,
+        0.4132
+      ],
+      "bytes": 190686,
+      "source": {
+        "library": "ambientCG",
+        "id": "Travertine009",
+        "name": "Travertine 009",
+        "authors": [
+          "ambientCG (Lennart Demes)"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://ambientcg.com/a/Travertine009"
+      }
+    },
+    {
+      "id": "polished-concrete",
+      "name": "Polished concrete",
+      "category": "stone",
+      "albedo": "photo",
+      "url": "/assets/materials/polished-concrete",
+      "size": [
+        2,
+        2
+      ],
+      "meanLinear": [
+        0.482,
+        0.482,
+        0.482
+      ],
+      "bytes": 316673,
+      "source": {
+        "library": "ambientCG",
+        "id": "Concrete034",
+        "name": "Concrete 034",
+        "authors": [
+          "ambientCG (Lennart Demes)"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://ambientcg.com/a/Concrete034"
       }
     }
   ],

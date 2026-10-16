@@ -2124,3 +2124,31 @@ kbd {
 .furniture-warnings summary {
   cursor: pointer;
 }
+.finish-controls {
+  border: 0;
+  margin: 14px 0 4px;
+  padding: 0;
+  min-width: 0;
+}
+.finish-controls legend {
+  font-size: 11px;
+  color: #67735e;
+  margin-bottom: 8px;
+}
+.finish-controls .field-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 9px;
+}
+.finish-slot {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.finish-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  border: 1px solid #cfd4c4;
+  display: inline-block;
+}

@@ -39,6 +39,24 @@ export const furnitureKindSchema = z.enum([
   'toilet',
   'rug',
 ]);
+/** Swappable finish slots. Furniture models name their materials after these;
+ * a slot without a chosen finish keeps the model's own photographed material. */
+export const finishSlotSchema = z.enum(['upholstery', 'wood', 'metal', 'stone', 'rug']);
+export type FinishSlot = z.infer<typeof finishSlotSchema>;
+/** Finish library or catalog model ID (see shared/asset-catalog.json). Unknown IDs
+ * render with the model's own materials rather than failing. */
+export const assetIdSchema = z
+  .string()
+  .regex(/^[a-z0-9][a-z0-9-]*$/)
+  .max(60);
+export const finishesSchema = z.object({
+  upholstery: assetIdSchema.optional(),
+  wood: assetIdSchema.optional(),
+  metal: assetIdSchema.optional(),
+  stone: assetIdSchema.optional(),
+  rug: assetIdSchema.optional(),
+});
+export type Finishes = z.infer<typeof finishesSchema>;
 /** Positions are room-local meters; rotation is yaw in degrees, matching stairs. */
 export const furnitureSchema = z.object({
   id: z.string().min(1).max(60),
@@ -51,6 +69,10 @@ export const furnitureSchema = z.object({
   depth: z.number().min(0.2).max(30),
   height: z.number().min(0.02).max(4),
   palette: paletteSchema.optional(),
+  /** Catalog model for this piece; absent = the default model for its kind. */
+  model: assetIdSchema.optional(),
+  /** Finish per slot for this piece; falls back to the room's furnitureFinishes. */
+  finishes: finishesSchema.optional(),
 });
 export type Furniture = z.infer<typeof furnitureSchema>;
 export type FurnitureKind = z.infer<typeof furnitureKindSchema>;
@@ -92,6 +114,8 @@ export const roomSchema = z.object({
   surfacePalettes: surfacePalettesSchema.optional(),
   roof: roofSchema.optional(),
   wallOpenings: z.array(wallOpeningSchema).max(64).optional(),
+  /** Default finish per slot for every piece in this room. */
+  furnitureFinishes: finishesSchema.optional(),
   // Absent = the legacy schematic layout; [] = deliberately unfurnished.
   furniture: z.array(furnitureSchema).max(32).optional(),
 });

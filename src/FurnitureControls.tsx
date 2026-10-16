@@ -4,6 +4,8 @@ import { furnitureCatalog, makeFurniture, roomFurniture } from '../shared/furnit
 import { inspectRoomFurniture } from '../shared/spatial';
 import type { DesignCommand } from '../shared/design';
 import type { Furniture, FurnitureKind, Room, Scene } from '../shared/model';
+import { finishSlots, pieceSlots } from '../shared/finishes';
+import { FinishControls } from './FinishControls';
 
 export function FurnitureControls({
   scene,
@@ -59,6 +61,35 @@ export function FurnitureControls({
       >
         Arrange existing furniture
       </button>
+      {selected ? (
+        <FinishControls
+          label="Piece finishes"
+          slots={pieceSlots(selected)}
+          value={selected.finishes}
+          inherited={room.furnitureFinishes ?? {}}
+          disabled={disabled}
+          onChange={(finishes) =>
+            onApply([
+              {
+                type: 'update_furniture',
+                roomId: room.id,
+                furnitureId: selected.id,
+                patch: { finishes },
+              },
+            ])
+          }
+        />
+      ) : (
+        <FinishControls
+          label="Room furniture finishes"
+          slots={finishSlots.filter((slot) => items.some((item) => pieceSlots(item).includes(slot)))}
+          value={room.furnitureFinishes}
+          disabled={disabled}
+          onChange={(furnitureFinishes) =>
+            onApply([{ type: 'update_room', roomId: room.id, patch: { furnitureFinishes } }])
+          }
+        />
+      )}
       {draft && (
         <form
           onSubmit={(e) => {

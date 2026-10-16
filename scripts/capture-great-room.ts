@@ -40,6 +40,25 @@ if (!source) throw new Error(`No saved project ${projectId}.`);
 const scene = sceneSchema.parse(structuredClone(source.scene));
 const room = scene.rooms.find((item) => item.id === roomId);
 if (!room) throw new Error(`Project ${projectId} has no room ${roomId}.`);
+// --demo-finishes applies library finishes to this isolated copy only.
+if (args.includes('--demo-finishes')) {
+  const byId = (id: string) => scene.rooms.find((item) => item.id === id);
+  const piece = (roomKey: string, kind: string, index = 0) =>
+    (byId(roomKey)?.furniture ?? []).filter((item) => item.kind === kind)[index];
+  const hall = byId('great-hall');
+  if (hall) hall.furnitureFinishes = { wood: 'walnut', metal: 'blackened-steel' };
+  Object.assign(piece('great-hall', 'sofa') ?? {}, { finishes: { upholstery: 'boucle' } });
+  Object.assign(piece('great-hall', 'sofa', 1) ?? {}, { finishes: { upholstery: 'velvet' } });
+  Object.assign(piece('great-hall', 'armchair') ?? {}, { finishes: { upholstery: 'leather-cognac' } });
+  Object.assign(piece('great-hall', 'coffee-table') ?? {}, { finishes: { stone: 'white-marble' } });
+  Object.assign(piece('great-hall', 'rug') ?? {}, { finishes: { rug: 'jute' } });
+  for (const [id, finishes] of [
+    ['primary-suite', { upholstery: 'linen', wood: 'pale-oak' }],
+    ['dining', { wood: 'teak', upholstery: 'leather-espresso' }],
+    ['kitchen', { wood: 'ebonised-oak', stone: 'white-marble', metal: 'brass' }],
+  ] as const)
+    if (byId(id)) byId(id)!.furnitureFinishes = finishes;
+}
 
 // Interior angles use the broker's 68° framing; explicit cameras use the
 // exterior contract (43°) placed inside the room at standing eye height.
@@ -54,6 +73,17 @@ const shots: { id: string; request: RenderRequest }[] = [
   { id: 'fireside-front', request: explicit(at(1.6, 1.45, -3.7), at(-3.2, 0.55, -0.3)) },
   { id: 'fireside-behind', request: explicit(at(-0.6, 1.6, 4.6), at(-2.6, 1.0, -3.6)) },
   { id: 'conversation', request: explicit(at(0.2, 1.35, 5.2), at(3.6, 0.55, 2.3)) },
+  // Whole-house cameras (world meters) for windows, doors, siding and catalog pieces.
+  // They assume the saved Timber Ridge Lodge layout and are skipped with --room.
+  ...(roomId === 'great-hall'
+    ? [
+        { id: 'exterior-south', request: explicit([15, 4.2, 30], [1, 2.2, 10]) },
+        { id: 'exterior-northwest', request: explicit([-22, 6, -26], [-2, 2.5, -4]) },
+        { id: 'entry-door', request: explicit([-3.9, 1.6, 7.1], [1.6, 1.15, 12.9]) },
+        { id: 'suite-windows', request: explicit([7.6, 1.6, -2.2], [15.5, 1.1, -7.2]) },
+        { id: 'kitchen-dining', request: explicit([-7.6, 1.6, 5.5], [-13.5, 0.9, -2.5]) },
+      ]
+    : []),
 ];
 function interior(angle: RenderRequest['angle']) {
   return renderRequestSchema.parse({

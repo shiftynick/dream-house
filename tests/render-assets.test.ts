@@ -82,6 +82,10 @@ test('the committed asset manifest references existing, budgeted files', () => {
       assert.ok(existsSync(file), file);
       bytes += statSync(file).size;
     }
+  for (const item of manifest.materials ?? [])
+    if (item.url.startsWith('/assets/materials/'))
+      for (const map of ['color', 'normal', 'arm']) bytes += statSync(`public${item.url}/${map}.jpg`).size;
   for (const item of manifest.environment ?? []) bytes += statSync(`public${item.url}`).size;
-  assert.ok(bytes < 50e6, `assets total ${bytes} bytes`);
+  // The owner asked to flag committed assets above ~80 MB.
+  assert.ok(bytes < 80e6, `assets total ${bytes} bytes`);
 });

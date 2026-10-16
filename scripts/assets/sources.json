@@ -1,9 +1,11 @@
 {
-  "$comment": "Source list for scripts/assets/build-assets.ts. Every source is CC0 (Poly Haven). Furniture sizes are fitted to each saved piece at runtime; stretch zones (normalized model x, -0.5..0.5) scale only the interior so arms and legs keep their proportions. Texture albedo \"luminance\" stores a grayscale photo so the palette supplies hue; \"photo\" keeps the photographed color.",
+  "$comment": "Source list for scripts/assets/build-assets.ts. Every source is CC0 (Poly Haven). Furniture sizes are fitted to each saved piece at runtime; stretch zones (normalized model x, -0.5..0.5) scale only the interior so arms and legs keep their proportions. Texture albedo \"luminance\" stores a grayscale photo so the palette supplies hue; \"photo\" keeps the photographed color. \"materials\" is the swappable furniture finish library (Poly Haven and ambientCG, both CC0); each entry fits the slots of its category. ambientCG entries give their physical repeat in meters because the library does not record one.",
   "furniture": [
     {
       "id": "armchair-oak-leather",
-      "kinds": ["armchair"],
+      "kinds": [
+        "armchair"
+      ],
       "polyhaven": "modern_arm_chair_01",
       "targetTriangles": 24000,
       "textureSize": 1024,
@@ -15,24 +17,44 @@
     },
     {
       "id": "coffee-table-concrete-oak",
-      "kinds": ["coffee-table"],
+      "kinds": [
+        "coffee-table"
+      ],
       "polyhaven": "modern_coffee_table_01",
       "targetTriangles": 8000,
       "textureSize": 1024,
       "stretch": {
-        "x": [-0.32, 0.32],
-        "z": [-0.3, 0.3]
+        "x": [
+          -0.32,
+          0.32
+        ],
+        "z": [
+          -0.3,
+          0.3
+        ]
       },
-      "rotateZ": 90
+      "rotateZ": 90,
+      "split": [
+        [
+          "modern_coffee_table_01",
+          "wood",
+          "stone"
+        ]
+      ]
     },
     {
       "id": "sofa-tufted-leather",
-      "kinds": ["sofa"],
+      "kinds": [
+        "sofa"
+      ],
       "polyhaven": "sofa_02",
       "targetTriangles": 30000,
       "textureSize": 1024,
       "stretch": {
-        "x": [-0.34, 0.34]
+        "x": [
+          -0.34,
+          0.34
+        ]
       },
       "upholstery": {
         "material": "sofa_02",
@@ -102,6 +124,45 @@
       "size": 1024,
       "albedo": "photo",
       "contrast": 0.8
+    },
+    {
+      "id": "charred-siding",
+      "surface": "charred",
+      "polyhaven": "black_painted_planks",
+      "size": 1024,
+      "albedo": "luminance",
+      "contrast": 0.7
+    },
+    {
+      "id": "ashlar",
+      "surface": "ashlar",
+      "polyhaven": "white_sandstone_blocks_02",
+      "size": 1024,
+      "albedo": "luminance",
+      "contrast": 0.75
+    },
+    {
+      "id": "stucco",
+      "surface": "stucco",
+      "polyhaven": "white_stucco",
+      "size": 1024,
+      "albedo": "luminance"
+    },
+    {
+      "id": "concrete",
+      "surface": "concrete",
+      "polyhaven": "smooth_concrete_floor",
+      "size": 1024,
+      "albedo": "luminance",
+      "contrast": 0.8
+    },
+    {
+      "id": "metal-roof",
+      "surface": "metal",
+      "polyhaven": "box_profile_metal_sheet",
+      "size": 1024,
+      "albedo": "luminance",
+      "contrast": 0.6
     }
   ],
   "environment": [
@@ -110,7 +171,211 @@
       "polyhaven": "alps_field",
       "resolution": "4k",
       "width": 4096,
-      "lights": ["day"]
+      "lights": [
+        "day"
+      ]
+    }
+  ],
+  "materials": [
+    {
+      "id": "linen",
+      "name": "Linen",
+      "category": "fabric",
+      "polyhaven": "rough_linen",
+      "size": 1024,
+      "albedo": "luminance",
+      "texture": "linen"
+    },
+    {
+      "id": "velvet",
+      "name": "Velvet",
+      "category": "fabric",
+      "polyhaven": "velour_velvet",
+      "size": 512,
+      "albedo": "luminance"
+    },
+    {
+      "id": "boucle",
+      "name": "Bouclé",
+      "category": "fabric",
+      "polyhaven": "curly_teddy_natural",
+      "size": 512,
+      "albedo": "luminance",
+      "scale": 0.4
+    },
+    {
+      "id": "corduroy",
+      "name": "Corduroy",
+      "category": "fabric",
+      "polyhaven": "ribbed_corduroy",
+      "size": 512,
+      "albedo": "luminance"
+    },
+    {
+      "id": "herringbone-wool",
+      "name": "Herringbone wool",
+      "category": "fabric",
+      "polyhaven": "poly_wool_herringbone",
+      "size": 1024,
+      "albedo": "luminance",
+      "texture": "wool-rug"
+    },
+    {
+      "id": "jute",
+      "name": "Jute weave",
+      "category": "fabric",
+      "polyhaven": "hessian_380",
+      "size": 512,
+      "albedo": "luminance",
+      "scale": 5
+    },
+    {
+      "id": "plaid-wool",
+      "name": "Plaid wool",
+      "category": "fabric",
+      "polyhaven": "wool_boucle",
+      "size": 512,
+      "albedo": "photo"
+    },
+    {
+      "id": "leather-cognac",
+      "name": "Cognac leather",
+      "category": "leather",
+      "polyhaven": "fabric_leather_02",
+      "size": 1024,
+      "albedo": "photo"
+    },
+    {
+      "id": "leather-espresso",
+      "name": "Espresso leather",
+      "category": "leather",
+      "polyhaven": "brown_leather",
+      "size": 1024,
+      "albedo": "photo"
+    },
+    {
+      "id": "leather-dyed",
+      "name": "Leather, palette colour",
+      "category": "leather",
+      "polyhaven": "leather_white",
+      "size": 1024,
+      "albedo": "luminance"
+    },
+    {
+      "id": "oak",
+      "name": "Natural oak",
+      "category": "wood",
+      "polyhaven": "oak_veneer_01",
+      "size": 1024,
+      "albedo": "photo",
+      "texture": "oak-veneer"
+    },
+    {
+      "id": "walnut",
+      "name": "Walnut",
+      "category": "wood",
+      "polyhaven": "walnut_veneer",
+      "size": 1024,
+      "albedo": "photo"
+    },
+    {
+      "id": "pale-oak",
+      "name": "Pale oak",
+      "category": "wood",
+      "polyhaven": "silver_oak_veneer_01",
+      "size": 1024,
+      "albedo": "photo",
+      "rotate90": true
+    },
+    {
+      "id": "teak",
+      "name": "Teak",
+      "category": "wood",
+      "polyhaven": "teak_veneer",
+      "size": 1024,
+      "albedo": "photo",
+      "rotate90": true
+    },
+    {
+      "id": "ebonised-oak",
+      "name": "Ebonised oak",
+      "category": "wood",
+      "polyhaven": "flamed_black_veneer",
+      "size": 1024,
+      "albedo": "photo"
+    },
+    {
+      "id": "brushed-steel",
+      "name": "Brushed steel",
+      "category": "metal",
+      "ambientcg": "Metal009",
+      "size": 1024,
+      "albedo": "photo",
+      "meters": 0.5,
+      "rotate90": true
+    },
+    {
+      "id": "brass",
+      "name": "Satin brass",
+      "category": "metal",
+      "ambientcg": "Metal042A",
+      "size": 1024,
+      "albedo": "photo",
+      "meters": 0.5
+    },
+    {
+      "id": "blackened-steel",
+      "name": "Blackened steel",
+      "category": "metal",
+      "ambientcg": "Metal046A",
+      "size": 1024,
+      "albedo": "photo",
+      "meters": 0.5
+    },
+    {
+      "id": "copper",
+      "name": "Copper",
+      "category": "metal",
+      "ambientcg": "Metal035",
+      "size": 1024,
+      "albedo": "photo",
+      "meters": 0.5
+    },
+    {
+      "id": "white-marble",
+      "name": "White marble",
+      "category": "stone",
+      "ambientcg": "Marble001",
+      "size": 1024,
+      "albedo": "photo",
+      "meters": 1.5
+    },
+    {
+      "id": "black-marble",
+      "name": "Black marble",
+      "category": "stone",
+      "ambientcg": "Marble016",
+      "size": 1024,
+      "albedo": "photo",
+      "meters": 1.5
+    },
+    {
+      "id": "travertine",
+      "name": "Travertine",
+      "category": "stone",
+      "ambientcg": "Travertine009",
+      "size": 1024,
+      "albedo": "photo",
+      "meters": 1.2
+    },
+    {
+      "id": "polished-concrete",
+      "name": "Polished concrete",
+      "category": "stone",
+      "ambientcg": "Concrete034",
+      "size": 1024,
+      "albedo": "photo",
+      "meters": 2
     }
   ]
 }

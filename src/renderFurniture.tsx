@@ -2,7 +2,8 @@ import { useEffect, useMemo } from 'react';
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
-import type { Furniture, FurnitureKind } from '../shared/model';
+import type { FinishSlot, Finishes, Furniture, FurnitureKind } from '../shared/model';
+import { modelMaterialSlot, proceduralSlot, resolveFinish } from '../shared/finishes';
 import { physicalUvs } from './renderMeshes';
 import {
   fittedModelGeometry,
@@ -115,7 +116,7 @@ export function furnitureParts(kind: FurnitureKind): FurniturePart[] {
     if (kind === 'nightstand') {
       box([0, 0.67, 0], [0.92, 0.31, 0.9], 'wood', 0.016);
       box([0, 0.67, 0.455], [0.85, 0.27, 0.025], 'wood', 0.007);
-      box([0, 0.68, 0.477], [0.22, 0.025, 0.035], 'frame', 0.006);
+      box([0, 0.68, 0.477], [0.22, 0.025, 0.035], 'chrome', 0.006);
     }
   } else if (kind === 'bed') {
     for (const x of [-0.4, 0.4]) for (const z of [-0.39, 0.39]) leg(x, z, 0.15, 'wood', 0.045);
@@ -154,13 +155,15 @@ export function furnitureParts(kind: FurnitureKind): FurniturePart[] {
     box([0, 0.974, -0.31], [0.89, 0.045, 0.36], 'ceramic', 0.016);
     box([0.2, 0.84, -0.13], [0.15, 0.045, 0.025], 'chrome', 0.006);
   } else {
-    box([0, 0.07, 0], [0.89, 0.14, 0.85], 'frame', 0.006);
+    // A recessed toe-kick in the carcass finish keeps cabinets within four draw batches.
+    box([0, 0.07, 0], [0.89, 0.14, 0.85], 'wood', 0.006);
     box([0, 0.52, 0], [0.97, 0.87, 0.94], 'wood', 0.01);
     const doors = kind === 'wardrobe' ? 3 : 4;
     for (let i = 0; i < doors; i++) {
       const x = -0.475 + ((i + 0.5) * 0.95) / doors;
       box([x, 0.54, 0.474], [0.95 / doors - 0.007, 0.79, 0.025], 'wood', 0.004);
-      box([x + (0.95 / doors) * 0.31, 0.66, 0.491], [0.007, 0.15, 0.018], 'frame', 0.003);
+      // Handles are hardware: the metal finish slot.
+      box([x + (0.95 / doors) * 0.31, 0.66, 0.491], [0.007, 0.15, 0.018], 'chrome', 0.003);
     }
     box([0, 0.976, 0], [1, 0.048, 1], kind === 'wardrobe' ? 'wood' : 'worktop', 0.014);
     if (kind === 'island' || kind === 'vanity') {
@@ -429,10 +432,23 @@ function contactMaterial() {
   return contact;
 }
 
+export type FinishMaterial = (
+  id: string,
+  slot: FinishSlot,
+  /** UV channel holding meter-scale coordinates: 1 on models, 0 on procedural parts. */
+  channel: number,
+  /** Palette color for grayscale (tinted) finishes. */
+  palette?: string,
+  /** The model material being replaced, whose form maps upholstery keeps. */
+  source?: THREE.Material,
+) => THREE.Material | undefined;
+
 export function FurnitureMesh({
   item,
   materials,
   modelMaterial,
+  finishMaterial,
+  roomFinishes,
   selected,
   onSelect,
 }: {
@@ -440,11 +456,17 @@ export function FurnitureMesh({
   materials: Record<string, THREE.Material>;
   /** Room-lit material for a model's own PBR material; absent in clay/wireframe. */
   modelMaterial?: (source: THREE.Material, tint?: THREE.Color) => THREE.Material;
+  /** Room-lit library finish; absent in clay/wireframe. Undefined while loading. */
+  finishMaterial?: FinishMaterial;
+  roomFinishes?: Finishes;
   selected: boolean;
   onSelect: () => void;
 }) {
   const assetsVersion = useRenderAssets();
-  const model = useMemo(() => furnitureModel(item.kind), [item.kind, assetsVersion]);
+  const model = useMemo(
+    () => furnitureModel(item.kind, item.model),
+    [item.kind, item.model, assetsVersion],
+  );
   const pieces = useMemo(
     () =>
       model
@@ -463,6 +485,28 @@ export function FurnitureMesh({
   useEffect(() => () => pieces.forEach((part) => part.geometry.dispose()), [pieces]);
   const fabric = materials.fabric?.userData.paletteColor as string | undefined;
   const tint = useMemo(() => model && upholsteryTint(model.asset, fabric), [model, fabric]);
+  const paletteFor = (slot: FinishSlot, part?: string) => {
+    const color =
+      slot === 'rug'
+        ? (materials.rug?.userData.paletteColor as string | undefined)
+        : slot === 'upholstery'
+          ? fabric
+          : undefined;
+    // Procedural mattresses and bindings stay a shade darker than the cover.
+    return color && part === 'seam'
+      ? '#' + new THREE.Color(color).multiplyScalar(0.85).getHexString()
+      : color;
+  };
+  const finished = (
+    slot: FinishSlot | undefined,
+    channel: number,
+    part?: string,
+    source?: THREE.Material,
+  ) => {
+    if (!slot || !finishMaterial) return undefined;
+    const id = resolveFinish(item, { furnitureFinishes: roomFinishes }, slot);
+    return id ? finishMaterial(id, slot, channel, paletteFor(slot, part), source) : undefined;
+  };
   return (
     <group
       position={[item.x, 0, item.z]}
@@ -479,10 +523,15 @@ export function FurnitureMesh({
           geometry={part.geometry}
           material={
             part.source
-              ? modelMaterial
-                ? modelMaterial(part.source, part.source.name === 'upholstery' ? tint : undefined)
-                : materials.fabric
-              : materials[part.material!]
+              ? (finished(modelMaterialSlot(part.source.name), 1, undefined, part.source) ??
+                (modelMaterial
+                  ? modelMaterial(
+                      part.source,
+                      modelMaterialSlot(part.source.name) === 'upholstery' ? tint : undefined,
+                    )
+                  : materials.fabric))
+              : (finished(proceduralSlot(part.material!), 0, part.material!) ??
+                materials[part.material!])
           }
           castShadow
           receiveShadow

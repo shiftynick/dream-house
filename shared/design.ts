@@ -128,6 +128,9 @@ export const commandSchema = z.discriminatedUnion('type', [
           south: wallSchema.optional(),
           east: wallSchema.optional(),
           west: wallSchema.optional(),
+          furnitureFinishes: roomSchema.shape.furnitureFinishes.describe(
+            'Room-wide finish library ID per slot for all furniture; replaces the whole map. Pieces override with update_furniture finishes.',
+          ),
         })
         .strict(),
     })

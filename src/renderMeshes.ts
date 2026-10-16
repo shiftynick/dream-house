@@ -74,6 +74,10 @@ export function slabGeometry(
           metersPerHorizontalMeter,
       );
     }
+    // Top and underside take the roofing; the cut edges take a plain flashing
+    // (material index 1) instead of ribs wrapped across a 0.18 m fascia.
+    geometry.addGroup(0, 12, 0);
+    geometry.addGroup(12, 24, 1);
   }
   return geometry;
 }

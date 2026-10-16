@@ -9,7 +9,7 @@ import { makeSurfaceTextures, surfaceScale, type SurfaceKind } from './renderMat
  * Everything here is additive: a missing manifest, model or texture leaves the
  * procedural furniture and generated surface maps in place. */
 export const ASSET_ROOT = '/assets';
-export type MaterialSurface = SurfaceKind | 'veneer' | 'stone';
+export type MaterialSurface = SurfaceKind | 'veneer' | 'stone' | 'charred' | 'ashlar' | 'stucco';
 type Range = [number, number];
 export type FurnitureAsset = {
   id: string;
@@ -22,6 +22,19 @@ export type FurnitureAsset = {
   /** The material named `upholstery` holds grayscale detail with this linear
    * mean; it is tinted by the palette fabric color times `shade`. */
   upholstery?: { mean: number; shade: number };
+  /** Finish slots named by the model's materials. */
+  slots?: string[];
+};
+/** A swappable finish from the library; loaded on first use. */
+export type MaterialAsset = {
+  id: string;
+  name: string;
+  category: string;
+  url: string;
+  size: [number, number];
+  albedo: 'luminance' | 'photo';
+  meanLinear: [number, number, number];
+  metal?: boolean;
 };
 export type TextureAsset = {
   id: string;
@@ -39,6 +52,7 @@ export type AssetManifest = {
   version: 1;
   furniture: FurnitureAsset[];
   textures: TextureAsset[];
+  materials?: MaterialAsset[];
   environment?: EnvironmentAsset[];
 };
 
@@ -62,12 +76,20 @@ const proceduralFallback: Record<MaterialSurface, SurfaceKind> = {
   metal: 'metal',
   veneer: 'oak',
   stone: 'concrete',
+  charred: 'timber',
+  ashlar: 'concrete',
+  stucco: 'plaster',
 };
 
+type FinishSet = { asset: MaterialAsset; sources: Record<'color' | 'normal' | 'arm', THREE.Source> };
 const state = {
   version: 0,
-  models: new Map<FurnitureKind, FurnitureModel>(),
+  /** By asset ID; `defaults` maps each kind to its first listed model. */
+  models: new Map<string, FurnitureModel>(),
+  defaults: new Map<FurnitureKind, string>(),
   photos: new Map<MaterialSurface, PhotoSet>(),
+  library: new Map<string, MaterialAsset>(),
+  finishes: new Map<string, FinishSet | 'loading' | 'failed'>(),
   backgrounds: new Map<string, HTMLImageElement>(),
   failures: [] as string[],
 };
@@ -124,12 +146,13 @@ export function loadRenderAssets(): Promise<void> {
     }
     const draco = new DRACOLoader().setDecoderPath(`${ASSET_ROOT}/draco/`);
     const loader = new GLTFLoader().setDRACOLoader(draco);
+    for (const asset of manifest.materials ?? []) state.library.set(asset.id, asset);
+    for (const asset of manifest.furniture)
+      for (const kind of asset.kinds) if (!state.defaults.has(kind)) state.defaults.set(kind, asset.id);
     await Promise.all([
       ...manifest.furniture.map(async (asset) => {
         try {
-          const model = await loadModel(loader, asset);
-          for (const kind of asset.kinds)
-            if (!state.models.has(kind)) state.models.set(kind, model);
+          state.models.set(asset.id, await loadModel(loader, asset));
         } catch (error) {
           state.failures.push(`${asset.id}: ${error instanceof Error ? error.message : error}`);
         }
@@ -175,8 +198,64 @@ export function useRenderAssets() {
   return version;
 }
 
-export function furnitureModel(kind: FurnitureKind) {
-  return state.models.get(kind);
+/** The loaded model for a piece: its chosen catalog model when it fits the
+ * kind, else the kind's default; undefined renders the procedural fallback. */
+export function furnitureModel(kind: FurnitureKind, modelId?: string) {
+  const chosen = modelId ? state.models.get(modelId) : undefined;
+  if (chosen?.asset.kinds.includes(kind)) return chosen;
+  const fallback = state.defaults.get(kind);
+  return fallback ? state.models.get(fallback) : undefined;
+}
+
+/** A library finish's decoded maps, or undefined while it loads (a publish
+ * follows) or when it is unknown/failed. Images decode once per page. */
+export function finishSet(id: string) {
+  const entry = state.finishes.get(id);
+  if (entry && entry !== 'loading' && entry !== 'failed') return entry;
+  const asset = state.library.get(id);
+  if (entry || !asset) return undefined;
+  state.finishes.set(id, 'loading');
+  void Promise.all(['color', 'normal', 'arm'].map((map) => loadImage(`${asset.url}/${map}.jpg`)))
+    .then(([color, normal, arm]) => {
+      state.finishes.set(id, {
+        asset,
+        sources: {
+          color: new THREE.Source(color),
+          normal: new THREE.Source(normal),
+          arm: new THREE.Source(arm),
+        },
+      });
+    })
+    .catch((error) => {
+      state.finishes.set(id, 'failed');
+      state.failures.push(`${id}: ${error instanceof Error ? error.message : error}`);
+    })
+    .finally(publish);
+  return undefined;
+}
+
+/** Textures for one material using `channel` UVs (meters). They share decoded
+ * sources, so materials on one canvas share GPU memory; callers dispose them. */
+export function finishMaps(set: FinishSet, channel: number) {
+  const texture = (source: THREE.Source, color = false) => {
+    const map = new THREE.Texture();
+    map.source = source;
+    map.colorSpace = color ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+    map.wrapS = map.wrapT = THREE.RepeatWrapping;
+    map.repeat.set(1 / set.asset.size[0], 1 / set.asset.size[1]);
+    map.channel = channel;
+    map.anisotropy = 8;
+    map.needsUpdate = true;
+    return map;
+  };
+  const arm = texture(set.sources.arm);
+  return {
+    map: texture(set.sources.color, true),
+    normalMap: texture(set.sources.normal),
+    roughnessMap: arm,
+    aoMap: arm,
+    ...(set.asset.metal ? { metalnessMap: arm } : {}),
+  };
 }
 export function photoTexture(surface: MaterialSurface) {
   return state.photos.get(surface)?.asset;
@@ -257,6 +336,27 @@ function axisMap(native: number, target: number, zone: Range | undefined, low: n
   return (value: number) => [mapped(value) + shift, value > a && value < b ? k : 1] as const;
 }
 
+/** Replace the pipeline's per-face projection axis (`uv1`.x: 0 = x, 1 = y,
+ * 2 = z) with box-projected UVs in meters, measured on the fitted piece so a
+ * library finish keeps its real-world scale on stretched zones too. */
+export function projectedUvs(geometry: THREE.BufferGeometry) {
+  const axes = geometry.getAttribute('uv1') as THREE.BufferAttribute | undefined;
+  if (!axes) return;
+  const position = geometry.getAttribute('position') as THREE.BufferAttribute;
+  const uv = new Float32Array(position.count * 2);
+  for (let i = 0; i < position.count; i++) {
+    const axis = Math.round(axes.getX(i));
+    const x = position.getX(i),
+      y = position.getY(i),
+      z = position.getZ(i);
+    // Library grain runs along v: up the piece on vertical faces (legs, panels)
+    // and along the width on horizontal ones (tops, seats).
+    uv[i * 2] = axis === 0 || axis === 1 ? z : x;
+    uv[i * 2 + 1] = axis === 1 ? x : y;
+  }
+  geometry.setAttribute('uv1', new THREE.BufferAttribute(uv, 2));
+}
+
 /** Fit a model to a saved piece's exact envelope. Geometry is owned by the caller. */
 export function fittedModelGeometry(
   model: FurnitureModel,
@@ -284,6 +384,7 @@ export function fittedModelGeometry(
     }
     position.needsUpdate = true;
     if (normal) normal.needsUpdate = true;
+    projectedUvs(geometry);
     geometry.computeBoundingBox();
     geometry.computeBoundingSphere();
     return { geometry, material: part.material };

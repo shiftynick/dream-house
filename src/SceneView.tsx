@@ -34,13 +34,15 @@ import type { DesignCommand } from '../shared/design';
 import { PlanFurniture } from './PlanFurniture';
 import { daylightSkyPixels, interiorExposure } from './renderLighting';
 import { RasterRenderer } from './rasterRenderer';
-import { FurnitureMesh } from './renderFurniture';
+import { FurnitureMesh, type FinishMaterial } from './renderFurniture';
+import { createFinishMaterial, disposeFinishMaterial } from './renderFinishes';
 import { Hearth } from './renderFire';
 import { wallFinishGeometry, wallSurfaceGeometry } from './architecturalFinish';
 import {
   backgroundTexture,
   hasBackground,
   surfaceTextures,
+  finishSet,
   useRenderAssets,
   type MaterialSurface,
 } from './renderAssets';
@@ -227,6 +229,34 @@ function RoomMesh({
           modelMaterials.set(key, material);
           return material;
         };
+  // Library finishes, lit like the room; cached per finish, channel and palette.
+  const finishMaterials = useMemo(() => new Map<string, THREE.Material>(), [roomLit]);
+  useEffect(
+    () => () => finishMaterials.forEach((material) => disposeFinishMaterial(material)),
+    [finishMaterials],
+  );
+  const finishMaterial: FinishMaterial | undefined =
+    quality === 'clay' || quality === 'wireframe'
+      ? undefined
+      : (id, slot, channel, palette, source) => {
+          const set = finishSet(id);
+          if (!set) return undefined;
+          const key = `${id}:${slot}:${channel}:${palette ?? ''}:${source?.uuid ?? ''}`;
+          const cached = finishMaterials.get(key);
+          if (cached) return cached;
+          const material = createFinishMaterial(set, slot, channel, palette, source);
+          if (!outdoor && roomEnvironment) {
+            material.envMap = roomEnvironment;
+            applyRoomIrradiance(
+              material,
+              roomIrradiance(roomEnvironment.image.data as Float32Array),
+              roomEnvironmentIntensity,
+            );
+            material.envMapIntensity = roomEnvironmentIntensity;
+          }
+          finishMaterials.set(key, material);
+          return material;
+        };
   useEffect(
     () => () =>
       Object.values(interiorSets).forEach((set) =>
@@ -237,7 +267,7 @@ function RoomMesh({
   const insideMaterial = (surface: DesignSurface) =>
     interiorSets[surfacePalette(house, r, surface)];
   const wallMaterials = (side: Side, name: string) => {
-    const outside = materialSets[surfacePalette(house, r, side)][name];
+    const outside = materialSets[surfacePalette(house, r, side)][name === 'wall' ? 'siding' : name];
     const inside = insideMaterial(side)[name];
     return [outside, inside];
   };
@@ -474,7 +504,12 @@ function RoomMesh({
           {!cutaway && (
             <>
               {generated.roofs.map((geometry, index) =>
-                generatedMesh(geometry, surfaceMaterial('roof').roof, index, 'roof'),
+                generatedMesh(
+                  geometry,
+                  [surfaceMaterial('roof').roof, surfaceMaterial('roof').roofEdge],
+                  index,
+                  'roof',
+                ),
               )}
               {generated.soffits.map((geometry, index) =>
                 generatedMesh(geometry, insideMaterial('roof').ceiling, `soffit-${index}`, 'roof'),
@@ -488,6 +523,8 @@ function RoomMesh({
           key={item.id}
           item={item}
           modelMaterial={modelMaterial}
+          finishMaterial={finishMaterial}
+          roomFinishes={r.furnitureFinishes}
           materials={
             outdoor
               ? item.palette
@@ -844,6 +881,9 @@ export function Architecture({
             'metal',
             'veneer',
             'stone',
+            'charred',
+            'ashlar',
+            'stucco',
           ] as MaterialSurface[]
         ).map((kind) => [kind, surfaceTextures(kind)]),
       ) as Record<MaterialSurface, ReturnType<typeof surfaceTextures>>,
@@ -951,6 +991,15 @@ export function Architecture({
                 palette === 'cedar' || palette === 'charcoal' ? 'timber' : 'plaster',
                 0.003,
               ),
+              // Exterior cladding: cedar boards, charred boards, limestone ashlar, lime stucco.
+              siding: mat(
+                p.wall,
+                1,
+                ({ cedar: 'timber', charcoal: 'charred', limestone: 'ashlar', chalk: 'stucco' } as const)[
+                  palette
+                ],
+                0.003,
+              ),
               wood: new THREE.MeshPhysicalMaterial({
                 color: clay ? '#e0dcd1' : p.wood,
                 roughness: 0.72,
@@ -968,6 +1017,12 @@ export function Architecture({
               stone: mat('#9a948a', 1, 'stone', 0.006),
               floor: mat(p.floor, 0.9, palette === 'charcoal' ? 'concrete' : 'oak', 0.003),
               roof: mat(p.roof, 0.8, 'metal', 0.012),
+              roofEdge: new THREE.MeshStandardMaterial({
+                color: clay ? '#e0dcd1' : p.roof,
+                roughness: 0.55,
+                metalness: clay ? 0 : 0.35,
+                wireframe,
+              }),
               frame: new THREE.MeshStandardMaterial({
                 color: clay ? '#e0dcd1' : p.accent,
                 roughness: 0.34,
@@ -981,7 +1036,10 @@ export function Architecture({
               }),
               seam: textile(new THREE.Color(fabricColor).multiplyScalar(0.85).getStyle()),
               accentFabric: textile(palette === 'charcoal' ? '#a89b82' : '#998870'),
-              rug: mat(palette === 'charcoal' ? '#8c9089' : '#b8ac97', 1, 'rug', 0.0025),
+              rug: Object.assign(
+                mat(palette === 'charcoal' ? '#8c9089' : '#b8ac97', 1, 'rug', 0.0025),
+                { userData: { paletteColor: palette === 'charcoal' ? '#8c9089' : '#b8ac97' } },
+              ),
               rugEdge: mat('#8f8575', 1, 'rug', 0.001),
               ceramic: mat('#edede7', 0.18),
               basin: mat('#a5afad', 0.16),

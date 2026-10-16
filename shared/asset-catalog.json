@@ -1,0 +1,238 @@
+{
+  "materials": [
+    {
+      "id": "linen",
+      "name": "Linen",
+      "category": "fabric",
+      "swatch": "#a8a8a8",
+      "tinted": true,
+      "attribution": "Rough Linen by colormass, Rico Cilliers (Poly Haven, CC0)"
+    },
+    {
+      "id": "velvet",
+      "name": "Velvet",
+      "category": "fabric",
+      "swatch": "#4a4a4a",
+      "tinted": true,
+      "attribution": "Velour Velvet by colormass, Rico Cilliers (Poly Haven, CC0)"
+    },
+    {
+      "id": "boucle",
+      "name": "Bouclé",
+      "category": "fabric",
+      "swatch": "#d6d6d6",
+      "tinted": true,
+      "attribution": "Curly Teddy Natural by colormass, Rico Cilliers (Poly Haven, CC0)"
+    },
+    {
+      "id": "corduroy",
+      "name": "Corduroy",
+      "category": "fabric",
+      "swatch": "#919191",
+      "tinted": true,
+      "attribution": "Ribbed Corduroy by colormass, Rico Cilliers (Poly Haven, CC0)"
+    },
+    {
+      "id": "herringbone-wool",
+      "name": "Herringbone wool",
+      "category": "fabric",
+      "swatch": "#777777",
+      "tinted": true,
+      "attribution": "Poly Wool Herringbone by colormass, Rico Cilliers (Poly Haven, CC0)"
+    },
+    {
+      "id": "jute",
+      "name": "Jute weave",
+      "category": "fabric",
+      "swatch": "#959595",
+      "tinted": true,
+      "attribution": "Hessian 380 by colormass, Rico Cilliers (Poly Haven, CC0)"
+    },
+    {
+      "id": "plaid-wool",
+      "name": "Plaid wool",
+      "category": "fabric",
+      "swatch": "#867c71",
+      "tinted": false,
+      "attribution": "Wool Boucle by colormass, Rico Cilliers (Poly Haven, CC0)"
+    },
+    {
+      "id": "leather-cognac",
+      "name": "Cognac leather",
+      "category": "leather",
+      "swatch": "#824f1c",
+      "tinted": false,
+      "attribution": "Fabric Leather 02 by Rob Tuytel (Poly Haven, CC0)"
+    },
+    {
+      "id": "leather-espresso",
+      "name": "Espresso leather",
+      "category": "leather",
+      "swatch": "#512e11",
+      "tinted": false,
+      "attribution": "Brown Leather by Rob Tuytel (Poly Haven, CC0)"
+    },
+    {
+      "id": "leather-dyed",
+      "name": "Leather, palette colour",
+      "category": "leather",
+      "swatch": "#929292",
+      "tinted": true,
+      "attribution": "Leather White by Rob Tuytel (Poly Haven, CC0)"
+    },
+    {
+      "id": "oak",
+      "name": "Natural oak",
+      "category": "wood",
+      "swatch": "#838383",
+      "tinted": false,
+      "attribution": "Oak Veneer 01 by Jenelle van Heerden (Poly Haven, CC0)"
+    },
+    {
+      "id": "walnut",
+      "name": "Walnut",
+      "category": "wood",
+      "swatch": "#8a6a51",
+      "tinted": false,
+      "attribution": "Walnut Veneer by Jenelle van Heerden (Poly Haven, CC0)"
+    },
+    {
+      "id": "pale-oak",
+      "name": "Pale oak",
+      "category": "wood",
+      "swatch": "#ddbf9f",
+      "tinted": false,
+      "attribution": "Silver Oak Veneer 01 by Jenelle van Heerden (Poly Haven, CC0)"
+    },
+    {
+      "id": "teak",
+      "name": "Teak",
+      "category": "wood",
+      "swatch": "#b08257",
+      "tinted": false,
+      "attribution": "Teak Veneer by Jenelle van Heerden (Poly Haven, CC0)"
+    },
+    {
+      "id": "ebonised-oak",
+      "name": "Ebonised oak",
+      "category": "wood",
+      "swatch": "#56504e",
+      "tinted": false,
+      "attribution": "Flamed Black Veneer by Jenelle van Heerden (Poly Haven, CC0)"
+    },
+    {
+      "id": "brushed-steel",
+      "name": "Brushed steel",
+      "category": "metal",
+      "swatch": "#939498",
+      "tinted": false,
+      "attribution": "Metal 009 by ambientCG (Lennart Demes) (ambientCG, CC0)"
+    },
+    {
+      "id": "brass",
+      "name": "Satin brass",
+      "category": "metal",
+      "swatch": "#f3d691",
+      "tinted": false,
+      "attribution": "Metal 042 A by ambientCG (Lennart Demes) (ambientCG, CC0)"
+    },
+    {
+      "id": "blackened-steel",
+      "name": "Blackened steel",
+      "category": "metal",
+      "swatch": "#5c5c5e",
+      "tinted": false,
+      "attribution": "Metal 046 A by ambientCG (Lennart Demes) (ambientCG, CC0)"
+    },
+    {
+      "id": "copper",
+      "name": "Copper",
+      "category": "metal",
+      "swatch": "#ae713a",
+      "tinted": false,
+      "attribution": "Metal 035 by ambientCG (Lennart Demes) (ambientCG, CC0)"
+    },
+    {
+      "id": "white-marble",
+      "name": "White marble",
+      "category": "stone",
+      "swatch": "#e0ddd7",
+      "tinted": false,
+      "attribution": "Marble 001 by ambientCG (Lennart Demes) (ambientCG, CC0)"
+    },
+    {
+      "id": "black-marble",
+      "name": "Black marble",
+      "category": "stone",
+      "swatch": "#424443",
+      "tinted": false,
+      "attribution": "Marble 016 by ambientCG (Lennart Demes) (ambientCG, CC0)"
+    },
+    {
+      "id": "travertine",
+      "name": "Travertine",
+      "category": "stone",
+      "swatch": "#dfcbac",
+      "tinted": false,
+      "attribution": "Travertine 009 by ambientCG (Lennart Demes) (ambientCG, CC0)"
+    },
+    {
+      "id": "polished-concrete",
+      "name": "Polished concrete",
+      "category": "stone",
+      "swatch": "#b8b8b8",
+      "tinted": false,
+      "attribution": "Concrete 034 by ambientCG (Lennart Demes) (ambientCG, CC0)"
+    }
+  ],
+  "models": [
+    {
+      "id": "armchair-oak-leather",
+      "kinds": [
+        "armchair"
+      ],
+      "slots": [
+        "upholstery",
+        "wood"
+      ],
+      "size": [
+        0.8203,
+        1.0229,
+        0.9866
+      ],
+      "attribution": "Modern Arm Chair 01 by Vibrant Nordic (Poly Haven, CC0)"
+    },
+    {
+      "id": "coffee-table-concrete-oak",
+      "kinds": [
+        "coffee-table"
+      ],
+      "slots": [
+        "stone",
+        "wood"
+      ],
+      "size": [
+        1.2018,
+        0.39,
+        0.6
+      ],
+      "attribution": "Modern Coffee Table 01 by Amin (Poly Haven, CC0)"
+    },
+    {
+      "id": "sofa-tufted-leather",
+      "kinds": [
+        "sofa"
+      ],
+      "slots": [
+        "upholstery",
+        "wood"
+      ],
+      "size": [
+        1.8072,
+        0.7095,
+        0.8178
+      ],
+      "attribution": "Sofa 02 by Kirill Sannikov (Poly Haven, CC0)"
+    }
+  ]
+}

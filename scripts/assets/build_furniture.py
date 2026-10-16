@@ -4,10 +4,15 @@
       --input source.gltf --output public/assets/furniture/x.glb --meta x.json \
       [--triangles 30000] [--texture-size 1024] [--rotate-z 0] [--preview x.png]
 
-Result contract (consumed by src/furnitureModels.ts):
+Result contract (consumed by src/renderAssets.ts):
   * glTF +Y up, the piece's front faces +Z (Terrain yaw 0 faces south, +Z);
   * origin at the bottom center of the bounding box, units in meters;
   * all meshes joined (one node, one primitive per material), transforms applied;
+  * every material is named after its finish slot (upholstery, wood, metal, stone,
+    rug, glass or other; Blender may add a .001 suffix), so the app can swap in a
+    library finish per slot;
+  * TEXCOORD_1.u holds each face's box-projection axis (0 = x, 1 = y, 2 = z in glTF
+    axes); the renderer rebuilds meter-scale UVs from it after fitting a piece;
   * triangles capped by a collapse decimation, textures capped at --texture-size;
   * Draco-compressed geometry and JPEG textures.
 Blender's front view looks along +Y, so a front facing Blender -Y exports as +Z.
@@ -41,7 +46,77 @@ def parse_args():
     parser.add_argument("--split-saturated", action="store_true",
                         help="move faces whose texels are saturated (wood trim) to their own material")
     parser.add_argument("--upholstery-contrast", type=float, default=0.6)
+    parser.add_argument("--slots", default="{}",
+                        help="JSON map of source material name (or prefix) to finish slot")
+    parser.add_argument("--split", action="append", default=[],
+                        help="MATERIAL:SATURATED_SLOT:REST_SLOT island split of a shared atlas")
+    parser.add_argument("--trim-slot", default="wood",
+                        help="slot for faces moved off the upholstery by --split-saturated")
     return parser.parse_args(argv)
+
+
+SLOTS = ("upholstery", "wood", "metal", "stone", "rug", "glass", "other")
+# Ordered: the first keyword found in a lower-cased material name decides its slot.
+SLOT_KEYWORDS = (
+    ("glass", ("glass", "mirror")),
+    ("metal", ("metal", "steel", "chrome", "brass", "iron", "alumin", "copper", "bronze",
+               "handle", "screw", "nail", "bolt")),
+    ("stone", ("marble", "stone", "concrete", "granite", "terrazzo", "ceramic", "porcelain")),
+    ("upholstery", ("fabric", "cloth", "cushion", "pillow", "leather", "upholster", "seat",
+                    "textile", "linen", "velvet", "mattress", "sheet", "blanket", "duvet")),
+    ("rug", ("rug", "carpet")),
+    ("wood", ("wood", "oak", "walnut", "pine", "plank", "timber", "leg", "frame", "veneer",
+              "table", "cabinet", "drawer", "shelf", "body")),
+)
+
+
+def guess_slot(name):
+    lower = name.lower()
+    for slot, words in SLOT_KEYWORDS:
+        if any(word in lower for word in words):
+            return slot
+    return "other"
+
+
+def assign_slots(piece, mapping, upholstery_names):
+    """Rename every material to its finish slot; returns {slot: [source names]}."""
+    assigned = {}
+    for slot_entry in piece.material_slots:
+        material = slot_entry.material
+        if not material:
+            continue
+        source = material.name
+        if source in upholstery_names:
+            slot = "upholstery"
+        elif material.get("slot"):
+            slot = material["slot"]
+        else:
+            slot = next((value for key, value in mapping.items()
+                         if source == key or source.startswith(key)), None) or guess_slot(source)
+        if slot not in SLOTS:
+            raise SystemExit(f"Unknown slot {slot} for {source}")
+        assigned.setdefault(slot, []).append(source)
+        material.name = slot
+    return assigned
+
+
+def add_projection_axes(piece):
+    """Second UV map: u = the glTF axis a face projects along (meters are rebuilt at runtime)."""
+    mesh = piece.data
+    layer = mesh.uv_layers.new(name="projection")
+    if layer is None:
+        raise SystemExit("Could not add a projection UV map (8 maps maximum)")
+    # Blender x, y, z -> glTF x, -z, y.
+    to_gltf = (0, 2, 1)
+    for polygon in mesh.polygons:
+        normal = polygon.normal
+        axis = to_gltf[max(range(3), key=lambda i: abs(normal[i]))]
+        for loop in polygon.loop_indices:
+            layer.data[loop].uv = (axis, 0.0)
+    # Keep the source UVs as TEXCOORD_0 for the model's own textures.
+    mesh.uv_layers.active_index = 0
+    for index, uv in enumerate(mesh.uv_layers):
+        uv.active_render = index == 0
 
 
 def import_source(path):
@@ -116,7 +191,12 @@ def main():
             factor = args.texture_size / max(width, height)
             image.scale(max(1, round(width * factor)), max(1, round(height * factor)))
 
+    for rule in args.split:
+        name, saturated_slot, rest_slot = rule.rsplit(":", 2)
+        split_material(piece, name, saturated_slot, rest_slot)
     upholstery = prepare_upholstery(piece, args) if args.upholstery else None
+    slots = assign_slots(piece, json.loads(args.slots), {"upholstery"} if upholstery else set())
+    add_projection_axes(piece)
 
     os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
     bpy.ops.export_scene.gltf(
@@ -147,6 +227,8 @@ def main():
         "triangles": triangle_count(piece),
         "sourceTriangles": source_triangles,
         "materials": [slot.material.name for slot in piece.material_slots if slot.material],
+        "slots": sorted(slots),
+        "slotSources": slots,
         "textureSize": max([max(image.size) for image in bpy.data.images] or [0]),
         "bytes": os.path.getsize(args.output),
         **({"upholstery": upholstery} if upholstery else {}),
@@ -188,6 +270,60 @@ def saturated(rgb):
     return ((high - low) / np.maximum(high, 1e-4) > 0.5) & (high > 0.08)
 
 
+def material_index(piece, name):
+    index = next(
+        (i for i, slot in enumerate(piece.material_slots)
+         if slot.material and slot.material.name == name),
+        None,
+    )
+    if index is None:
+        raise SystemExit(f"No material {name}")
+    return index
+
+
+def split_saturated_islands(piece, slot_index, mask, trim_slot):
+    """Move whole UV islands that mostly sample saturated texels (wood sharing a
+    fabric or stone atlas) onto a copy of the material marked `trim_slot`."""
+    material = piece.material_slots[slot_index].material
+    height, width = mask.shape
+    trim = material.copy()
+    trim.name = f"{material.name}-trim"
+    trim["slot"] = trim_slot
+    piece.data.materials.append(trim)
+    trim_index = len(piece.data.materials) - 1
+    # Classify whole UV islands, so a leg or seam panel moves as one part.
+    uv = piece.data.uv_layers.active.data
+    mesh = piece.data
+    moved = 0
+    for island in mesh_linked_uv_islands(mesh):
+        faces = [mesh.polygons[i] for i in island if mesh.polygons[i].material_index == slot_index]
+        votes = total = 0
+        for polygon in faces:
+            points = [uv[loop].uv for loop in polygon.loop_indices]
+            centroid = sum(points, mathutils.Vector((0, 0))) / len(points)
+            for point in points + [centroid]:
+                sample = (point + centroid) / 2
+                x = min(width - 1, max(0, int((sample.x % 1.0) * width)))
+                y = min(height - 1, max(0, int((sample.y % 1.0) * height)))
+                votes += bool(mask[y, x])
+                total += 1
+        if total and votes * 2 > total:
+            for polygon in faces:
+                polygon.material_index = trim_index
+                moved += 1
+    return moved
+
+
+def split_material(piece, name, saturated_slot, rest_slot):
+    """--split: separate a shared atlas into a saturated slot and the rest."""
+    index = material_index(piece, name)
+    material = piece.material_slots[index].material
+    mask = saturated(image_rgb(base_color_image(material).image))
+    moved = split_saturated_islands(piece, index, mask, saturated_slot)
+    material["slot"] = rest_slot
+    return moved
+
+
 def prepare_upholstery(piece, args):
     """Turn one material into palette-tintable upholstery.
 
@@ -196,44 +332,15 @@ def prepare_upholstery(piece, args):
     --split-saturated, faces sampling saturated texels (e.g. wooden legs sharing
     one atlas) first move to a copy of the original material and keep their color.
     """
-    slot_index = next(
-        (i for i, slot in enumerate(piece.material_slots)
-         if slot.material and slot.material.name == args.upholstery),
-        None,
-    )
-    if slot_index is None:
-        raise SystemExit(f"No material {args.upholstery}")
+    slot_index = material_index(piece, args.upholstery)
     material = piece.material_slots[slot_index].material
     node = base_color_image(material)
     source = node.image
     rgb = image_rgb(source)
     height, width = rgb.shape[:2]
     mask = saturated(rgb)
-    trim_faces = 0
-    if args.split_saturated:
-        trim = material.copy()
-        trim.name = f"{material.name}-trim"
-        piece.data.materials.append(trim)
-        trim_index = len(piece.data.materials) - 1
-        # Classify whole UV islands, so a leg or seam panel moves as one part.
-        uv = piece.data.uv_layers.active.data
-        mesh = piece.data
-        for island in mesh_linked_uv_islands(mesh):
-            faces = [mesh.polygons[i] for i in island if mesh.polygons[i].material_index == slot_index]
-            votes = total = 0
-            for polygon in faces:
-                points = [uv[loop].uv for loop in polygon.loop_indices]
-                centroid = sum(points, mathutils.Vector((0, 0))) / len(points)
-                for point in points + [centroid]:
-                    sample = (point + centroid) / 2
-                    x = min(width - 1, max(0, int((sample.x % 1.0) * width)))
-                    y = min(height - 1, max(0, int((sample.y % 1.0) * height)))
-                    votes += bool(mask[y, x])
-                    total += 1
-            if total and votes * 2 > total:
-                for polygon in faces:
-                    polygon.material_index = trim_index
-                    trim_faces += 1
+    trim_faces = split_saturated_islands(piece, slot_index, mask, args.trim_slot) \
+        if args.split_saturated else 0
     linear = to_linear(rgb)
     luminance = linear @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
     mean = float(luminance[~mask].mean()) if (~mask).any() else float(luminance.mean())
