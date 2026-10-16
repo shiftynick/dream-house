@@ -295,6 +295,10 @@
           -0.28,
           0.28
         ]
+      },
+      "default": true,
+      "finishes": {
+        "wood": "oak"
       }
     },
     {
@@ -552,7 +556,8 @@
       "slots": {
         "potted_plant_01_pot": "stone",
         "potted_plant_01_leaves": "other"
-      }
+      },
+      "default": true
     },
     {
       "id": "plant-aloe",
@@ -803,8 +808,7 @@
       "category": "wood",
       "polyhaven": "oak_veneer_01",
       "size": 1024,
-      "albedo": "photo",
-      "texture": "oak-veneer"
+      "albedo": "photo"
     },
     {
       "id": "walnut",

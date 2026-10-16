@@ -84,7 +84,7 @@
       "id": "oak",
       "name": "Natural oak",
       "category": "wood",
-      "swatch": "#838383",
+      "swatch": "#a27f58",
       "tinted": false,
       "attribution": "Oak Veneer 01 by Jenelle van Heerden (Poly Haven, CC0)"
     },
@@ -388,6 +388,10 @@
       "id": "dining-table-plank",
       "name": "Plank dining table",
       "style": "contemporary",
+      "default": true,
+      "finishes": {
+        "wood": "oak"
+      },
       "thumbnail": "/assets/thumbnails/dining-table-plank.jpg",
       "stretches": true,
       "kinds": [
@@ -647,6 +651,7 @@
       "id": "plant-ficus",
       "name": "Potted ficus",
       "style": "decor",
+      "default": true,
       "thumbnail": "/assets/thumbnails/plant-ficus.jpg",
       "kinds": [
         "plant"

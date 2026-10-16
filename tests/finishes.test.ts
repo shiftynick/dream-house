@@ -29,6 +29,17 @@ test('a piece finish overrides the room default, and unknown or misfit IDs are i
   assert.equal(resolveFinish({ finishes: { wood: 'not-a-finish' } }, room, 'wood'), undefined);
 });
 
+test('a model default finish applies only when neither the piece nor its room sets one', () => {
+  const model = { finishes: { wood: 'oak' } };
+  assert.equal(resolveFinish({}, undefined, 'wood', model), 'oak');
+  assert.equal(resolveFinish({}, { furnitureFinishes: { wood: 'walnut' } }, 'wood', model), 'walnut');
+  assert.equal(resolveFinish({ finishes: { wood: 'teak' } }, undefined, 'wood', model), 'teak');
+  assert.equal(resolveFinish({}, undefined, 'upholstery', model), undefined);
+  const plank = pieceModel({ kind: 'dining-table' });
+  assert.equal(plank?.id, 'dining-table-plank');
+  assert.equal(resolveFinish({}, undefined, 'wood', plank), 'oak');
+});
+
 test('slot options follow material categories', () => {
   const ids = (slot: Parameters<typeof finishOptions>[0]) => finishOptions(slot).map((m) => m.id);
   assert.ok(ids('upholstery').includes('leather-cognac') && ids('upholstery').includes('boucle'));

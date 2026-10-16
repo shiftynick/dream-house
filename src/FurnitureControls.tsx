@@ -4,7 +4,7 @@ import { furnitureCatalog, makeFurniture, roomFurniture } from '../shared/furnit
 import { inspectRoomFurniture } from '../shared/spatial';
 import type { DesignCommand } from '../shared/design';
 import type { Furniture, FurnitureKind, Room, Scene } from '../shared/model';
-import { finishSlots, pieceSlots } from '../shared/finishes';
+import { finishSlots, pieceModel, pieceSlots } from '../shared/finishes';
 import { FinishControls } from './FinishControls';
 import { ModelPicker } from './ModelPicker';
 
@@ -79,6 +79,7 @@ export function FurnitureControls({
           slots={pieceSlots(selected)}
           value={selected.finishes}
           inherited={room.furnitureFinishes ?? {}}
+          modelFinishes={pieceModel(selected)?.finishes}
           disabled={disabled}
           onChange={(finishes) =>
             onApply([

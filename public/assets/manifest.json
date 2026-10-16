@@ -234,7 +234,7 @@
     },
     {
       "id": "armchair-bergere",
-      "name": "Upholstered bergère",
+      "name": "Upholstered berg\u00e8re",
       "style": "classic",
       "thumbnail": "/assets/thumbnails/armchair-bergere.jpg",
       "kinds": [
@@ -374,6 +374,10 @@
       "id": "dining-table-plank",
       "name": "Plank dining table",
       "style": "contemporary",
+      "default": true,
+      "finishes": {
+        "wood": "oak"
+      },
       "thumbnail": "/assets/thumbnails/dining-table-plank.jpg",
       "kinds": [
         "dining-table"
@@ -851,6 +855,7 @@
       "id": "plant-ficus",
       "name": "Potted ficus",
       "style": "decor",
+      "default": true,
       "thumbnail": "/assets/thumbnails/plant-ficus.jpg",
       "kinds": [
         "plant"
@@ -1348,7 +1353,7 @@
     },
     {
       "id": "boucle",
-      "name": "Bouclé",
+      "name": "Boucl\u00e9",
       "category": "fabric",
       "albedo": "luminance",
       "url": "/assets/materials/boucle",
@@ -1572,17 +1577,17 @@
       "name": "Natural oak",
       "category": "wood",
       "albedo": "photo",
-      "url": "/assets/textures/oak-veneer",
+      "url": "/assets/materials/oak",
       "size": [
         1.83,
         1.83
       ],
       "meanLinear": [
-        0.2276,
-        0.2276,
-        0.2276
+        0.3595,
+        0.2112,
+        0.0983
       ],
-      "bytes": 0,
+      "bytes": 510628,
       "source": {
         "library": "Poly Haven",
         "id": "oak_veneer_01",

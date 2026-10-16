@@ -58,6 +58,8 @@ type Sources = {
     style?: string;
     /** The model a kind renders with until a piece chooses another (at most one per kind). */
     default?: boolean;
+    /** Library finish per slot used when neither the piece nor its room sets one. */
+    finishes?: Record<string, string>;
     stretch?: { x?: Range; y?: Range; z?: Range };
   }[];
   textures: (TextureSource & { surface: string })[];
@@ -257,7 +259,19 @@ const furniture = [];
 for (const item of sources.furniture) {
   if (only && only !== item.id) {
     const kept = previous.furniture.find((entry: { id: string }) => entry.id === item.id);
-    if (kept) furniture.push(kept);
+    // Catalog metadata still follows sources.json without rebuilding the mesh.
+    if (kept) {
+      const { id, name: _name, default: _default, style: _style, finishes: _finishes, ...built } =
+        kept;
+      furniture.push({
+        id,
+        name: item.name,
+        ...(item.style ? { style: item.style } : {}),
+        ...(item.default ? { default: true } : {}),
+        ...(item.finishes ? { finishes: item.finishes } : {}),
+        ...built,
+      });
+    }
     continue;
   }
   const output = path.join(publicRoot, 'furniture', `${item.id}.glb`);
@@ -323,6 +337,7 @@ for (const item of sources.furniture) {
     name: item.name,
     ...(item.style ? { style: item.style } : {}),
     ...(item.default ? { default: true } : {}),
+    ...(item.finishes ? { finishes: item.finishes } : {}),
     thumbnail: `/assets/thumbnails/${item.id}.jpg`,
     kinds: item.kinds,
     url: `/assets/furniture/${item.id}.glb`,
@@ -486,6 +501,7 @@ await writeFile(
         name: item.name,
         ...(item.style ? { style: item.style } : {}),
         ...(item.default ? { default: true } : {}),
+        ...(item.finishes ? { finishes: item.finishes } : {}),
         thumbnail: item.thumbnail,
         ...(item.stretch ? { stretches: true } : {}),
         kinds: item.kinds,

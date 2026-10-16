@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import type { FinishSlot, Finishes, Furniture, FurnitureKind } from '../shared/model';
-import { modelMaterialSlot, proceduralSlot, resolveFinish } from '../shared/finishes';
+import { catalogModel, modelMaterialSlot, proceduralSlot, resolveFinish } from '../shared/finishes';
 import { physicalUvs } from './renderMeshes';
 import {
   fittedModelGeometry,
@@ -508,7 +508,12 @@ export function FurnitureMesh({
     source?: THREE.Material,
   ) => {
     if (!slot || !finishMaterial) return undefined;
-    const id = resolveFinish(item, { furnitureFinishes: roomFinishes }, slot);
+    const id = resolveFinish(
+      item,
+      { furnitureFinishes: roomFinishes },
+      slot,
+      catalogModel(model?.asset.id),
+    );
     return id ? finishMaterial(id, slot, channel, paletteFor(slot, part), source) : undefined;
   };
   return (

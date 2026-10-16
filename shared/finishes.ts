@@ -2,6 +2,7 @@ import catalog from './asset-catalog.json';
 import {
   finishSlotSchema,
   type FinishSlot,
+  type Finishes,
   type Furniture,
   type FurnitureKind,
   type Room,
@@ -31,6 +32,8 @@ export type CatalogModel = {
   default?: boolean;
   /** Has stretch zones, so it fits any saved length without distortion. */
   stretches?: boolean;
+  /** Library finish per slot used when neither the piece nor its room sets one. */
+  finishes?: Finishes;
   attribution: string;
 };
 export const assetCatalog = catalog as { materials: CatalogMaterial[]; models: CatalogModel[] };
@@ -123,13 +126,15 @@ export function pieceSlots(item: Pick<Furniture, 'kind' | 'model'>): FinishSlot[
   return finishSlots.filter((slot) => model.slots.includes(slot));
 }
 
-/** Piece finish, then the room default, for one slot; undefined keeps the model's own. */
+/** Piece finish, then the room default, then the model's default finish, for
+ * one slot; undefined keeps the model's own material. */
 export function resolveFinish(
   item: Pick<Furniture, 'finishes'>,
   room: Pick<Room, 'furnitureFinishes'> | undefined,
   slot: FinishSlot,
+  model?: Pick<CatalogModel, 'finishes'>,
 ) {
-  const id = item.finishes?.[slot] ?? room?.furnitureFinishes?.[slot];
+  const id = item.finishes?.[slot] ?? room?.furnitureFinishes?.[slot] ?? model?.finishes?.[slot];
   return id && finishFits(slot, id) ? id : undefined;
 }
 
@@ -148,3 +153,4 @@ export function chooseModelPatch(item: Pick<Furniture, 'kind'>, id: string): Par
   const { width, depth, height } = modelDimensions(model);
   return { model: id, width: round(width), depth: round(depth), height: round(height) };
 }
+

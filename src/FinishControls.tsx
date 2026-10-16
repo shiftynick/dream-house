@@ -14,6 +14,7 @@ export function FinishControls({
   slots,
   value,
   inherited,
+  modelFinishes,
   disabled,
   onChange,
 }: {
@@ -22,6 +23,8 @@ export function FinishControls({
   value?: Finishes;
   /** Room defaults shown in a piece's "inherit" option. */
   inherited?: Finishes;
+  /** The model's own default finishes, used when the room sets none. */
+  modelFinishes?: Finishes;
   disabled: boolean;
   onChange: (next: Finishes) => void;
 }) {
@@ -35,7 +38,11 @@ export function FinishControls({
           const fallback = inherited?.[slot] && finishFits(slot, inherited[slot]!)
             ? catalogMaterial(inherited[slot])
             : undefined;
-          const shown = catalogMaterial(current) ?? fallback;
+          const modelDefault =
+            !inherited?.[slot] && modelFinishes?.[slot] && finishFits(slot, modelFinishes[slot]!)
+              ? catalogMaterial(modelFinishes[slot])
+              : undefined;
+          const shown = catalogMaterial(current) ?? fallback ?? modelDefault;
           return (
             <label key={slot} className="field-label">
               <span className="finish-slot">
@@ -58,7 +65,13 @@ export function FinishControls({
                 }}
               >
                 <option value="">
-                  {inherited ? (fallback ? `Room: ${fallback.name}` : 'Room default') : 'Model finish'}
+                  {fallback
+                    ? `Room: ${fallback.name}`
+                    : modelDefault
+                      ? `Model: ${modelDefault.name}`
+                      : inherited
+                        ? 'Room default'
+                        : 'Model finish'}
                 </option>
                 {finishOptions(slot).map((item) => (
                   <option key={item.id} value={item.id} title={item.attribution}>
