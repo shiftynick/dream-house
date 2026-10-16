@@ -1075,6 +1075,7 @@ export function Architecture({
               ),
               rugEdge: mat('#8f8575', 1, 'rug', 0.001),
               ceramic: mat('#edede7', 0.18),
+              foliage: mat(clay ? '#e0dcd1' : '#4d6b3c', 0.85),
               basin: mat('#a5afad', 0.16),
               worktop: mat('#dfddd3', 0.42, 'concrete', 0.0005),
               chrome: new THREE.MeshStandardMaterial({

@@ -6,6 +6,7 @@ import type { DesignCommand } from '../shared/design';
 import type { Furniture, FurnitureKind, Room, Scene } from '../shared/model';
 import { finishSlots, pieceSlots } from '../shared/finishes';
 import { FinishControls } from './FinishControls';
+import { ModelPicker } from './ModelPicker';
 
 export function FurnitureControls({
   scene,
@@ -61,6 +62,17 @@ export function FurnitureControls({
       >
         Arrange existing furniture
       </button>
+      {selected && (
+        <ModelPicker
+          item={selected}
+          disabled={disabled}
+          onChange={(patch) =>
+            onApply([
+              { type: 'update_furniture', roomId: room.id, furnitureId: selected.id, patch },
+            ])
+          }
+        />
+      )}
       {selected ? (
         <FinishControls
           label="Piece finishes"

@@ -23,6 +23,7 @@ export const furnitureCatalog: Record<
   vanity: { name: 'Vanity', width: 1.2, depth: 0.55, height: 0.9 },
   toilet: { name: 'Toilet', width: 0.45, depth: 0.7, height: 0.8 },
   rug: { name: 'Rug', width: 3, depth: 2, height: 0.025 },
+  plant: { name: 'Potted plant', width: 0.6, depth: 0.6, height: 1.3 },
 };
 
 export function makeFurniture(
@@ -67,7 +68,7 @@ export function furnitureBounds(item: Pick<Furniture, 'width' | 'depth' | 'rotat
 
 /** Cardinal clearance sides use the same yaw transform as the mesh and SVG. */
 export function furnitureClearance(item: Furniture): { clearance: number; clearanceSides: Side[] } {
-  if (item.kind === 'rug') return { clearance: 0, clearanceSides: [] };
+  if (item.kind === 'rug' || item.kind === 'plant') return { clearance: 0, clearanceSides: [] };
   const sides: Side[] = ['north', 'east', 'south', 'west'];
   const backAgainstWall = ['sofa', 'armchair', 'chair', 'bed', 'wardrobe', 'vanity', 'toilet'];
   const usable: Side[] =

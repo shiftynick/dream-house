@@ -3,6 +3,10 @@
   "furniture": [
     {
       "id": "armchair-oak-leather",
+      "name": "Oak lounge armchair",
+      "style": "modern",
+      "default": true,
+      "thumbnail": "/assets/thumbnails/armchair-oak-leather.jpg",
       "kinds": [
         "armchair"
       ],
@@ -36,6 +40,10 @@
     },
     {
       "id": "coffee-table-concrete-oak",
+      "name": "Concrete and oak coffee table",
+      "style": "modern",
+      "default": true,
+      "thumbnail": "/assets/thumbnails/coffee-table-concrete-oak.jpg",
       "kinds": [
         "coffee-table"
       ],
@@ -75,6 +83,10 @@
     },
     {
       "id": "sofa-tufted-leather",
+      "name": "Tufted curved sofa",
+      "style": "transitional",
+      "default": true,
+      "thumbnail": "/assets/thumbnails/sofa-tufted-leather.jpg",
       "kinds": [
         "sofa"
       ],
@@ -110,6 +122,825 @@
         ],
         "license": "CC0-1.0",
         "url": "https://polyhaven.com/a/sofa_02"
+      }
+    },
+    {
+      "id": "sofa-camelback",
+      "name": "Camelback sofa",
+      "style": "classic",
+      "thumbnail": "/assets/thumbnails/sofa-camelback.jpg",
+      "kinds": [
+        "sofa"
+      ],
+      "url": "/assets/furniture/sofa-camelback.glb",
+      "size": [
+        1.5715,
+        0.7965,
+        0.658
+      ],
+      "slots": [
+        "upholstery",
+        "wood"
+      ],
+      "stretch": {
+        "x": [
+          -0.3,
+          0.3
+        ]
+      },
+      "triangles": 4101,
+      "textureSize": 1024,
+      "bytes": 425520,
+      "source": {
+        "library": "Poly Haven",
+        "id": "Sofa_01",
+        "name": "Sofa 01",
+        "authors": [
+          "Kirill Sannikov"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/Sofa_01"
+      }
+    },
+    {
+      "id": "sofa-painted-settle",
+      "name": "Painted wooden settle",
+      "style": "rustic",
+      "thumbnail": "/assets/thumbnails/sofa-painted-settle.jpg",
+      "kinds": [
+        "sofa"
+      ],
+      "url": "/assets/furniture/sofa-painted-settle.glb",
+      "size": [
+        2.4517,
+        1.281,
+        0.7873
+      ],
+      "slots": [
+        "upholstery",
+        "wood"
+      ],
+      "stretch": {
+        "x": [
+          -0.3,
+          0.3
+        ]
+      },
+      "triangles": 5826,
+      "textureSize": 1024,
+      "bytes": 563856,
+      "source": {
+        "library": "Poly Haven",
+        "id": "painted_wooden_sofa",
+        "name": "Painted Wooden Sofa",
+        "authors": [
+          "Kirill Sannikov"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/painted_wooden_sofa"
+      }
+    },
+    {
+      "id": "armchair-mid-century",
+      "name": "Mid-century swivel lounge chair",
+      "style": "mid-century",
+      "thumbnail": "/assets/thumbnails/armchair-mid-century.jpg",
+      "kinds": [
+        "armchair"
+      ],
+      "url": "/assets/furniture/armchair-mid-century.glb",
+      "size": [
+        1.0086,
+        1.1691,
+        1.1903
+      ],
+      "slots": [
+        "metal",
+        "upholstery"
+      ],
+      "triangles": 6148,
+      "textureSize": 1024,
+      "bytes": 516524,
+      "source": {
+        "library": "Poly Haven",
+        "id": "mid_century_lounge_chair",
+        "name": "Mid Century Lounge Chair",
+        "authors": [
+          "Kuutti Siitonen"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/mid_century_lounge_chair"
+      }
+    },
+    {
+      "id": "armchair-bergere",
+      "name": "Upholstered bergère",
+      "style": "classic",
+      "thumbnail": "/assets/thumbnails/armchair-bergere.jpg",
+      "kinds": [
+        "armchair"
+      ],
+      "url": "/assets/furniture/armchair-bergere.glb",
+      "size": [
+        0.8484,
+        1.0651,
+        0.7658
+      ],
+      "slots": [
+        "upholstery",
+        "wood"
+      ],
+      "triangles": 5626,
+      "textureSize": 1024,
+      "bytes": 648332,
+      "source": {
+        "library": "Poly Haven",
+        "id": "ArmChair_01",
+        "name": "Arm Chair 01",
+        "authors": [
+          "Kirill Sannikov"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/ArmChair_01"
+      }
+    },
+    {
+      "id": "coffee-table-inlay",
+      "name": "Inlaid block coffee table",
+      "style": "modern",
+      "thumbnail": "/assets/thumbnails/coffee-table-inlay.jpg",
+      "kinds": [
+        "coffee-table"
+      ],
+      "url": "/assets/furniture/coffee-table-inlay.glb",
+      "size": [
+        1.1991,
+        0.3692,
+        1.1997
+      ],
+      "slots": [
+        "stone",
+        "wood"
+      ],
+      "triangles": 13645,
+      "textureSize": 1024,
+      "bytes": 662816,
+      "source": {
+        "library": "Poly Haven",
+        "id": "modern_coffee_table_02",
+        "name": "Modern Coffee Table 02",
+        "authors": [
+          "Amin"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/modern_coffee_table_02"
+      }
+    },
+    {
+      "id": "coffee-table-round-steel",
+      "name": "Round steel coffee table",
+      "style": "modern",
+      "thumbnail": "/assets/thumbnails/coffee-table-round-steel.jpg",
+      "kinds": [
+        "coffee-table"
+      ],
+      "url": "/assets/furniture/coffee-table-round-steel.glb",
+      "size": [
+        1.3013,
+        0.491,
+        1.3013
+      ],
+      "slots": [
+        "metal",
+        "stone"
+      ],
+      "triangles": 4044,
+      "textureSize": 1024,
+      "bytes": 372692,
+      "source": {
+        "library": "Poly Haven",
+        "id": "coffee_table_round_01",
+        "name": "Coffee Table Round 01",
+        "authors": [
+          "Ulan Cabanilla"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/coffee_table_round_01"
+      }
+    },
+    {
+      "id": "coffee-table-industrial",
+      "name": "Industrial steel coffee table",
+      "style": "industrial",
+      "thumbnail": "/assets/thumbnails/coffee-table-industrial.jpg",
+      "kinds": [
+        "coffee-table"
+      ],
+      "url": "/assets/furniture/coffee-table-industrial.glb",
+      "size": [
+        0.7772,
+        0.6382,
+        0.7571
+      ],
+      "slots": [
+        "metal",
+        "wood"
+      ],
+      "stretch": {
+        "x": [
+          -0.3,
+          0.3
+        ],
+        "z": [
+          -0.3,
+          0.3
+        ]
+      },
+      "triangles": 20000,
+      "textureSize": 1024,
+      "bytes": 676456,
+      "source": {
+        "library": "Poly Haven",
+        "id": "industrial_coffee_table",
+        "name": "Industrial Coffee Table",
+        "authors": [
+          "Ulan Cabanilla"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/industrial_coffee_table"
+      }
+    },
+    {
+      "id": "dining-table-plank",
+      "name": "Plank dining table",
+      "style": "contemporary",
+      "thumbnail": "/assets/thumbnails/dining-table-plank.jpg",
+      "kinds": [
+        "dining-table"
+      ],
+      "url": "/assets/furniture/dining-table-plank.glb",
+      "size": [
+        1.1344,
+        0.7995,
+        0.706
+      ],
+      "slots": [
+        "wood"
+      ],
+      "stretch": {
+        "x": [
+          -0.32,
+          0.32
+        ],
+        "z": [
+          -0.28,
+          0.28
+        ]
+      },
+      "triangles": 196,
+      "textureSize": 1024,
+      "bytes": 461560,
+      "source": {
+        "library": "Poly Haven",
+        "id": "wooden_table_02",
+        "name": "Wooden Table 02",
+        "authors": [
+          "Serhii Khromov"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/wooden_table_02"
+      }
+    },
+    {
+      "id": "dining-table-pedestal",
+      "name": "Round pedestal table",
+      "style": "classic",
+      "thumbnail": "/assets/thumbnails/dining-table-pedestal.jpg",
+      "kinds": [
+        "dining-table"
+      ],
+      "url": "/assets/furniture/dining-table-pedestal.glb",
+      "size": [
+        1.3993,
+        1.005,
+        1.3993
+      ],
+      "slots": [
+        "wood"
+      ],
+      "triangles": 8640,
+      "textureSize": 1024,
+      "bytes": 345012,
+      "source": {
+        "library": "Poly Haven",
+        "id": "round_wooden_table_01",
+        "name": "Round Wooden Table 01",
+        "authors": [
+          "Ulan Cabanilla"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/round_wooden_table_01"
+      }
+    },
+    {
+      "id": "dining-table-writing",
+      "name": "Small wooden table",
+      "style": "rustic",
+      "thumbnail": "/assets/thumbnails/dining-table-writing.jpg",
+      "kinds": [
+        "dining-table"
+      ],
+      "url": "/assets/furniture/dining-table-writing.glb",
+      "size": [
+        0.9162,
+        0.5331,
+        0.44
+      ],
+      "slots": [
+        "wood"
+      ],
+      "stretch": {
+        "x": [
+          -0.32,
+          0.32
+        ],
+        "z": [
+          -0.25,
+          0.25
+        ]
+      },
+      "triangles": 3410,
+      "textureSize": 1024,
+      "bytes": 333168,
+      "source": {
+        "library": "Poly Haven",
+        "id": "small_wooden_table_01",
+        "name": "Small Wooden Table 01",
+        "authors": [
+          "Ulan Cabanilla"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/small_wooden_table_01"
+      }
+    },
+    {
+      "id": "chair-tufted-dining",
+      "name": "Tufted leather dining chair",
+      "style": "contemporary",
+      "thumbnail": "/assets/thumbnails/chair-tufted-dining.jpg",
+      "kinds": [
+        "chair"
+      ],
+      "url": "/assets/furniture/chair-tufted-dining.glb",
+      "size": [
+        0.4336,
+        0.9734,
+        0.5764
+      ],
+      "slots": [
+        "upholstery",
+        "wood"
+      ],
+      "triangles": 20000,
+      "textureSize": 1024,
+      "bytes": 467468,
+      "source": {
+        "library": "Poly Haven",
+        "id": "dining_chair_02",
+        "name": "Dining Chair 02",
+        "authors": [
+          "James Ray Cock"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/dining_chair_02"
+      }
+    },
+    {
+      "id": "chair-painted-white",
+      "name": "White painted chair",
+      "style": "farmhouse",
+      "thumbnail": "/assets/thumbnails/chair-painted-white.jpg",
+      "kinds": [
+        "chair"
+      ],
+      "url": "/assets/furniture/chair-painted-white.glb",
+      "size": [
+        0.4318,
+        0.9565,
+        0.5398
+      ],
+      "slots": [
+        "wood"
+      ],
+      "triangles": 724,
+      "textureSize": 1024,
+      "bytes": 454504,
+      "source": {
+        "library": "Poly Haven",
+        "id": "painted_wooden_chair_01",
+        "name": "Painted Wooden Chair 01",
+        "authors": [
+          "Kuutti Siitonen"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/painted_wooden_chair_01"
+      }
+    },
+    {
+      "id": "chair-ladder-back",
+      "name": "Ladder-back chair",
+      "style": "rustic",
+      "thumbnail": "/assets/thumbnails/chair-ladder-back.jpg",
+      "kinds": [
+        "chair"
+      ],
+      "url": "/assets/furniture/chair-ladder-back.glb",
+      "size": [
+        0.6394,
+        1.2638,
+        0.6621
+      ],
+      "slots": [
+        "wood"
+      ],
+      "triangles": 1246,
+      "textureSize": 1024,
+      "bytes": 639484,
+      "source": {
+        "library": "Poly Haven",
+        "id": "painted_wooden_chair_02",
+        "name": "Painted Wooden Chair 02",
+        "authors": [
+          "Kirill Sannikov"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/painted_wooden_chair_02"
+      }
+    },
+    {
+      "id": "bed-iron-frame",
+      "name": "Iron bed frame",
+      "style": "industrial",
+      "thumbnail": "/assets/thumbnails/bed-iron-frame.jpg",
+      "kinds": [
+        "bed"
+      ],
+      "url": "/assets/furniture/bed-iron-frame.glb",
+      "size": [
+        0.9047,
+        1.2024,
+        2.0017
+      ],
+      "slots": [
+        "metal"
+      ],
+      "stretch": {
+        "x": [
+          -0.3,
+          0.3
+        ],
+        "z": [
+          -0.3,
+          0.3
+        ]
+      },
+      "triangles": 20000,
+      "textureSize": 1024,
+      "bytes": 812616,
+      "source": {
+        "library": "Poly Haven",
+        "id": "old_bed_frame",
+        "name": "Old Bed Frame",
+        "authors": [
+          "Luca B"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/old_bed_frame"
+      }
+    },
+    {
+      "id": "bed-carved-oak",
+      "name": "Carved four-post bed",
+      "style": "gothic",
+      "thumbnail": "/assets/thumbnails/bed-carved-oak.jpg",
+      "kinds": [
+        "bed"
+      ],
+      "url": "/assets/furniture/bed-carved-oak.glb",
+      "size": [
+        1.4938,
+        1.5338,
+        2.04
+      ],
+      "slots": [
+        "upholstery",
+        "wood"
+      ],
+      "stretch": {
+        "x": [
+          -0.25,
+          0.25
+        ],
+        "z": [
+          -0.25,
+          0.25
+        ]
+      },
+      "triangles": 18745,
+      "textureSize": 1024,
+      "bytes": 646940,
+      "source": {
+        "library": "Poly Haven",
+        "id": "GothicBed_01",
+        "name": "Gothic Bed 01",
+        "authors": [
+          "Kirill Sannikov"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/GothicBed_01"
+      }
+    },
+    {
+      "id": "nightstand-open-shelf",
+      "name": "Open-shelf side table",
+      "style": "contemporary",
+      "thumbnail": "/assets/thumbnails/nightstand-open-shelf.jpg",
+      "kinds": [
+        "nightstand"
+      ],
+      "url": "/assets/furniture/nightstand-open-shelf.glb",
+      "size": [
+        0.55,
+        0.5507,
+        0.45
+      ],
+      "slots": [
+        "wood"
+      ],
+      "triangles": 2756,
+      "textureSize": 1024,
+      "bytes": 388920,
+      "source": {
+        "library": "Poly Haven",
+        "id": "side_table_01",
+        "name": "Side Table 01",
+        "authors": [
+          "James Ray Cock"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/side_table_01"
+      }
+    },
+    {
+      "id": "nightstand-painted",
+      "name": "Painted nightstand",
+      "style": "rustic",
+      "thumbnail": "/assets/thumbnails/nightstand-painted.jpg",
+      "kinds": [
+        "nightstand"
+      ],
+      "url": "/assets/furniture/nightstand-painted.glb",
+      "size": [
+        0.5046,
+        0.6155,
+        0.5087
+      ],
+      "slots": [
+        "wood"
+      ],
+      "triangles": 470,
+      "textureSize": 1024,
+      "bytes": 546576,
+      "source": {
+        "library": "Poly Haven",
+        "id": "painted_wooden_nightstand",
+        "name": "Painted Wooden Nightstand",
+        "authors": [
+          "Kirill Sannikov"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/painted_wooden_nightstand"
+      }
+    },
+    {
+      "id": "nightstand-classic",
+      "name": "Carved nightstand",
+      "style": "classic",
+      "thumbnail": "/assets/thumbnails/nightstand-classic.jpg",
+      "kinds": [
+        "nightstand"
+      ],
+      "url": "/assets/furniture/nightstand-classic.glb",
+      "size": [
+        0.5678,
+        0.7,
+        0.4242
+      ],
+      "slots": [
+        "wood"
+      ],
+      "triangles": 2002,
+      "textureSize": 1024,
+      "bytes": 380124,
+      "source": {
+        "library": "Poly Haven",
+        "id": "ClassicNightstand_01",
+        "name": "Classic Nightstand 01",
+        "authors": [
+          "Kirill Sannikov"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/ClassicNightstand_01"
+      }
+    },
+    {
+      "id": "wardrobe-carved",
+      "name": "Carved cabinet",
+      "style": "gothic",
+      "thumbnail": "/assets/thumbnails/wardrobe-carved.jpg",
+      "kinds": [
+        "wardrobe"
+      ],
+      "url": "/assets/furniture/wardrobe-carved.glb",
+      "size": [
+        1.7191,
+        2.3609,
+        1.1165
+      ],
+      "slots": [
+        "wood"
+      ],
+      "triangles": 12170,
+      "textureSize": 1024,
+      "bytes": 616856,
+      "source": {
+        "library": "Poly Haven",
+        "id": "GothicCabinet_01",
+        "name": "Gothic Cabinet 01",
+        "authors": [
+          "Kirill Sannikov"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/GothicCabinet_01"
+      }
+    },
+    {
+      "id": "wardrobe-hutch",
+      "name": "Glazed hutch cabinet",
+      "style": "classic",
+      "thumbnail": "/assets/thumbnails/wardrobe-hutch.jpg",
+      "kinds": [
+        "wardrobe"
+      ],
+      "url": "/assets/furniture/wardrobe-hutch.glb",
+      "size": [
+        2.0218,
+        2.2347,
+        0.6698
+      ],
+      "slots": [
+        "glass",
+        "wood"
+      ],
+      "triangles": 19999,
+      "textureSize": 1024,
+      "bytes": 1015652,
+      "source": {
+        "library": "Poly Haven",
+        "id": "vintage_cabinet_01",
+        "name": "Vintage Cabinet 01",
+        "authors": [
+          "Rico Cilliers"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/vintage_cabinet_01"
+      }
+    },
+    {
+      "id": "wardrobe-tall-shelf",
+      "name": "Tall shelf cabinet",
+      "style": "asian",
+      "thumbnail": "/assets/thumbnails/wardrobe-tall-shelf.jpg",
+      "kinds": [
+        "wardrobe"
+      ],
+      "url": "/assets/furniture/wardrobe-tall-shelf.glb",
+      "size": [
+        1.2625,
+        2.8721,
+        0.5452
+      ],
+      "slots": [
+        "wood"
+      ],
+      "triangles": 15668,
+      "textureSize": 1024,
+      "bytes": 601604,
+      "source": {
+        "library": "Poly Haven",
+        "id": "chinese_cabinet",
+        "name": "Chinese Cabinet",
+        "authors": [
+          "Kirill Sannikov"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/chinese_cabinet"
+      }
+    },
+    {
+      "id": "plant-ficus",
+      "name": "Potted ficus",
+      "style": "decor",
+      "thumbnail": "/assets/thumbnails/plant-ficus.jpg",
+      "kinds": [
+        "plant"
+      ],
+      "url": "/assets/furniture/plant-ficus.glb",
+      "size": [
+        0.5854,
+        1.3499,
+        0.6335
+      ],
+      "slots": [
+        "other",
+        "stone"
+      ],
+      "triangles": 19999,
+      "textureSize": 1024,
+      "bytes": 2180024,
+      "source": {
+        "library": "Poly Haven",
+        "id": "potted_plant_01",
+        "name": "Potted Plant 01",
+        "authors": [
+          "Rico Cilliers"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/potted_plant_01"
+      }
+    },
+    {
+      "id": "plant-aloe",
+      "name": "Aloe in white planter",
+      "style": "decor",
+      "thumbnail": "/assets/thumbnails/plant-aloe.jpg",
+      "kinds": [
+        "plant"
+      ],
+      "url": "/assets/furniture/plant-aloe.glb",
+      "size": [
+        0.1679,
+        0.2675,
+        0.1848
+      ],
+      "slots": [
+        "other",
+        "stone"
+      ],
+      "triangles": 8929,
+      "textureSize": 1024,
+      "bytes": 632364,
+      "source": {
+        "library": "Poly Haven",
+        "id": "potted_plant_04",
+        "name": "Potted Plant 04",
+        "authors": [
+          "James Ray Cock"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/potted_plant_04"
+      }
+    },
+    {
+      "id": "plant-leafy",
+      "name": "Leafy potted plant",
+      "style": "decor",
+      "thumbnail": "/assets/thumbnails/plant-leafy.jpg",
+      "kinds": [
+        "plant"
+      ],
+      "url": "/assets/furniture/plant-leafy.glb",
+      "size": [
+        0.7008,
+        0.8416,
+        0.6564
+      ],
+      "slots": [
+        "other",
+        "stone"
+      ],
+      "triangles": 20000,
+      "textureSize": 1024,
+      "bytes": 2199800,
+      "source": {
+        "library": "Poly Haven",
+        "id": "potted_plant_02",
+        "name": "Potted Plant 02",
+        "authors": [
+          "Rico Cilliers"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/potted_plant_02"
       }
     }
   ],

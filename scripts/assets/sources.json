@@ -13,7 +13,10 @@
         "material": "modern_arm_chair_01_pillow",
         "contrast": 0.35,
         "shade": 0.62
-      }
+      },
+      "name": "Oak lounge armchair",
+      "style": "modern",
+      "default": true
     },
     {
       "id": "coffee-table-concrete-oak",
@@ -40,7 +43,10 @@
           "wood",
           "stone"
         ]
-      ]
+      ],
+      "name": "Concrete and oak coffee table",
+      "style": "modern",
+      "default": true
     },
     {
       "id": "sofa-tufted-leather",
@@ -61,6 +67,536 @@
         "split": true,
         "contrast": 0.35,
         "shade": 0.62
+      },
+      "name": "Tufted curved sofa",
+      "style": "transitional",
+      "default": true
+    },
+    {
+      "id": "sofa-camelback",
+      "name": "Camelback sofa",
+      "style": "classic",
+      "kinds": [
+        "sofa"
+      ],
+      "polyhaven": "Sofa_01",
+      "targetTriangles": 20000,
+      "textureSize": 1024,
+      "classify": [
+        {
+          "material": "Sofa_01",
+          "default": "wood",
+          "rules": [
+            {
+              "slot": "upholstery",
+              "sat": [
+                0,
+                0.3
+              ]
+            }
+          ]
+        }
+      ],
+      "stretch": {
+        "x": [
+          -0.3,
+          0.3
+        ]
+      }
+    },
+    {
+      "id": "sofa-painted-settle",
+      "name": "Painted wooden settle",
+      "style": "rustic",
+      "kinds": [
+        "sofa"
+      ],
+      "polyhaven": "painted_wooden_sofa",
+      "targetTriangles": 20000,
+      "textureSize": 1024,
+      "classify": [
+        {
+          "material": "painted_wooden_sofa",
+          "default": "wood",
+          "rules": [
+            {
+              "slot": "upholstery",
+              "sat": [
+                0,
+                0.2
+              ],
+              "val": [
+                0.4,
+                1
+              ]
+            }
+          ]
+        }
+      ],
+      "stretch": {
+        "x": [
+          -0.3,
+          0.3
+        ]
+      }
+    },
+    {
+      "id": "armchair-mid-century",
+      "name": "Mid-century swivel lounge chair",
+      "style": "mid-century",
+      "kinds": [
+        "armchair"
+      ],
+      "polyhaven": "mid_century_lounge_chair",
+      "targetTriangles": 20000,
+      "textureSize": 1024,
+      "classify": [
+        {
+          "material": "mid_century_lounge_chair",
+          "default": "upholstery",
+          "rules": [
+            {
+              "slot": "metal",
+              "sat": [
+                0,
+                0.2
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "armchair-bergere",
+      "name": "Upholstered bergère",
+      "style": "classic",
+      "kinds": [
+        "armchair"
+      ],
+      "polyhaven": "ArmChair_01",
+      "targetTriangles": 20000,
+      "textureSize": 1024,
+      "classify": [
+        {
+          "material": "Armchair_01",
+          "default": "wood",
+          "rules": [
+            {
+              "slot": "upholstery",
+              "sat": [
+                0,
+                0.2
+              ],
+              "val": [
+                0.35,
+                1
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "coffee-table-inlay",
+      "name": "Inlaid block coffee table",
+      "style": "modern",
+      "kinds": [
+        "coffee-table"
+      ],
+      "polyhaven": "modern_coffee_table_02",
+      "targetTriangles": 20000,
+      "textureSize": 1024,
+      "slots": {
+        "modern_coffee_table_02_base": "stone",
+        "modern_coffee_table_02_wood": "wood"
+      }
+    },
+    {
+      "id": "coffee-table-round-steel",
+      "name": "Round steel coffee table",
+      "style": "modern",
+      "kinds": [
+        "coffee-table"
+      ],
+      "polyhaven": "coffee_table_round_01",
+      "targetTriangles": 20000,
+      "textureSize": 1024,
+      "classify": [
+        {
+          "material": "coffee_table_round_01",
+          "default": "metal",
+          "rules": [
+            {
+              "slot": "stone",
+              "val": [
+                0.5,
+                1
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "coffee-table-industrial",
+      "name": "Industrial steel coffee table",
+      "style": "industrial",
+      "kinds": [
+        "coffee-table"
+      ],
+      "polyhaven": "industrial_coffee_table",
+      "targetTriangles": 20000,
+      "textureSize": 1024,
+      "classify": [
+        {
+          "material": "industrial_coffee_table",
+          "default": "metal",
+          "rules": [
+            {
+              "slot": "wood",
+              "sat": [
+                0.3,
+                1
+              ]
+            }
+          ]
+        }
+      ],
+      "stretch": {
+        "x": [
+          -0.3,
+          0.3
+        ],
+        "z": [
+          -0.3,
+          0.3
+        ]
+      }
+    },
+    {
+      "id": "dining-table-plank",
+      "name": "Plank dining table",
+      "style": "contemporary",
+      "kinds": [
+        "dining-table"
+      ],
+      "polyhaven": "wooden_table_02",
+      "targetTriangles": 20000,
+      "textureSize": 1024,
+      "slots": {
+        "wooden_table_02": "wood"
+      },
+      "stretch": {
+        "x": [
+          -0.32,
+          0.32
+        ],
+        "z": [
+          -0.28,
+          0.28
+        ]
+      }
+    },
+    {
+      "id": "dining-table-pedestal",
+      "name": "Round pedestal table",
+      "style": "classic",
+      "kinds": [
+        "dining-table"
+      ],
+      "polyhaven": "round_wooden_table_01",
+      "targetTriangles": 20000,
+      "textureSize": 1024,
+      "slots": {
+        "round_wooden_table_01": "wood"
+      }
+    },
+    {
+      "id": "dining-table-writing",
+      "name": "Small wooden table",
+      "style": "rustic",
+      "kinds": [
+        "dining-table"
+      ],
+      "polyhaven": "small_wooden_table_01",
+      "targetTriangles": 20000,
+      "textureSize": 1024,
+      "slots": {
+        "small_wooden_table_01": "wood"
+      },
+      "stretch": {
+        "x": [
+          -0.32,
+          0.32
+        ],
+        "z": [
+          -0.25,
+          0.25
+        ]
+      }
+    },
+    {
+      "id": "chair-tufted-dining",
+      "name": "Tufted leather dining chair",
+      "style": "contemporary",
+      "kinds": [
+        "chair"
+      ],
+      "polyhaven": "dining_chair_02",
+      "targetTriangles": 20000,
+      "textureSize": 1024,
+      "classify": [
+        {
+          "material": "dining_chair_02",
+          "default": "upholstery",
+          "rules": [
+            {
+              "slot": "wood",
+              "top": [
+                0,
+                0.42
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "chair-painted-white",
+      "name": "White painted chair",
+      "style": "farmhouse",
+      "kinds": [
+        "chair"
+      ],
+      "polyhaven": "painted_wooden_chair_01",
+      "targetTriangles": 20000,
+      "textureSize": 1024,
+      "slots": {
+        "painted_wooden_chair_01": "wood"
+      }
+    },
+    {
+      "id": "chair-ladder-back",
+      "name": "Ladder-back chair",
+      "style": "rustic",
+      "kinds": [
+        "chair"
+      ],
+      "polyhaven": "painted_wooden_chair_02",
+      "targetTriangles": 20000,
+      "textureSize": 1024,
+      "slots": {
+        "painted_wooden_chair_02": "wood"
+      }
+    },
+    {
+      "id": "bed-iron-frame",
+      "name": "Iron bed frame",
+      "style": "industrial",
+      "kinds": [
+        "bed"
+      ],
+      "polyhaven": "old_bed_frame",
+      "targetTriangles": 20000,
+      "textureSize": 1024,
+      "slots": {
+        "old_bed_frame": "metal"
+      },
+      "stretch": {
+        "x": [
+          -0.3,
+          0.3
+        ],
+        "z": [
+          -0.3,
+          0.3
+        ]
+      }
+    },
+    {
+      "id": "bed-carved-oak",
+      "name": "Carved four-post bed",
+      "style": "gothic",
+      "kinds": [
+        "bed"
+      ],
+      "polyhaven": "GothicBed_01",
+      "targetTriangles": 20000,
+      "textureSize": 1024,
+      "classify": [
+        {
+          "material": "GothicBed_01",
+          "default": "wood",
+          "rules": [
+            {
+              "slot": "upholstery",
+              "sat": [
+                0,
+                0.2
+              ],
+              "val": [
+                0.45,
+                1
+              ]
+            }
+          ]
+        }
+      ],
+      "stretch": {
+        "x": [
+          -0.25,
+          0.25
+        ],
+        "z": [
+          -0.25,
+          0.25
+        ]
+      }
+    },
+    {
+      "id": "nightstand-open-shelf",
+      "name": "Open-shelf side table",
+      "style": "contemporary",
+      "kinds": [
+        "nightstand"
+      ],
+      "polyhaven": "side_table_01",
+      "targetTriangles": 20000,
+      "textureSize": 1024,
+      "slots": {
+        "side_table_01": "wood"
+      }
+    },
+    {
+      "id": "nightstand-painted",
+      "name": "Painted nightstand",
+      "style": "rustic",
+      "kinds": [
+        "nightstand"
+      ],
+      "polyhaven": "painted_wooden_nightstand",
+      "targetTriangles": 20000,
+      "textureSize": 1024,
+      "slots": {
+        "painted_wooden_nightstand": "wood"
+      }
+    },
+    {
+      "id": "nightstand-classic",
+      "name": "Carved nightstand",
+      "style": "classic",
+      "kinds": [
+        "nightstand"
+      ],
+      "polyhaven": "ClassicNightstand_01",
+      "targetTriangles": 20000,
+      "textureSize": 1024,
+      "slots": {
+        "ClassicNightstand_01": "wood"
+      }
+    },
+    {
+      "id": "wardrobe-carved",
+      "name": "Carved cabinet",
+      "style": "gothic",
+      "kinds": [
+        "wardrobe"
+      ],
+      "polyhaven": "GothicCabinet_01",
+      "targetTriangles": 20000,
+      "textureSize": 1024,
+      "slots": {
+        "GothicCabinet_01": "wood"
+      }
+    },
+    {
+      "id": "wardrobe-hutch",
+      "name": "Glazed hutch cabinet",
+      "style": "classic",
+      "kinds": [
+        "wardrobe"
+      ],
+      "polyhaven": "vintage_cabinet_01",
+      "targetTriangles": 20000,
+      "textureSize": 1024,
+      "slots": {
+        "vintage_cabinet_01_a": "wood",
+        "vintage_cabinet_01_b": "wood",
+        "vintage_cabinet_01_glass": "glass"
+      }
+    },
+    {
+      "id": "wardrobe-tall-shelf",
+      "name": "Tall shelf cabinet",
+      "style": "asian",
+      "kinds": [
+        "wardrobe"
+      ],
+      "polyhaven": "chinese_cabinet",
+      "targetTriangles": 20000,
+      "textureSize": 1024,
+      "slots": {
+        "chinese_cabinet": "wood"
+      }
+    },
+    {
+      "id": "plant-ficus",
+      "name": "Potted ficus",
+      "style": "decor",
+      "kinds": [
+        "plant"
+      ],
+      "polyhaven": "potted_plant_01",
+      "targetTriangles": 20000,
+      "textureSize": 1024,
+      "slots": {
+        "potted_plant_01_pot": "stone",
+        "potted_plant_01_leaves": "other"
+      }
+    },
+    {
+      "id": "plant-aloe",
+      "name": "Aloe in white planter",
+      "style": "decor",
+      "kinds": [
+        "plant"
+      ],
+      "polyhaven": "potted_plant_04",
+      "targetTriangles": 20000,
+      "textureSize": 1024,
+      "classify": [
+        {
+          "material": "potted_plant_04",
+          "default": "other",
+          "rules": [
+            {
+              "slot": "stone",
+              "sat": [
+                0,
+                0.12
+              ],
+              "val": [
+                0.6,
+                1
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "plant-leafy",
+      "name": "Leafy potted plant",
+      "style": "decor",
+      "kinds": [
+        "plant"
+      ],
+      "polyhaven": "potted_plant_02",
+      "targetTriangles": 20000,
+      "textureSize": 1024,
+      "slots": {
+        "potted_plant_02_pot": "stone",
+        "potted_plant_02_leaves": "other"
       }
     }
   ],

@@ -52,6 +52,12 @@ type Sources = {
     slots?: Record<string, string>;
     /** Shared atlases split by UV island saturation: [material, saturated slot, rest slot]. */
     split?: [string, string, string][];
+    /** Shared atlases split by island mean color (see build_furniture.py --classify). */
+    classify?: { material: string; default: string; rules?: unknown[] }[];
+    name: string;
+    style?: string;
+    /** The model a kind renders with until a piece chooses another (at most one per kind). */
+    default?: boolean;
     stretch?: { x?: Range; y?: Range; z?: Range };
   }[];
   textures: (TextureSource & { surface: string })[];
@@ -282,6 +288,11 @@ for (const item of sources.furniture) {
       '--slots',
       JSON.stringify(item.slots ?? {}),
       ...(item.split ?? []).flatMap((rule) => ['--split', rule.join(':')]),
+      ...(item.classify ?? []).flatMap((rule) => ['--classify', JSON.stringify(rule)]),
+      '--slot-preview',
+      path.join(previewRoot, `${item.id}-slots.png`),
+      '--thumbnail',
+      path.join(previewRoot, `${item.id}-thumb.png`),
       ...(item.upholstery
         ? [
             '--upholstery',
@@ -295,8 +306,24 @@ for (const item of sources.furniture) {
     { maxBuffer: 64 * 1024 * 1024 },
   );
   const result = JSON.parse(await readFile(meta, 'utf8'));
+  // Picker thumbnails: 256 px JPEG on the editor's paper color.
+  const thumbnail = path.join(publicRoot, 'thumbnails', `${item.id}.jpg`);
+  await mkdir(path.dirname(thumbnail), { recursive: true });
+  await run('magick', [
+    path.join(previewRoot, `${item.id}-thumb.png`),
+    '-resize',
+    '160x160',
+    '-strip',
+    '-quality',
+    '82',
+    thumbnail,
+  ]);
   furniture.push({
     id: item.id,
+    name: item.name,
+    ...(item.style ? { style: item.style } : {}),
+    ...(item.default ? { default: true } : {}),
+    thumbnail: `/assets/thumbnails/${item.id}.jpg`,
     kinds: item.kinds,
     url: `/assets/furniture/${item.id}.glb`,
     size: result.size,
@@ -314,6 +341,16 @@ for (const item of sources.furniture) {
     `${item.id}: ${result.triangles} triangles, ${(result.bytes / 1e6).toFixed(2)} MB, slots ${JSON.stringify(result.slotSources)}`,
   );
 }
+
+// Remove models and thumbnails dropped from sources.json.
+if (!only)
+  for (const [dir, extension] of [
+    ['furniture', '.glb'],
+    ['thumbnails', '.jpg'],
+  ] as const)
+    for (const file of await readdir(path.join(publicRoot, dir)).catch(() => []))
+      if (!sources.furniture.some((item) => `${item.id}${extension}` === file))
+        await rm(path.join(publicRoot, dir, file));
 
 const textures = [];
 for (const item of sources.textures) {
@@ -446,6 +483,11 @@ await writeFile(
       })),
       models: furniture.map((item) => ({
         id: item.id,
+        name: item.name,
+        ...(item.style ? { style: item.style } : {}),
+        ...(item.default ? { default: true } : {}),
+        thumbnail: item.thumbnail,
+        ...(item.stretch ? { stretches: true } : {}),
         kinds: item.kinds,
         slots: item.slots,
         size: item.size,

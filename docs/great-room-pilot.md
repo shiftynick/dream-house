@@ -30,6 +30,8 @@ npx tsx scripts/assets/build-assets.ts    # Blender + ImageMagick → public/ass
 
 `scripts/assets/sources.json` lists every source and its budget. Headless Blender (`scripts/assets/build_furniture.py`) joins the meshes and bakes their transforms. It orients the front to +Z with the origin at the bottom center, caps triangles (24k–30k) and textures (1024 px), prepares the upholstery, and exports Draco GLBs with JPEG textures. Committed assets total about 9.8 MB: three GLBs of 0.3–0.8 MB, 1–2 MB per texture set, and a 1.5 MB backdrop.
 
+Later work (finish slots, window/door kits, starter catalog) is documented in [asset-library.md](asset-library.md).
+
 ## Verification
 
 460 existing tests plus `tests/render-assets.test.ts` pass, along with the TypeScript check and the production build. The lifecycle smoke passes: modes, picking, edits, forced context loss/restore and a post-restore capture, with no browser warnings. In the performance smoke, Live and Presentation orbit/walk p95 stay at 16.7 ms, the same as `main` on the same GPU, and idle submits zero draws.

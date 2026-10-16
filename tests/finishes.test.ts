@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import * as THREE from 'three';
 import {
   assetCatalog,
+  chooseModelPatch,
   finishOptions,
   modelMaterialSlot,
   pieceModel,
@@ -120,4 +121,30 @@ test('the bundled catalog matches the manifest and every library finish has its 
     assert.ok(model.slots.length > 0, model.id);
     assert.match(model.attribution, /CC0/);
   }
+});
+
+test('the catalog offers several models for each common kind, each with thumbnail and CC0 credit', () => {
+  for (const kind of ['sofa', 'armchair', 'coffee-table', 'dining-table', 'chair', 'nightstand', 'wardrobe', 'plant'] as const)
+    assert.ok(assetCatalog.models.filter((m) => m.kinds.includes(kind)).length >= 3, kind);
+  assert.ok(assetCatalog.models.filter((m) => m.kinds.includes('bed')).length >= 2);
+  for (const model of assetCatalog.models) {
+    assert.ok(model.thumbnail && existsSync(`public${model.thumbnail}`), model.id);
+    assert.ok(model.name);
+  }
+  // At most one default per kind; kinds without one keep the built-in piece.
+  for (const kind of new Set(assetCatalog.models.flatMap((m) => m.kinds)))
+    assert.ok(assetCatalog.models.filter((m) => m.default && m.kinds.includes(kind)).length <= 1, kind);
+  assert.equal(pieceModel({ kind: 'bed' }), undefined);
+  assert.equal(pieceModel({ kind: 'sofa', model: 'builtin' }), undefined);
+  assert.equal(pieceModel({ kind: 'bed', model: 'bed-iron-frame' })?.id, 'bed-iron-frame');
+});
+
+test('choosing a non-stretching model adopts its native size; stretchable models keep the saved size', () => {
+  const round = chooseModelPatch({ kind: 'coffee-table' }, 'coffee-table-round-steel');
+  const model = assetCatalog.models.find((m) => m.id === 'coffee-table-round-steel')!;
+  assert.equal(round.width, Math.round(model.size[0] * 100) / 100);
+  assert.equal(round.depth, Math.round(model.size[2] * 100) / 100);
+  assert.deepEqual(chooseModelPatch({ kind: 'sofa' }, 'sofa-tufted-leather'), { model: 'sofa-tufted-leather' });
+  // A model for another kind changes nothing but the (ignored) reference.
+  assert.deepEqual(chooseModelPatch({ kind: 'sofa' }, 'bed-iron-frame'), { model: 'bed-iron-frame' });
 });

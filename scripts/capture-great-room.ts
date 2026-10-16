@@ -12,6 +12,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { chromium } from 'playwright-core';
 import { sceneSchema, type Scene } from '../shared/model.ts';
+import { chooseModelPatch } from '../shared/finishes.ts';
 import { sceneFingerprint } from '../server/render-service.ts';
 import { renderCamera, renderRequestSchema, type RenderRequest } from '../shared/render.ts';
 
@@ -40,6 +41,30 @@ if (!source) throw new Error(`No saved project ${projectId}.`);
 const scene = sceneSchema.parse(structuredClone(source.scene));
 const room = scene.rooms.find((item) => item.id === roomId);
 if (!room) throw new Error(`Project ${projectId} has no room ${roomId}.`);
+// --demo-catalog picks catalog models and adds a few plants, also only in this copy.
+if (args.includes('--demo-catalog')) {
+  const byId = (id: string) => scene.rooms.find((item) => item.id === id);
+  const pieces = (roomKey: string, kind: string) =>
+    (byId(roomKey)?.furniture ?? []).filter((item) => item.kind === kind);
+  const choose = (roomKey: string, kind: string, model: string, index?: number) =>
+    pieces(roomKey, kind).forEach((item, i) => {
+      if (index === undefined || index === i) Object.assign(item, chooseModelPatch(item, model));
+    });
+  choose('great-hall', 'armchair', 'armchair-mid-century', 1);
+  choose('great-hall', 'coffee-table', 'coffee-table-round-steel', 1);
+  choose('dining', 'dining-table', 'dining-table-plank');
+  choose('dining', 'chair', 'chair-tufted-dining');
+  choose('primary-suite', 'nightstand', 'nightstand-open-shelf');
+  choose('primary-suite', 'wardrobe', 'wardrobe-hutch');
+  choose('terrace', 'chair', 'chair-ladder-back');
+  const plant = (roomKey: string, id: string, model: string, x: number, z: number, height = 1.3) =>
+    byId(roomKey)?.furniture?.push({
+      id, kind: 'plant', name: 'Potted plant', model, x, z, rotation: 0, width: 0.6, depth: 0.6, height,
+    });
+  plant('great-hall', 'demo-plant-hall', 'plant-ficus', 5.9, -5.0, 1.5);
+  plant('entry', 'demo-plant-entry', 'plant-leafy', -1.6, 2.9, 1.0);
+  plant('primary-suite', 'demo-plant-suite', 'plant-aloe', -4.3, -2.4, 0.7);
+}
 // --demo-finishes applies library finishes to this isolated copy only.
 if (args.includes('--demo-finishes')) {
   const byId = (id: string) => scene.rooms.find((item) => item.id === id);

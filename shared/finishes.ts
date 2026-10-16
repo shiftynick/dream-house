@@ -28,6 +28,9 @@ export type CatalogModel = {
   size: [number, number, number];
   thumbnail?: string;
   style?: string;
+  default?: boolean;
+  /** Has stretch zones, so it fits any saved length without distortion. */
+  stretches?: boolean;
   attribution: string;
 };
 export const assetCatalog = catalog as { materials: CatalogMaterial[]; models: CatalogModel[] };
@@ -64,11 +67,17 @@ export function catalogModel(id: string | undefined) {
 export function modelsForKind(kind: FurnitureKind) {
   return assetCatalog.models.filter((item) => item.kinds.includes(kind));
 }
+/** `model: 'builtin'` keeps the procedural piece even where a kind has a default model. */
+export const BUILTIN_MODEL = 'builtin';
 /** The model a piece renders with: its chosen catalog model when that model
- * fits its kind, otherwise the first catalog model for the kind, if any. */
+ * fits its kind, otherwise the kind's default model, if any; undefined means
+ * the built-in procedural piece. */
 export function pieceModel(item: Pick<Furniture, 'kind' | 'model'>) {
+  if (item.model === BUILTIN_MODEL) return undefined;
   const chosen = catalogModel(item.model);
-  return chosen?.kinds.includes(item.kind) ? chosen : modelsForKind(item.kind)[0];
+  return chosen?.kinds.includes(item.kind)
+    ? chosen
+    : modelsForKind(item.kind).find((model) => model.default);
 }
 
 /** Material keys of the procedural fallback geometry (src/renderFurniture.tsx). */
@@ -99,6 +108,7 @@ const proceduralKindSlots: Record<FurnitureKind, FinishSlot[]> = {
   bath: ['metal'],
   toilet: ['metal'],
   rug: ['rug'],
+  plant: [],
 };
 /** A glTF material named `wood` or `wood.001` belongs to the wood slot. */
 export function modelMaterialSlot(name: string): FinishSlot | undefined {
@@ -121,4 +131,20 @@ export function resolveFinish(
 ) {
   const id = item.finishes?.[slot] ?? room?.furnitureFinishes?.[slot];
   return id && finishFits(slot, id) ? id : undefined;
+}
+
+/** Native [width, depth, height] of a model in centimeter-rounded meters. */
+export function modelDimensions(model: CatalogModel) {
+  const [width, height, depth] = model.size;
+  return { width, depth, height };
+}
+
+/** The update for choosing a model: models with stretch zones keep the saved
+ * size; others adopt their native proportions instead of being distorted. */
+export function chooseModelPatch(item: Pick<Furniture, 'kind'>, id: string): Partial<Furniture> {
+  const model = catalogModel(id);
+  if (!model || !model.kinds.includes(item.kind) || model.stretches) return { model: id };
+  const round = (value: number) => Math.round(value * 100) / 100;
+  const { width, depth, height } = modelDimensions(model);
+  return { model: id, width: round(width), depth: round(depth), height: round(height) };
 }

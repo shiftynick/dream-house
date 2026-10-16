@@ -188,6 +188,10 @@
   "models": [
     {
       "id": "armchair-oak-leather",
+      "name": "Oak lounge armchair",
+      "style": "modern",
+      "default": true,
+      "thumbnail": "/assets/thumbnails/armchair-oak-leather.jpg",
       "kinds": [
         "armchair"
       ],
@@ -204,6 +208,11 @@
     },
     {
       "id": "coffee-table-concrete-oak",
+      "name": "Concrete and oak coffee table",
+      "style": "modern",
+      "default": true,
+      "thumbnail": "/assets/thumbnails/coffee-table-concrete-oak.jpg",
+      "stretches": true,
       "kinds": [
         "coffee-table"
       ],
@@ -220,6 +229,11 @@
     },
     {
       "id": "sofa-tufted-leather",
+      "name": "Tufted curved sofa",
+      "style": "transitional",
+      "default": true,
+      "thumbnail": "/assets/thumbnails/sofa-tufted-leather.jpg",
+      "stretches": true,
       "kinds": [
         "sofa"
       ],
@@ -233,6 +247,458 @@
         0.8178
       ],
       "attribution": "Sofa 02 by Kirill Sannikov (Poly Haven, CC0)"
+    },
+    {
+      "id": "sofa-camelback",
+      "name": "Camelback sofa",
+      "style": "classic",
+      "thumbnail": "/assets/thumbnails/sofa-camelback.jpg",
+      "stretches": true,
+      "kinds": [
+        "sofa"
+      ],
+      "slots": [
+        "upholstery",
+        "wood"
+      ],
+      "size": [
+        1.5715,
+        0.7965,
+        0.658
+      ],
+      "attribution": "Sofa 01 by Kirill Sannikov (Poly Haven, CC0)"
+    },
+    {
+      "id": "sofa-painted-settle",
+      "name": "Painted wooden settle",
+      "style": "rustic",
+      "thumbnail": "/assets/thumbnails/sofa-painted-settle.jpg",
+      "stretches": true,
+      "kinds": [
+        "sofa"
+      ],
+      "slots": [
+        "upholstery",
+        "wood"
+      ],
+      "size": [
+        2.4517,
+        1.281,
+        0.7873
+      ],
+      "attribution": "Painted Wooden Sofa by Kirill Sannikov (Poly Haven, CC0)"
+    },
+    {
+      "id": "armchair-mid-century",
+      "name": "Mid-century swivel lounge chair",
+      "style": "mid-century",
+      "thumbnail": "/assets/thumbnails/armchair-mid-century.jpg",
+      "kinds": [
+        "armchair"
+      ],
+      "slots": [
+        "metal",
+        "upholstery"
+      ],
+      "size": [
+        1.0086,
+        1.1691,
+        1.1903
+      ],
+      "attribution": "Mid Century Lounge Chair by Kuutti Siitonen (Poly Haven, CC0)"
+    },
+    {
+      "id": "armchair-bergere",
+      "name": "Upholstered bergère",
+      "style": "classic",
+      "thumbnail": "/assets/thumbnails/armchair-bergere.jpg",
+      "kinds": [
+        "armchair"
+      ],
+      "slots": [
+        "upholstery",
+        "wood"
+      ],
+      "size": [
+        0.8484,
+        1.0651,
+        0.7658
+      ],
+      "attribution": "Arm Chair 01 by Kirill Sannikov (Poly Haven, CC0)"
+    },
+    {
+      "id": "coffee-table-inlay",
+      "name": "Inlaid block coffee table",
+      "style": "modern",
+      "thumbnail": "/assets/thumbnails/coffee-table-inlay.jpg",
+      "kinds": [
+        "coffee-table"
+      ],
+      "slots": [
+        "stone",
+        "wood"
+      ],
+      "size": [
+        1.1991,
+        0.3692,
+        1.1997
+      ],
+      "attribution": "Modern Coffee Table 02 by Amin (Poly Haven, CC0)"
+    },
+    {
+      "id": "coffee-table-round-steel",
+      "name": "Round steel coffee table",
+      "style": "modern",
+      "thumbnail": "/assets/thumbnails/coffee-table-round-steel.jpg",
+      "kinds": [
+        "coffee-table"
+      ],
+      "slots": [
+        "metal",
+        "stone"
+      ],
+      "size": [
+        1.3013,
+        0.491,
+        1.3013
+      ],
+      "attribution": "Coffee Table Round 01 by Ulan Cabanilla (Poly Haven, CC0)"
+    },
+    {
+      "id": "coffee-table-industrial",
+      "name": "Industrial steel coffee table",
+      "style": "industrial",
+      "thumbnail": "/assets/thumbnails/coffee-table-industrial.jpg",
+      "stretches": true,
+      "kinds": [
+        "coffee-table"
+      ],
+      "slots": [
+        "metal",
+        "wood"
+      ],
+      "size": [
+        0.7772,
+        0.6382,
+        0.7571
+      ],
+      "attribution": "Industrial Coffee Table by Ulan Cabanilla (Poly Haven, CC0)"
+    },
+    {
+      "id": "dining-table-plank",
+      "name": "Plank dining table",
+      "style": "contemporary",
+      "thumbnail": "/assets/thumbnails/dining-table-plank.jpg",
+      "stretches": true,
+      "kinds": [
+        "dining-table"
+      ],
+      "slots": [
+        "wood"
+      ],
+      "size": [
+        1.1344,
+        0.7995,
+        0.706
+      ],
+      "attribution": "Wooden Table 02 by Serhii Khromov (Poly Haven, CC0)"
+    },
+    {
+      "id": "dining-table-pedestal",
+      "name": "Round pedestal table",
+      "style": "classic",
+      "thumbnail": "/assets/thumbnails/dining-table-pedestal.jpg",
+      "kinds": [
+        "dining-table"
+      ],
+      "slots": [
+        "wood"
+      ],
+      "size": [
+        1.3993,
+        1.005,
+        1.3993
+      ],
+      "attribution": "Round Wooden Table 01 by Ulan Cabanilla (Poly Haven, CC0)"
+    },
+    {
+      "id": "dining-table-writing",
+      "name": "Small wooden table",
+      "style": "rustic",
+      "thumbnail": "/assets/thumbnails/dining-table-writing.jpg",
+      "stretches": true,
+      "kinds": [
+        "dining-table"
+      ],
+      "slots": [
+        "wood"
+      ],
+      "size": [
+        0.9162,
+        0.5331,
+        0.44
+      ],
+      "attribution": "Small Wooden Table 01 by Ulan Cabanilla (Poly Haven, CC0)"
+    },
+    {
+      "id": "chair-tufted-dining",
+      "name": "Tufted leather dining chair",
+      "style": "contemporary",
+      "thumbnail": "/assets/thumbnails/chair-tufted-dining.jpg",
+      "kinds": [
+        "chair"
+      ],
+      "slots": [
+        "upholstery",
+        "wood"
+      ],
+      "size": [
+        0.4336,
+        0.9734,
+        0.5764
+      ],
+      "attribution": "Dining Chair 02 by James Ray Cock (Poly Haven, CC0)"
+    },
+    {
+      "id": "chair-painted-white",
+      "name": "White painted chair",
+      "style": "farmhouse",
+      "thumbnail": "/assets/thumbnails/chair-painted-white.jpg",
+      "kinds": [
+        "chair"
+      ],
+      "slots": [
+        "wood"
+      ],
+      "size": [
+        0.4318,
+        0.9565,
+        0.5398
+      ],
+      "attribution": "Painted Wooden Chair 01 by Kuutti Siitonen (Poly Haven, CC0)"
+    },
+    {
+      "id": "chair-ladder-back",
+      "name": "Ladder-back chair",
+      "style": "rustic",
+      "thumbnail": "/assets/thumbnails/chair-ladder-back.jpg",
+      "kinds": [
+        "chair"
+      ],
+      "slots": [
+        "wood"
+      ],
+      "size": [
+        0.6394,
+        1.2638,
+        0.6621
+      ],
+      "attribution": "Painted Wooden Chair 02 by Kirill Sannikov (Poly Haven, CC0)"
+    },
+    {
+      "id": "bed-iron-frame",
+      "name": "Iron bed frame",
+      "style": "industrial",
+      "thumbnail": "/assets/thumbnails/bed-iron-frame.jpg",
+      "stretches": true,
+      "kinds": [
+        "bed"
+      ],
+      "slots": [
+        "metal"
+      ],
+      "size": [
+        0.9047,
+        1.2024,
+        2.0017
+      ],
+      "attribution": "Old Bed Frame by Luca B (Poly Haven, CC0)"
+    },
+    {
+      "id": "bed-carved-oak",
+      "name": "Carved four-post bed",
+      "style": "gothic",
+      "thumbnail": "/assets/thumbnails/bed-carved-oak.jpg",
+      "stretches": true,
+      "kinds": [
+        "bed"
+      ],
+      "slots": [
+        "upholstery",
+        "wood"
+      ],
+      "size": [
+        1.4938,
+        1.5338,
+        2.04
+      ],
+      "attribution": "Gothic Bed 01 by Kirill Sannikov (Poly Haven, CC0)"
+    },
+    {
+      "id": "nightstand-open-shelf",
+      "name": "Open-shelf side table",
+      "style": "contemporary",
+      "thumbnail": "/assets/thumbnails/nightstand-open-shelf.jpg",
+      "kinds": [
+        "nightstand"
+      ],
+      "slots": [
+        "wood"
+      ],
+      "size": [
+        0.55,
+        0.5507,
+        0.45
+      ],
+      "attribution": "Side Table 01 by James Ray Cock (Poly Haven, CC0)"
+    },
+    {
+      "id": "nightstand-painted",
+      "name": "Painted nightstand",
+      "style": "rustic",
+      "thumbnail": "/assets/thumbnails/nightstand-painted.jpg",
+      "kinds": [
+        "nightstand"
+      ],
+      "slots": [
+        "wood"
+      ],
+      "size": [
+        0.5046,
+        0.6155,
+        0.5087
+      ],
+      "attribution": "Painted Wooden Nightstand by Kirill Sannikov (Poly Haven, CC0)"
+    },
+    {
+      "id": "nightstand-classic",
+      "name": "Carved nightstand",
+      "style": "classic",
+      "thumbnail": "/assets/thumbnails/nightstand-classic.jpg",
+      "kinds": [
+        "nightstand"
+      ],
+      "slots": [
+        "wood"
+      ],
+      "size": [
+        0.5678,
+        0.7,
+        0.4242
+      ],
+      "attribution": "Classic Nightstand 01 by Kirill Sannikov (Poly Haven, CC0)"
+    },
+    {
+      "id": "wardrobe-carved",
+      "name": "Carved cabinet",
+      "style": "gothic",
+      "thumbnail": "/assets/thumbnails/wardrobe-carved.jpg",
+      "kinds": [
+        "wardrobe"
+      ],
+      "slots": [
+        "wood"
+      ],
+      "size": [
+        1.7191,
+        2.3609,
+        1.1165
+      ],
+      "attribution": "Gothic Cabinet 01 by Kirill Sannikov (Poly Haven, CC0)"
+    },
+    {
+      "id": "wardrobe-hutch",
+      "name": "Glazed hutch cabinet",
+      "style": "classic",
+      "thumbnail": "/assets/thumbnails/wardrobe-hutch.jpg",
+      "kinds": [
+        "wardrobe"
+      ],
+      "slots": [
+        "glass",
+        "wood"
+      ],
+      "size": [
+        2.0218,
+        2.2347,
+        0.6698
+      ],
+      "attribution": "Vintage Cabinet 01 by Rico Cilliers (Poly Haven, CC0)"
+    },
+    {
+      "id": "wardrobe-tall-shelf",
+      "name": "Tall shelf cabinet",
+      "style": "asian",
+      "thumbnail": "/assets/thumbnails/wardrobe-tall-shelf.jpg",
+      "kinds": [
+        "wardrobe"
+      ],
+      "slots": [
+        "wood"
+      ],
+      "size": [
+        1.2625,
+        2.8721,
+        0.5452
+      ],
+      "attribution": "Chinese Cabinet by Kirill Sannikov (Poly Haven, CC0)"
+    },
+    {
+      "id": "plant-ficus",
+      "name": "Potted ficus",
+      "style": "decor",
+      "thumbnail": "/assets/thumbnails/plant-ficus.jpg",
+      "kinds": [
+        "plant"
+      ],
+      "slots": [
+        "other",
+        "stone"
+      ],
+      "size": [
+        0.5854,
+        1.3499,
+        0.6335
+      ],
+      "attribution": "Potted Plant 01 by Rico Cilliers (Poly Haven, CC0)"
+    },
+    {
+      "id": "plant-aloe",
+      "name": "Aloe in white planter",
+      "style": "decor",
+      "thumbnail": "/assets/thumbnails/plant-aloe.jpg",
+      "kinds": [
+        "plant"
+      ],
+      "slots": [
+        "other",
+        "stone"
+      ],
+      "size": [
+        0.1679,
+        0.2675,
+        0.1848
+      ],
+      "attribution": "Potted Plant 04 by James Ray Cock (Poly Haven, CC0)"
+    },
+    {
+      "id": "plant-leafy",
+      "name": "Leafy potted plant",
+      "style": "decor",
+      "thumbnail": "/assets/thumbnails/plant-leafy.jpg",
+      "kinds": [
+        "plant"
+      ],
+      "slots": [
+        "other",
+        "stone"
+      ],
+      "size": [
+        0.7008,
+        0.8416,
+        0.6564
+      ],
+      "attribution": "Potted Plant 02 by Rico Cilliers (Poly Haven, CC0)"
     }
   ]
 }

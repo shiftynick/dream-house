@@ -25,6 +25,8 @@ export type FurnitureAsset = {
   upholstery?: { mean: number; shade: number };
   /** Finish slots named by the model's materials. */
   slots?: string[];
+  /** Renders every piece of its kinds unless the piece chooses another model. */
+  default?: boolean;
 };
 /** A swappable finish from the library; loaded on first use. */
 export type MaterialAsset = {
@@ -151,7 +153,8 @@ export function loadRenderAssets(): Promise<void> {
     const loader = new GLTFLoader().setDRACOLoader(draco);
     for (const asset of manifest.materials ?? []) state.library.set(asset.id, asset);
     for (const asset of manifest.furniture)
-      for (const kind of asset.kinds) if (!state.defaults.has(kind)) state.defaults.set(kind, asset.id);
+      if (asset.default)
+        for (const kind of asset.kinds) if (!state.defaults.has(kind)) state.defaults.set(kind, asset.id);
     await Promise.all([
       ...manifest.furniture.map(async (asset) => {
         try {
@@ -220,6 +223,7 @@ export function useRenderAssets() {
 /** The loaded model for a piece: its chosen catalog model when it fits the
  * kind, else the kind's default; undefined renders the procedural fallback. */
 export function furnitureModel(kind: FurnitureKind, modelId?: string) {
+  if (modelId === 'builtin') return undefined;
   const chosen = modelId ? state.models.get(modelId) : undefined;
   if (chosen?.asset.kinds.includes(kind)) return chosen;
   const fallback = state.defaults.get(kind);

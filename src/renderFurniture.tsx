@@ -140,6 +140,10 @@ export function furnitureParts(kind: FurnitureKind): FurniturePart[] {
       welt: 'y',
       flatWelt: true,
     });
+  } else if (kind === 'plant') {
+    // A tapered pot and a soft foliage mass, both inside the saved envelope.
+    parts.push({ position: [0, 0.16, 0], size: [0.62, 0.32, 0.62], material: 'ceramic', cylinder: true });
+    box([0, 0.62, 0], [0.98, 0.62, 0.98], 'foliage', 0.3);
   } else if (kind === 'bath') {
     box([0, 0.36, 0], [0.97, 0.72, 0.96], 'ceramic', 0.14);
     box([0, 0.705, 0], [0.82, 0.035, 0.72], 'basin', 0.13);

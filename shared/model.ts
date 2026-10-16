@@ -38,6 +38,7 @@ export const furnitureKindSchema = z.enum([
   'vanity',
   'toilet',
   'rug',
+  'plant',
 ]);
 /** Swappable finish slots. Furniture models name their materials after these;
  * a slot without a chosen finish keeps the model's own photographed material. */

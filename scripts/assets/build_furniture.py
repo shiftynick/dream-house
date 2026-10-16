@@ -50,6 +50,11 @@ def parse_args():
                         help="JSON map of source material name (or prefix) to finish slot")
     parser.add_argument("--split", action="append", default=[],
                         help="MATERIAL:SATURATED_SLOT:REST_SLOT island split of a shared atlas")
+    parser.add_argument("--classify", action="append", default=[],
+                        help='JSON {"material", "default", "rules": [{"slot", "sat": [lo, hi], "val": [lo, hi]}]}: '
+                             "assign each UV island of a shared atlas by its mean texel color and top height")
+    parser.add_argument("--slot-preview", help="workbench render colored by finish slot")
+    parser.add_argument("--thumbnail", help="Cycles studio thumbnail (PNG) for the catalog picker")
     parser.add_argument("--trim-slot", default="wood",
                         help="slot for faces moved off the upholstery by --split-saturated")
     return parser.parse_args(argv)
@@ -191,6 +196,19 @@ def main():
             factor = args.texture_size / max(width, height)
             image.scale(max(1, round(width * factor)), max(1, round(height * factor)))
 
+    classified = [classify_material(piece, json.loads(rule)) for rule in args.classify]
+    # Drop now-unused source materials so they do not export as empty slots.
+    mesh = piece.data
+    used = sorted({polygon.material_index for polygon in mesh.polygons})
+    if len(used) < len(mesh.materials):
+        kept = [mesh.materials[i] for i in used]
+        remap = {old: new for new, old in enumerate(used)}
+        indices = [remap[polygon.material_index] for polygon in mesh.polygons]
+        mesh.materials.clear()
+        for mat in kept:
+            mesh.materials.append(mat)
+        for polygon, index in zip(mesh.polygons, indices):
+            polygon.material_index = index
     for rule in args.split:
         name, saturated_slot, rest_slot = rule.rsplit(":", 2)
         split_material(piece, name, saturated_slot, rest_slot)
@@ -232,12 +250,17 @@ def main():
         "textureSize": max([max(image.size) for image in bpy.data.images] or [0]),
         "bytes": os.path.getsize(args.output),
         **({"upholstery": upholstery} if upholstery else {}),
+        **({"classified": classified} if classified else {}),
     }
     with open(args.meta, "w") as handle:
         json.dump(meta, handle, indent=2)
 
     if args.preview:
         render_preview(piece, size, args.preview)
+    if args.slot_preview:
+        render_slot_preview(piece, size, args.slot_preview)
+    if args.thumbnail:
+        render_thumbnail(piece, size, args.thumbnail)
 
 
 def base_color_image(material):
@@ -314,6 +337,59 @@ def split_saturated_islands(piece, slot_index, mask, trim_slot):
     return moved
 
 
+def island_colors(piece, index, rgb):
+    """Yield (faces, mean sRGB color) for each UV island using material `index`."""
+    height, width = rgb.shape[:2]
+    uv = piece.data.uv_layers.active.data
+    mesh = piece.data
+    for island in mesh_linked_uv_islands(mesh):
+        faces = [mesh.polygons[i] for i in island if mesh.polygons[i].material_index == index]
+        samples = []
+        for polygon in faces:
+            points = [uv[loop].uv for loop in polygon.loop_indices]
+            centroid = sum(points, mathutils.Vector((0, 0))) / len(points)
+            for point in points + [centroid]:
+                sample = (point + centroid) / 2
+                x = min(width - 1, max(0, int((sample.x % 1.0) * width)))
+                y = min(height - 1, max(0, int((sample.y % 1.0) * height)))
+                samples.append(rgb[y, x])
+        if faces:
+            top = max((piece.matrix_world @ mesh.vertices[v].co).z for f in faces for v in f.vertices)
+            yield faces, np.mean(samples, axis=0), top
+
+
+def classify_material(piece, rule_set):
+    """--classify: move each UV island of one atlas material to a per-slot copy
+    chosen by HSV rules on its mean color (first match wins, else `default`)."""
+    index = material_index(piece, rule_set["material"])
+    material = piece.material_slots[index].material
+    rgb = image_rgb(base_color_image(material).image)
+    copies = {}
+    counts = {}
+    import colorsys
+    low, high = world_bounds(piece)
+    span = max(high.z - low.z, 1e-6)
+    for faces, color, top in list(island_colors(piece, index, rgb)):
+        _, sat, val = colorsys.rgb_to_hsv(*[float(c) for c in color[:3]])
+        # `top`: the island's highest point as a fraction of the piece height (legs sit low).
+        height = (top - low.z) / span
+        slot = next((rule["slot"] for rule in rule_set.get("rules", [])
+                     if rule.get("sat", [0, 1])[0] <= sat <= rule.get("sat", [0, 1])[1]
+                     and rule.get("val", [0, 1])[0] <= val <= rule.get("val", [0, 1])[1]
+                     and rule.get("top", [0, 1])[0] <= height <= rule.get("top", [0, 1])[1]),
+                    rule_set.get("default", "other"))
+        if slot not in copies:
+            copy = material.copy()
+            copy.name = f"{material.name}-{slot}"
+            copy["slot"] = slot
+            piece.data.materials.append(copy)
+            copies[slot] = len(piece.data.materials) - 1
+        for polygon in faces:
+            polygon.material_index = copies[slot]
+        counts[slot] = counts.get(slot, 0) + len(faces)
+    return counts
+
+
 def split_material(piece, name, saturated_slot, rest_slot):
     """--split: separate a shared atlas into a saturated slot and the rest."""
     index = material_index(piece, name)
@@ -357,28 +433,81 @@ def prepare_upholstery(piece, args):
     return {"mean": UPHOLSTERY_MEAN, "sourceMean": round(mean, 5), "trimFaces": trim_faces}
 
 
-def render_preview(piece, size, path):
+SLOT_COLORS = {"upholstery": (0.85, 0.3, 0.3, 1), "wood": (0.55, 0.35, 0.15, 1),
+               "metal": (0.3, 0.5, 0.9, 1), "stone": (0.9, 0.9, 0.85, 1),
+               "rug": (0.9, 0.6, 0.1, 1), "glass": (0.4, 0.9, 0.9, 1), "other": (0.3, 0.8, 0.3, 1)}
+
+
+def render_slot_preview(piece, size, path):
+    """The preview camera with each material colored by its slot, to verify splits."""
+    for slot in piece.material_slots:
+        if slot.material:
+            slot.material.diffuse_color = SLOT_COLORS.get(slot.material.name.split(".")[0], (1, 0, 1, 1))
+    bpy.context.scene.display.shading.color_type = "MATERIAL"
+    render_preview(piece, size, path, color_type="MATERIAL")
+
+
+def place_camera(scene, size, lens=40, distance=1.9):
+    camera = scene.camera
+    if camera is None:
+        camera = bpy.data.objects.new("preview", bpy.data.cameras.new("preview"))
+        scene.collection.objects.link(camera)
+        scene.camera = camera
+    radius = max(size) * distance
+    # Blender -Y is the front: place the camera in front, to the right and above.
+    camera.location = (radius * 0.6, -radius * 0.9, size.z * 0.5 + radius * 0.45)
+    target = mathutils.Vector((0, 0, size.z * 0.45))
+    camera.rotation_euler = (target - camera.location).to_track_quat("-Z", "Y").to_euler()
+    camera.data.lens = lens
+    return camera
+
+
+def render_thumbnail(piece, size, path):
+    """A soft studio render on the editor's paper color, for the catalog picker."""
+    scene = bpy.context.scene
+    scene.render.engine = "CYCLES"
+    scene.cycles.device = "CPU"
+    scene.cycles.samples = 48
+    scene.cycles.use_denoising = True
+    scene.render.resolution_x = scene.render.resolution_y = 256
+    scene.render.film_transparent = False
+    scene.view_settings.view_transform = "AgX"
+    scene.view_settings.look = "AgX - Medium High Contrast"
+    world = scene.world or bpy.data.worlds.new("thumbnail")
+    scene.world = world
+    world.use_nodes = True
+    world.node_tree.nodes["Background"].inputs["Color"].default_value = (0.62, 0.61, 0.57, 1)
+    world.node_tree.nodes["Background"].inputs["Strength"].default_value = 0.55
+    sun = bpy.data.objects.new("key", bpy.data.lights.new("key", "SUN"))
+    sun.data.energy = 4.5
+    sun.data.angle = math.radians(25)
+    sun.rotation_euler = (math.radians(50), 0, math.radians(35))
+    scene.collection.objects.link(sun)
+    # A floor that catches the contact shadow, colored like the background.
+    bpy.ops.mesh.primitive_plane_add(size=max(size) * 20)
+    floor = bpy.context.active_object
+    mat = bpy.data.materials.new("floor")
+    mat.use_nodes = True
+    mat.node_tree.nodes["Principled BSDF"].inputs["Base Color"].default_value = (0.55, 0.54, 0.5, 1)
+    floor.data.materials.append(mat)
+    place_camera(scene, size, lens=50, distance=1.75)
+    scene.render.image_settings.file_format = "PNG"
+    scene.render.filepath = os.path.abspath(path)
+    bpy.ops.render.render(write_still=True)
+
+
+def render_preview(piece, size, path, color_type="TEXTURE"):
     """Workbench 3/4 front view from the south-east, so orientation can be checked."""
     scene = bpy.context.scene
     scene.render.engine = "BLENDER_WORKBENCH"
     scene.display.shading.light = "STUDIO"
-    scene.display.shading.color_type = "TEXTURE"
+    scene.display.shading.color_type = color_type
     scene.display.shading.show_shadows = True
     scene.render.resolution_x = 640
     scene.render.resolution_y = 480
     scene.render.film_transparent = False
     scene.world = bpy.data.worlds.new("preview") if not scene.world else scene.world
-    camera_data = bpy.data.cameras.new("preview")
-    camera = bpy.data.objects.new("preview", camera_data)
-    scene.collection.objects.link(camera)
-    scene.camera = camera
-    radius = max(size) * 1.9
-    # Blender -Y is the front: place the camera in front, to the right and above.
-    camera.location = (radius * 0.6, -radius * 0.9, size.z * 0.5 + radius * 0.45)
-    target = mathutils.Vector((0, 0, size.z * 0.45))
-    direction = target - camera.location
-    camera.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
-    camera_data.lens = 40
+    place_camera(scene, size)
     scene.render.filepath = os.path.abspath(path)
     bpy.ops.render.render(write_still=True)
 
