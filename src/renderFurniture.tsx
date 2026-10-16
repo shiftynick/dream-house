@@ -4,6 +4,12 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import type { Furniture, FurnitureKind } from '../shared/model';
 import { physicalUvs } from './renderMeshes';
+import {
+  fittedModelGeometry,
+  furnitureModel,
+  upholsteryTint,
+  useRenderAssets,
+} from './renderAssets';
 
 export type FurniturePart = {
   position: [number, number, number];
@@ -386,27 +392,82 @@ export function furnitureGeometry(item: Furniture) {
   });
 }
 
+/** A soft footprint darkening that grounds pieces where shadow maps and SSAO
+ * are too coarse for floor contact. Shared, never disposed (module lifetime). */
+const contactPlane = new THREE.PlaneGeometry(1, 1);
+let contact: THREE.MeshBasicMaterial | undefined;
+function contactMaterial() {
+  if (contact) return contact;
+  const size = 128,
+    canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const context = canvas.getContext('2d')!;
+  const image = context.createImageData(size, size);
+  for (let y = 0; y < size; y++)
+    for (let x = 0; x < size; x++) {
+      // Distance outside an inner rounded rectangle, in normalized units.
+      const dx = Math.max(0, Math.abs((x + 0.5) / size - 0.5) - 0.36),
+        dy = Math.max(0, Math.abs((y + 0.5) / size - 0.5) - 0.36);
+      const t = Math.min(1, Math.hypot(dx, dy) / 0.14);
+      // alphaMap samples the green channel.
+      const i = (y * size + x) * 4;
+      image.data.fill(Math.round(255 * (1 - t * t * (3 - 2 * t))), i, i + 3);
+      image.data[i + 3] = 255;
+    }
+  context.putImageData(image, 0, 0);
+  const map = new THREE.CanvasTexture(canvas);
+  contact = new THREE.MeshBasicMaterial({
+    color: '#000000',
+    alphaMap: map,
+    transparent: true,
+    opacity: 0.62,
+    depthWrite: false,
+    toneMapped: false,
+    polygonOffset: true,
+    polygonOffsetFactor: -2,
+  });
+  return contact;
+}
+
 export function FurnitureMesh({
   item,
   materials,
+  modelMaterial,
   selected,
   onSelect,
 }: {
   item: Furniture;
   materials: Record<string, THREE.Material>;
+  /** Room-lit material for a model's own PBR material; absent in clay/wireframe. */
+  modelMaterial?: (source: THREE.Material, tint?: THREE.Color) => THREE.Material;
   selected: boolean;
   onSelect: () => void;
 }) {
+  const assetsVersion = useRenderAssets();
+  const model = useMemo(() => furnitureModel(item.kind), [item.kind, assetsVersion]);
   const pieces = useMemo(
-    () => furnitureGeometry(item),
-    [item.kind, item.width, item.height, item.depth],
+    () =>
+      model
+        ? fittedModelGeometry(model, item).map(({ geometry, material }) => ({
+            geometry,
+            material: null as string | null,
+            source: material,
+          }))
+        : furnitureGeometry(item).map(({ geometry, material }) => ({
+            geometry,
+            material: material as string | null,
+            source: null as THREE.Material | null,
+          })),
+    [model, item.kind, item.width, item.height, item.depth],
   );
   useEffect(() => () => pieces.forEach((part) => part.geometry.dispose()), [pieces]);
+  const fabric = materials.fabric?.userData.paletteColor as string | undefined;
+  const tint = useMemo(() => model && upholsteryTint(model.asset, fabric), [model, fabric]);
   return (
     <group
       position={[item.x, 0, item.z]}
       rotation={[0, (item.rotation * Math.PI) / 180, 0]}
-      userData={{ furnitureId: item.id }}
+      userData={{ furnitureId: item.id, furnitureModel: model?.asset.id }}
       onClick={(event) => {
         event.stopPropagation();
         onSelect();
@@ -416,11 +477,28 @@ export function FurnitureMesh({
         <mesh
           key={index}
           geometry={part.geometry}
-          material={materials[part.material]}
+          material={
+            part.source
+              ? modelMaterial
+                ? modelMaterial(part.source, part.source.name === 'upholstery' ? tint : undefined)
+                : materials.fabric
+              : materials[part.material!]
+          }
           castShadow
           receiveShadow
         />
       ))}
+      {item.kind !== 'rug' && (
+        <mesh
+          position={[0, 0.004, 0]}
+          rotation={[-Math.PI / 2, 0, 0]}
+          scale={[item.width * 1.08, item.depth * 1.08, 1]}
+          geometry={contactPlane}
+          material={contactMaterial()}
+          raycast={() => null}
+          renderOrder={1}
+        />
+      )}
       {selected && (
         <mesh position={[0, item.height / 2, 0]}>
           <boxGeometry args={[item.width + 0.012, item.height + 0.012, item.depth + 0.012]} />

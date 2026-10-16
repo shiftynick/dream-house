@@ -4,6 +4,7 @@ import { createRoot, extend, useThree } from '@react-three/fiber';
 import { RasterRenderer } from './rasterRenderer';
 import { interiorExposure } from './renderLighting';
 import { captureAfterRender } from './captureSchedule';
+import { loadRenderAssets } from './renderAssets';
 import * as THREE from 'three';
 import { Architecture, Environment, FloorPlanSvg, Site } from './SceneView';
 import {
@@ -14,6 +15,7 @@ import {
 } from '../shared/render';
 
 const WIDTH = 768;
+const ASSET_WAIT_MS = 20000;
 const HEIGHT = 576;
 const noSelection = () => {};
 type Props = {
@@ -178,13 +180,21 @@ function OffscreenScene({
           camera.updateMatrixWorld(true);
         },
       })
+      // Captures must show the same furniture models/photo textures as the editor,
+      // so wait (bounded) for optional assets instead of drawing fallbacks.
+      .then(() =>
+        Promise.race([
+          loadRenderAssets(),
+          new Promise<void>((resolve) => setTimeout(resolve, ASSET_WAIT_MS)),
+        ]),
+      )
       .then(() => {
         if (cancelled) return;
         root.render(
           <CaptureBoundary onError={fail}>
             <Suspense fallback={null}>
               <Environment light={job.request.light} house={job.scene} />
-              <Site house={job.scene} quality={job.request.quality} />
+              <Site house={job.scene} quality={job.request.quality} light={job.request.light} />
               <Architecture
                 house={job.scene}
                 light={job.request.light}

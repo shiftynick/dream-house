@@ -1,0 +1,116 @@
+{
+  "$comment": "Source list for scripts/assets/build-assets.ts. Every source is CC0 (Poly Haven). Furniture sizes are fitted to each saved piece at runtime; stretch zones (normalized model x, -0.5..0.5) scale only the interior so arms and legs keep their proportions. Texture albedo \"luminance\" stores a grayscale photo so the palette supplies hue; \"photo\" keeps the photographed color.",
+  "furniture": [
+    {
+      "id": "armchair-oak-leather",
+      "kinds": ["armchair"],
+      "polyhaven": "modern_arm_chair_01",
+      "targetTriangles": 24000,
+      "textureSize": 1024,
+      "upholstery": {
+        "material": "modern_arm_chair_01_pillow",
+        "contrast": 0.35,
+        "shade": 0.62
+      }
+    },
+    {
+      "id": "coffee-table-concrete-oak",
+      "kinds": ["coffee-table"],
+      "polyhaven": "modern_coffee_table_01",
+      "targetTriangles": 8000,
+      "textureSize": 1024,
+      "stretch": {
+        "x": [-0.32, 0.32],
+        "z": [-0.3, 0.3]
+      },
+      "rotateZ": 90
+    },
+    {
+      "id": "sofa-tufted-leather",
+      "kinds": ["sofa"],
+      "polyhaven": "sofa_02",
+      "targetTriangles": 30000,
+      "textureSize": 1024,
+      "stretch": {
+        "x": [-0.34, 0.34]
+      },
+      "upholstery": {
+        "material": "sofa_02",
+        "split": true,
+        "contrast": 0.35,
+        "shade": 0.62
+      }
+    }
+  ],
+  "textures": [
+    {
+      "id": "oak-floor",
+      "surface": "oak",
+      "polyhaven": "laminate_floor_02",
+      "size": 2048,
+      "albedo": "luminance"
+    },
+    {
+      "id": "cedar-boards",
+      "surface": "timber",
+      "polyhaven": "japanese_cedar_planks",
+      "size": 1024,
+      "albedo": "luminance",
+      "scale": 2,
+      "contrast": 0.6
+    },
+    {
+      "id": "oak-veneer",
+      "surface": "veneer",
+      "polyhaven": "oak_veneer_01",
+      "size": 1024,
+      "albedo": "luminance",
+      "contrast": 0.8
+    },
+    {
+      "id": "plaster",
+      "surface": "plaster",
+      "polyhaven": "beige_wall_001",
+      "size": 1024,
+      "albedo": "luminance"
+    },
+    {
+      "id": "linen",
+      "surface": "linen",
+      "polyhaven": "rough_linen",
+      "size": 1024,
+      "albedo": "luminance"
+    },
+    {
+      "id": "wool-rug",
+      "surface": "rug",
+      "polyhaven": "poly_wool_herringbone",
+      "size": 1024,
+      "albedo": "luminance"
+    },
+    {
+      "id": "fieldstone",
+      "surface": "stone",
+      "polyhaven": "stacked_stone_wall",
+      "size": 1024,
+      "albedo": "photo"
+    },
+    {
+      "id": "meadow-ground",
+      "surface": "ground",
+      "polyhaven": "aerial_grass_rock",
+      "size": 1024,
+      "albedo": "photo",
+      "contrast": 0.8
+    }
+  ],
+  "environment": [
+    {
+      "id": "alps-field",
+      "polyhaven": "alps_field",
+      "resolution": "4k",
+      "width": 4096,
+      "lights": ["day"]
+    }
+  ]
+}

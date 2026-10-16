@@ -1,4 +1,12 @@
-import { Component, Suspense, useEffect, useMemo, useRef, type ReactNode } from 'react';
+import {
+  Component,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  type ReactNode,
+} from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
@@ -27,8 +35,15 @@ import { PlanFurniture } from './PlanFurniture';
 import { daylightSkyPixels, interiorExposure } from './renderLighting';
 import { RasterRenderer } from './rasterRenderer';
 import { FurnitureMesh } from './renderFurniture';
+import { Hearth } from './renderFire';
 import { wallFinishGeometry, wallSurfaceGeometry } from './architecturalFinish';
-import { makeSurfaceTextures, type SurfaceKind } from './renderMaterials';
+import {
+  backgroundTexture,
+  hasBackground,
+  surfaceTextures,
+  useRenderAssets,
+  type MaterialSurface,
+} from './renderAssets';
 import {
   ROOM_MAP_LIMIT,
   roomDaylightField,
@@ -166,33 +181,52 @@ function RoomMesh({
   quality: Quality;
 }) {
   const outdoor = ['terrace', 'courtyard'].includes(r.kind);
+  const roomLit = useCallback(
+    (source: THREE.Material) => {
+      const material = source.clone() as THREE.MeshStandardMaterial;
+      material.envMap = roomEnvironment ?? null;
+      if (roomEnvironment)
+        applyRoomIrradiance(
+          material,
+          roomIrradiance(roomEnvironment.image.data as Float32Array),
+          roomEnvironmentIntensity,
+        );
+      material.envMapIntensity = roomEnvironment
+        ? roomEnvironmentIntensity
+        : source instanceof THREE.MeshStandardMaterial
+          ? source.envMapIntensity
+          : 1;
+      return material;
+    },
+    [roomEnvironment, roomEnvironmentIntensity],
+  );
   const interiorSets = useMemo(
     () =>
       Object.fromEntries(
         Object.entries(materialSets).map(([palette, set]) => [
           palette,
-          Object.fromEntries(
-            Object.entries(set).map(([name, source]) => {
-              const material = source.clone() as THREE.MeshStandardMaterial;
-              material.envMap = roomEnvironment ?? null;
-              if (roomEnvironment)
-                applyRoomIrradiance(
-                  material,
-                  roomIrradiance(roomEnvironment.image.data as Float32Array),
-                  roomEnvironmentIntensity,
-                );
-              material.envMapIntensity = roomEnvironment
-                ? roomEnvironmentIntensity
-                : source instanceof THREE.MeshStandardMaterial
-                  ? source.envMapIntensity
-                  : 1;
-              return [name, material];
-            }),
-          ),
+          Object.fromEntries(Object.entries(set).map(([name, source]) => [name, roomLit(source)])),
         ]),
       ),
-    [materialSets, roomEnvironment, roomEnvironmentIntensity],
+    [materialSets, roomLit],
   );
+  // Furniture models bring their own PBR materials; give them this room's light.
+  const modelMaterials = useMemo(() => new Map<string, THREE.Material>(), [roomLit]);
+  useEffect(() => () => modelMaterials.forEach((material) => material.dispose()), [modelMaterials]);
+  const modelMaterial =
+    quality === 'clay' || quality === 'wireframe'
+      ? undefined
+      : (source: THREE.Material, tint?: THREE.Color) => {
+          const key = `${source.uuid}:${tint?.getHexString() ?? ''}`;
+          const cached = modelMaterials.get(key);
+          if (cached) return cached;
+          const material = outdoor
+            ? (source.clone() as THREE.MeshStandardMaterial)
+            : (roomLit(source) as THREE.MeshStandardMaterial);
+          if (tint) material.color.copy(tint);
+          modelMaterials.set(key, material);
+          return material;
+        };
   useEffect(
     () => () =>
       Object.values(interiorSets).forEach((set) =>
@@ -443,7 +477,7 @@ function RoomMesh({
                 generatedMesh(geometry, surfaceMaterial('roof').roof, index, 'roof'),
               )}
               {generated.soffits.map((geometry, index) =>
-                generatedMesh(geometry, insideMaterial('roof').wood, `soffit-${index}`, 'roof'),
+                generatedMesh(geometry, insideMaterial('roof').ceiling, `soffit-${index}`, 'roof'),
               )}
             </>
           )}
@@ -453,6 +487,7 @@ function RoomMesh({
         <FurnitureMesh
           key={item.id}
           item={item}
+          modelMaterial={modelMaterial}
           materials={
             outdoor
               ? item.palette
@@ -563,8 +598,10 @@ function Tree({ x, z, y = 0, scale = 1 }: { x: number; z: number; y?: number; sc
     </group>
   );
 }
+const BACKDROP_ROTATION = 1.92;
 export function Environment({ light, house }: { light: Light; house?: Scene }) {
   const { scene, gl, invalidate } = useThree();
+  const assetsVersion = useRenderAssets();
   const lighting = useMemo(() => {
     const rooms = house?.rooms ?? [];
     const minX = Math.min(0, ...rooms.map((room) => room.x - room.width / 2));
@@ -585,9 +622,15 @@ export function Environment({ light, house }: { light: Light; house?: Scene }) {
     tex.mapping = THREE.EquirectangularReflectionMapping;
     tex.needsUpdate = true;
     scene.environment = tex;
-    scene.background = new THREE.Color(
-      light === 'evening' ? '#9ba8bb' : light === 'golden' ? '#e6ded2' : '#d5e0e9',
-    );
+    // A photographed panorama is only a backdrop; the sky model above still lights.
+    const backdrop = backgroundTexture(light);
+    scene.background =
+      backdrop ??
+      new THREE.Color(light === 'evening' ? '#9ba8bb' : light === 'golden' ? '#e6ded2' : '#d5e0e9');
+    // Turn the panorama's sun toward the directional light's azimuth.
+    scene.backgroundRotation.set(0, BACKDROP_ROTATION, 0);
+    // Daylit exteriors should read brighter than the interior through glass.
+    scene.backgroundIntensity = 2.2;
     scene.environmentIntensity = 0.8;
     const previousExposure = gl.toneMappingExposure;
     gl.toneMappingExposure = 1.05;
@@ -595,15 +638,19 @@ export function Environment({ light, house }: { light: Light; house?: Scene }) {
     invalidate();
     // Three replaces its PMREM cache on context restoration. Dispose source
     // textures while old target callbacks still belong to the lost context.
-    const lost = () => tex.dispose();
+    const lost = () => {
+      tex.dispose();
+      backdrop?.dispose();
+    };
     gl.domElement.addEventListener('webglcontextlost', lost);
     return () => {
       gl.domElement.removeEventListener('webglcontextlost', lost);
       scene.environment = null;
       gl.toneMappingExposure = previousExposure;
       tex.dispose();
+      backdrop?.dispose();
     };
-  }, [scene, gl, light, invalidate]);
+  }, [scene, gl, light, invalidate, assetsVersion]);
   return (
     <>
       <directionalLight
@@ -629,8 +676,18 @@ export function Environment({ light, house }: { light: Light; house?: Scene }) {
     </>
   );
 }
-export function Site({ house, quality }: { house: Scene; quality: Quality }) {
-  const texture = useMemo(() => makeSurfaceTextures('ground'), []);
+export function Site({
+  house,
+  quality,
+  light = 'day',
+}: {
+  house: Scene;
+  quality: Quality;
+  light?: Light;
+}) {
+  const assetsVersion = useRenderAssets();
+  const ground = useMemo(() => surfaceTextures('ground'), [assetsVersion]);
+  const texture = ground.maps;
   const geometry = useMemo(() => {
     const geo = new THREE.PlaneGeometry(180, 180, 180, 180);
     geo.rotateX(-Math.PI / 2);
@@ -640,7 +697,10 @@ export function Site({ house, quality }: { house: Scene; quality: Quality }) {
     return physicalUvs(geo);
   }, [house.slope, house.rooms]);
   useEffect(() => () => geometry.dispose(), [geometry]);
-  useEffect(() => () => Object.values(texture).forEach((map) => map.dispose()), [texture]);
+  useEffect(
+    () => () => new Set(Object.values(texture)).forEach((map) => map?.dispose()),
+    [texture],
+  );
   const positions = [
     [-27, -14, 1.4],
     [-23, 6, 1.1],
@@ -661,25 +721,28 @@ export function Site({ house, quality }: { house: Scene; quality: Quality }) {
     <group>
       <mesh geometry={geometry} receiveShadow onClick={(e) => e.stopPropagation()}>
         <meshStandardMaterial
-          color={quality === 'clay' ? '#c6c4b9' : '#858b68'}
+          color={quality === 'clay' ? '#c6c4b9' : ground.photo ? '#ffffff' : '#858b68'}
           {...(quality === 'clay' || quality === 'wireframe' ? {} : texture)}
           normalScale={new THREE.Vector2(0.8, 0.8)}
           roughness={1}
           wireframe={quality === 'wireframe'}
         />
       </mesh>
-      {positions
-        .filter(
-          ([x, z]) =>
-            !house.rooms.some(
-              (room) =>
-                Math.abs(x - room.x) < room.width / 2 + 3 &&
-                Math.abs(z - room.z) < room.depth / 2 + 3,
-            ),
-        )
-        .map(([x, z, s], i) => (
-          <Tree key={i} x={x} z={z} y={terrainHeight(house, x, z)} scale={s} />
-        ))}
+      {/* A photographed backdrop already supplies the landscape; stylized
+          trees would sit in front of it, so they remain only as the fallback. */}
+      {!(quality === 'live' || quality === 'refined' ? hasBackground(light) : false) &&
+        positions
+          .filter(
+            ([x, z]) =>
+              !house.rooms.some(
+                (room) =>
+                  Math.abs(x - room.x) < room.width / 2 + 3 &&
+                  Math.abs(z - room.z) < room.depth / 2 + 3,
+              ),
+          )
+          .map(([x, z, s], i) => (
+            <Tree key={i} x={x} z={z} y={terrainHeight(house, x, z)} scale={s} />
+          ))}
       {!house.rooms.length && (
         <group position={[0, 0.02, 0]}>
           <mesh rotation={[-Math.PI / 2, 0, 0]}>
@@ -762,18 +825,35 @@ export function Architecture({
     };
   }, [environments, gl, invalidate]);
 
+  const assetsVersion = useRenderAssets();
+  useEffect(() => {
+    gl.shadowMap.needsUpdate = true;
+    invalidate();
+  }, [assetsVersion, gl, invalidate]);
   const textures = useMemo(
     () =>
       Object.fromEntries(
-        (['timber', 'oak', 'plaster', 'concrete', 'linen', 'rug', 'metal'] as SurfaceKind[]).map(
-          (kind) => [kind, makeSurfaceTextures(kind)],
-        ),
-      ),
-    [],
+        (
+          [
+            'timber',
+            'oak',
+            'plaster',
+            'concrete',
+            'linen',
+            'rug',
+            'metal',
+            'veneer',
+            'stone',
+          ] as MaterialSurface[]
+        ).map((kind) => [kind, surfaceTextures(kind)]),
+      ) as Record<MaterialSurface, ReturnType<typeof surfaceTextures>>,
+    [assetsVersion],
   );
   useEffect(
     () => () =>
-      Object.values(textures).forEach((set) => Object.values(set).forEach((map) => map.dispose())),
+      Object.values(textures).forEach(({ maps }) =>
+        new Set(Object.values(maps)).forEach((map) => map?.dispose()),
+      ),
     [textures],
   );
   const materialSets = useMemo(
@@ -783,17 +863,48 @@ export function Architecture({
           const p = palettes[palette];
           const wireframe = surfaceQuality === 'wireframe',
             clay = surfaceQuality === 'clay';
-          const mat = (color: string, roughness = 0.8, surface?: SurfaceKind, bumpScale = 0.002) =>
+          // Photographic sets carry their own roughness/occlusion; the palette
+          // color is divided by the photo's mean so the average hue is retained.
+          const surfaceMaps = (
+            surface: MaterialSurface,
+            color: string,
+            bumpScale: number,
+            photoNormal = 1,
+          ) => {
+            const { maps, photo } = textures[surface];
+            if (!photo)
+              return {
+                color,
+                ...maps,
+                normalScale: new THREE.Vector2(bumpScale / 0.003, bumpScale / 0.003),
+              };
+            const tint = new THREE.Color(photo.albedo === 'photo' ? '#ffffff' : color);
+            if (photo.albedo !== 'photo')
+              tint.setRGB(
+                ...(photo.meanLinear.map((mean, channel) =>
+                  Math.min(4, tint.toArray()[channel] / Math.max(0.02, mean)),
+                ) as [number, number, number]),
+                THREE.LinearSRGBColorSpace,
+              );
+            return {
+              color: tint,
+              ...maps,
+              roughness: 1,
+              normalScale: new THREE.Vector2(photoNormal, photoNormal),
+            };
+          };
+          const mat = (
+            color: string,
+            roughness = 0.8,
+            surface?: MaterialSurface,
+            bumpScale = 0.002,
+          ) =>
             new THREE.MeshStandardMaterial({
-              color: clay ? '#e0dcd1' : color,
               roughness,
               wireframe,
               ...(surface && !clay && !wireframe
-                ? {
-                    ...textures[surface],
-                    normalScale: new THREE.Vector2(bumpScale / 0.003, bumpScale / 0.003),
-                  }
-                : {}),
+                ? surfaceMaps(surface, color, bumpScale)
+                : { color: clay ? '#e0dcd1' : color }),
             });
           const fabricColor = {
             chalk: '#ddd7cb',
@@ -809,8 +920,7 @@ export function Architecture({
               ...(clay || wireframe
                 ? {}
                 : {
-                    ...textures.linen,
-                    normalScale: new THREE.Vector2(0.12, 0.12),
+                    ...surfaceMaps('linen', color, 0.00036, 0.6),
                     sheen: 0.28,
                     sheenRoughness: 0.85,
                     sheenColor: new THREE.Color(color).lerp(new THREE.Color('white'), 0.2),
@@ -848,13 +958,14 @@ export function Architecture({
                 ...(clay || wireframe
                   ? {}
                   : {
-                      ...textures.oak,
-                      normalScale: new THREE.Vector2(0.5, 0.5),
+                      ...surfaceMaps('veneer', p.wood, 0.0015),
                       clearcoat: 0.16,
                       clearcoatRoughness: 0.4,
                     }),
               }),
-              trim: mat(p.wood, 0.7, 'oak', 0.001),
+              trim: mat(p.wood, 0.7, 'veneer', 0.001),
+              ceiling: mat(p.wood, 0.85, 'timber', 0.003),
+              stone: mat('#9a948a', 1, 'stone', 0.006),
               floor: mat(p.floor, 0.9, palette === 'charcoal' ? 'concrete' : 'oak', 0.003),
               roof: mat(p.roof, 0.8, 'metal', 0.012),
               frame: new THREE.MeshStandardMaterial({
@@ -865,7 +976,9 @@ export function Architecture({
               }),
               foundation: mat('#a4a19b', 1, 'concrete', 0.006),
               deck: mat('#b6a185', 1, 'oak', 0.006),
-              fabric: textile(fabricColor),
+              fabric: Object.assign(textile(fabricColor), {
+                userData: { paletteColor: fabricColor },
+              }),
               seam: textile(new THREE.Color(fabricColor).multiplyScalar(0.85).getStyle()),
               accentFabric: textile(palette === 'charcoal' ? '#a89b82' : '#998870'),
               rug: mat(palette === 'charcoal' ? '#8c9089' : '#b8ac97', 1, 'rug', 0.0025),
@@ -936,20 +1049,16 @@ export function Architecture({
       ))}
       {house.fireplace && (
         <group position={[house.fireplace.x, house.fireplace.elevation, house.fireplace.z]}>
-          <Box position={[0, 0.15, 0]} size={[2.4, 0.3, 1.6]} material={m.wall} />
-          <Box position={[-0.8, 0.7, 0]} size={[0.35, 1.1, 1.15]} material={m.wall} />
-          <Box position={[0.8, 0.7, 0]} size={[0.35, 1.1, 1.15]} material={m.wall} />
+          <Box position={[0, 0.15, 0]} size={[2.4, 0.3, 1.6]} material={m.stone} />
+          <Box position={[-0.8, 0.7, 0]} size={[0.35, 1.1, 1.15]} material={m.stone} />
+          <Box position={[0.8, 0.7, 0]} size={[0.35, 1.1, 1.15]} material={m.stone} />
           <Box
             position={[0, (house.fireplace.height + 1.2) / 2, 0]}
             size={[1.95, house.fireplace.height - 1.2, 1.15]}
-            material={m.wall}
+            material={m.stone}
           />
           <Box position={[0, 0.55, 0]} size={[1.2, 0.3, 0.5]} material={m.frame} />
-          <mesh position={[0, 0.65, 0.1]}>
-            <sphereGeometry args={[0.32, 12, 8]} />
-            <meshStandardMaterial color="#edb568" emissive="#e78333" emissiveIntensity={2} />
-          </mesh>
-          <pointLight position={[0, 0.8, 0.7]} intensity={8} color="#ffb45f" distance={8} />
+          <Hearth />
         </group>
       )}
     </group>
@@ -1713,7 +1822,7 @@ export default function SceneView(props: Props) {
       >
         <Suspense fallback={null}>
           <Environment light={props.light} house={props.house} />
-          <Site house={props.house} quality={props.quality} />
+          <Site house={props.house} quality={props.quality} light={props.light} />
           <Architecture {...props} />
           <CameraRig {...props} />
           <InteractiveRenderer

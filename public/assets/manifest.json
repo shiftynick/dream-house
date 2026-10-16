@@ -1,0 +1,339 @@
+{
+  "version": 1,
+  "furniture": [
+    {
+      "id": "armchair-oak-leather",
+      "kinds": [
+        "armchair"
+      ],
+      "url": "/assets/furniture/armchair-oak-leather.glb",
+      "size": [
+        0.8203,
+        1.0229,
+        0.9866
+      ],
+      "upholstery": {
+        "mean": 0.35,
+        "shade": 0.62
+      },
+      "triangles": 8916,
+      "textureSize": 1024,
+      "bytes": 737772,
+      "source": {
+        "library": "Poly Haven",
+        "id": "modern_arm_chair_01",
+        "name": "Modern Arm Chair 01",
+        "authors": [
+          "Vibrant Nordic"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/modern_arm_chair_01"
+      }
+    },
+    {
+      "id": "coffee-table-concrete-oak",
+      "kinds": [
+        "coffee-table"
+      ],
+      "url": "/assets/furniture/coffee-table-concrete-oak.glb",
+      "size": [
+        1.2018,
+        0.39,
+        0.6
+      ],
+      "stretch": {
+        "x": [
+          -0.32,
+          0.32
+        ],
+        "z": [
+          -0.3,
+          0.3
+        ]
+      },
+      "triangles": 4504,
+      "textureSize": 1024,
+      "bytes": 320152,
+      "source": {
+        "library": "Poly Haven",
+        "id": "modern_coffee_table_01",
+        "name": "Modern Coffee Table 01",
+        "authors": [
+          "Amin"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/modern_coffee_table_01"
+      }
+    },
+    {
+      "id": "sofa-tufted-leather",
+      "kinds": [
+        "sofa"
+      ],
+      "url": "/assets/furniture/sofa-tufted-leather.glb",
+      "size": [
+        1.8072,
+        0.7095,
+        0.8178
+      ],
+      "stretch": {
+        "x": [
+          -0.34,
+          0.34
+        ]
+      },
+      "upholstery": {
+        "mean": 0.35,
+        "shade": 0.62
+      },
+      "triangles": 2728,
+      "textureSize": 1024,
+      "bytes": 499004,
+      "source": {
+        "library": "Poly Haven",
+        "id": "sofa_02",
+        "name": "Sofa 02",
+        "authors": [
+          "Kirill Sannikov"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/sofa_02"
+      }
+    }
+  ],
+  "textures": [
+    {
+      "id": "oak-floor",
+      "surface": "oak",
+      "albedo": "luminance",
+      "url": "/assets/textures/oak-floor",
+      "size": [
+        1.7,
+        1.7
+      ],
+      "meanLinear": [
+        0.2356,
+        0.2356,
+        0.2356
+      ],
+      "bytes": 2035208,
+      "source": {
+        "library": "Poly Haven",
+        "id": "laminate_floor_02",
+        "name": "Laminate Floor 02",
+        "authors": [
+          "Dario Barresi",
+          "Charlotte Baglioni"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/laminate_floor_02"
+      }
+    },
+    {
+      "id": "cedar-boards",
+      "surface": "timber",
+      "albedo": "luminance",
+      "url": "/assets/textures/cedar-boards",
+      "size": [
+        2.26,
+        2.26
+      ],
+      "meanLinear": [
+        0.1492,
+        0.1492,
+        0.1492
+      ],
+      "bytes": 429045,
+      "source": {
+        "library": "Poly Haven",
+        "id": "japanese_cedar_planks",
+        "name": "Japanese Cedar Planks",
+        "authors": [
+          "Charlotte Baglioni",
+          "Rico Cilliers"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/japanese_cedar_planks"
+      }
+    },
+    {
+      "id": "oak-veneer",
+      "surface": "veneer",
+      "albedo": "luminance",
+      "url": "/assets/textures/oak-veneer",
+      "size": [
+        1.83,
+        1.83
+      ],
+      "meanLinear": [
+        0.2276,
+        0.2276,
+        0.2276
+      ],
+      "bytes": 486496,
+      "source": {
+        "library": "Poly Haven",
+        "id": "oak_veneer_01",
+        "name": "Oak Veneer 01",
+        "authors": [
+          "Jenelle van Heerden"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/oak_veneer_01"
+      }
+    },
+    {
+      "id": "plaster",
+      "surface": "plaster",
+      "albedo": "luminance",
+      "url": "/assets/textures/plaster",
+      "size": [
+        3,
+        3
+      ],
+      "meanLinear": [
+        0.2699,
+        0.2699,
+        0.2699
+      ],
+      "bytes": 252553,
+      "source": {
+        "library": "Poly Haven",
+        "id": "beige_wall_001",
+        "name": "Beige Wall 001",
+        "authors": [
+          "Dimitrios Savva",
+          "Rico Cilliers"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/beige_wall_001"
+      }
+    },
+    {
+      "id": "linen",
+      "surface": "linen",
+      "albedo": "luminance",
+      "url": "/assets/textures/linen",
+      "size": [
+        0.271,
+        0.271
+      ],
+      "meanLinear": [
+        0.3938,
+        0.3938,
+        0.3938
+      ],
+      "bytes": 794150,
+      "source": {
+        "library": "Poly Haven",
+        "id": "rough_linen",
+        "name": "Rough Linen",
+        "authors": [
+          "colormass",
+          "Rico Cilliers"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/rough_linen"
+      }
+    },
+    {
+      "id": "wool-rug",
+      "surface": "rug",
+      "albedo": "luminance",
+      "url": "/assets/textures/wool-rug",
+      "size": [
+        0.27,
+        0.276
+      ],
+      "meanLinear": [
+        0.1829,
+        0.1829,
+        0.1829
+      ],
+      "bytes": 863102,
+      "source": {
+        "library": "Poly Haven",
+        "id": "poly_wool_herringbone",
+        "name": "Poly Wool Herringbone",
+        "authors": [
+          "colormass",
+          "Rico Cilliers"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/poly_wool_herringbone"
+      }
+    },
+    {
+      "id": "fieldstone",
+      "surface": "stone",
+      "albedo": "photo",
+      "url": "/assets/textures/fieldstone",
+      "size": [
+        2,
+        2
+      ],
+      "meanLinear": [
+        0.1189,
+        0.0619,
+        0.0313
+      ],
+      "bytes": 811632,
+      "source": {
+        "library": "Poly Haven",
+        "id": "stacked_stone_wall",
+        "name": "Stacked Stone Wall",
+        "authors": [
+          "Dimitrios Savva"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/stacked_stone_wall"
+      }
+    },
+    {
+      "id": "meadow-ground",
+      "surface": "ground",
+      "albedo": "photo",
+      "url": "/assets/textures/meadow-ground",
+      "size": [
+        15,
+        15
+      ],
+      "meanLinear": [
+        0.1706,
+        0.1219,
+        0.0237
+      ],
+      "bytes": 1160926,
+      "source": {
+        "library": "Poly Haven",
+        "id": "aerial_grass_rock",
+        "name": "Aerial Grass Rock",
+        "authors": [
+          "Rob Tuytel"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/aerial_grass_rock"
+      }
+    }
+  ],
+  "environment": [
+    {
+      "id": "alps-field",
+      "url": "/assets/environment/alps-field.jpg",
+      "lights": [
+        "day"
+      ],
+      "bytes": 1545451,
+      "source": {
+        "library": "Poly Haven",
+        "id": "alps_field",
+        "name": "Alps Field",
+        "authors": [
+          "Andreas Mischok"
+        ],
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/alps_field"
+      }
+    }
+  ]
+}

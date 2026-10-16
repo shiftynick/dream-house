@@ -154,6 +154,10 @@ A separate guard stops a run before another paid call after three consecutive ro
 
 One agent run or alternative-generation request is active per server. Duplicate run IDs are rejected. The UI polls progress and can cancel through an abort signal; disconnecting a request also cancels it. Failure/cancellation discards its draft without changing saved geometry. Messages and usage accounting may still be saved.
 
+## Optional render assets
+
+`src/renderAssets.ts` loads `public/assets/manifest.json`: CC0 furniture GLBs (Draco), photo PBR surface sets and a daylight backdrop. A furniture kind with a model renders as that model, fitted to the saved envelope through optional stretch zones. Upholstery is tinted by the palette fabric color. Photo surfaces keep each palette's mean color. Missing or failed assets fall back to the procedural meshes and maps. Plan, selection and spatial checks always use the saved dimensions. Broker captures wait, bounded, for loading. See [the Great Hall pilot](great-room-pilot.md) for the build pipeline (`scripts/assets/`) and evidence.
+
 ## Local render provider and broker
 
 The transport-independent interface is:

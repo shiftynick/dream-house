@@ -7,3 +7,6 @@ dist/
 # Personal discovery notes stay on this machine.
 PROJECT_BRIEF.md
 *.log
+
+# Untrusted downloaded source meshes/textures for scripts/assets.
+assets-src/
