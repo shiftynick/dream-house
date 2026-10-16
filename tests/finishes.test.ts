@@ -14,7 +14,7 @@ import {
 } from '../shared/finishes.ts';
 import { makeFurniture } from '../shared/furniture.ts';
 import { executeCommands } from '../shared/design.ts';
-import { emptyScene, makeRoom, sceneSchema, type Scene } from '../shared/model.ts';
+import { emptyScene, furnitureSchema, makeRoom, sceneSchema, type Scene } from '../shared/model.ts';
 import { projectedUvs, type AssetManifest } from '../src/renderAssets.ts';
 import { finishTint } from '../src/renderFinishes.ts';
 
@@ -158,4 +158,16 @@ test('choosing a non-stretching model adopts its native size; stretchable models
   assert.deepEqual(chooseModelPatch({ kind: 'sofa' }, 'sofa-tufted-leather'), { model: 'sofa-tufted-leather' });
   // A model for another kind changes nothing but the (ignored) reference.
   assert.deepEqual(chooseModelPatch({ kind: 'sofa' }, 'bed-iron-frame'), { model: 'bed-iron-frame' });
+});
+
+test('every model keeps a valid saved size when its native size is adopted', () => {
+  for (const model of assetCatalog.models)
+    for (const kind of model.kinds) {
+      const item = { ...makeFurniture(kind, 'piece'), ...chooseModelPatch({ kind }, model.id) };
+      assert.ok(furnitureSchema.safeParse(item).success, model.id);
+    }
+  // The aloe is smaller than the minimum footprint and scales up without distortion.
+  const aloe = chooseModelPatch({ kind: 'plant' }, 'plant-aloe');
+  assert.equal(aloe.width, 0.2);
+  assert.ok(Math.abs(aloe.height! / aloe.width! - 0.2675 / 0.1679) < 0.1);
 });

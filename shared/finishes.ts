@@ -139,10 +139,14 @@ export function resolveFinish(
   return id && finishFits(slot, id) ? id : undefined;
 }
 
-/** Native [width, depth, height] of a model in centimeter-rounded meters. */
+/** Smallest footprint a saved piece may have (furnitureSchema). */
+const MINIMUM_FOOTPRINT = 0.2;
+/** Native width, depth and height of a model in meters. A model smaller than
+ * the minimum footprint (the aloe) is scaled up uniformly to fit it. */
 export function modelDimensions(model: CatalogModel) {
   const [width, height, depth] = model.size;
-  return { width, depth, height };
+  const scale = Math.max(1, MINIMUM_FOOTPRINT / width, MINIMUM_FOOTPRINT / depth);
+  return { width: width * scale, depth: depth * scale, height: height * scale };
 }
 
 /** The update for choosing a model: models with stretch zones keep the saved

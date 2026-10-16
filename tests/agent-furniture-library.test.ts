@@ -41,8 +41,12 @@ test('prompt model IDs match the asset manifest for every furniture kind', () =>
       assert.equal(traits.includes('DEFAULT'), Boolean(model.default), `${model.id} default`);
       if (model.stretch) assert.ok(traits.includes('fits any size'), model.id);
       else {
-        // Manifest size is [width, height, depth]; the prompt lists WxDxH.
-        const [width, height, depth] = model.size.map((value) => Math.round(value * 100) / 100);
+        // Manifest size is [width, height, depth]; the prompt lists WxDxH, with
+        // models below the 0.2 m minimum footprint scaled up uniformly.
+        const scale = Math.max(1, 0.2 / model.size[0], 0.2 / model.size[2]);
+        const [width, height, depth] = model.size.map(
+          (value) => Math.round(value * scale * 100) / 100,
+        );
         assert.ok(traits.includes(`native ${width}x${depth}x${height}`), model.id);
       }
       // Slots in the prompt are exactly the manifest's finish slots, in display order.
