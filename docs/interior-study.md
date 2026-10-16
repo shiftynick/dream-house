@@ -1,5 +1,7 @@
 # Interior daylight and finish study
 
+> Superseded for lighting: the per-room CPU daylight map described here was replaced on October 16, 2026 by runtime window, bounce and reflection probes. See [lighting.md](lighting.md).
+
 The October 7, 2026 baseline uses the existing furnished cabin without changes: cedar room, chalk sofa, charcoal armchair, cedar table and limestone rug. Evidence is in `.data/verification/interior-study/baseline/`. Its scene fingerprint is `2d46a4838c77acbf11c86bf68a986d46ecc146edc973449b0c0c6bfc2808ae65`; renderer source hashes were stable throughout. Chromium selected ANGLE Intel Mesa Graphics ARL, not the installed NVIDIA GPU. Diagnostics contain no browser warnings or exceptions.
 
 ```sh

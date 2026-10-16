@@ -38,6 +38,6 @@ Later work (finish slots, window/door kits, starter catalog) is documented in [a
 
 ## Known gaps
 
-- Lighting is still the single per-room SH field. Walls and ceiling show little falloff, and doorways into rooms that receive less light read nearly black. A Blender lightmap bake was not attempted: architecture is editable at runtime, so a bake would go stale after every edit unless baking became a per-design step.
+- Lighting: superseded by the runtime window, bounce and reflection probes in [lighting.md](lighting.md). Baking stays ruled out because architecture is editable at runtime.
 - No modern sofa exists among CC0 libraries. `sofa_02` is a curved, tufted style, and a stretched long sofa shows wider tufting in the middle.
 - Through the windows, the near terrain is still the site plane at a 15 m texture repeat.

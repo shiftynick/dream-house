@@ -11,7 +11,7 @@ npx tsx scripts/assets/build-assets.ts    # Blender + ImageMagick → public/ass
 
 ## Swappable finishes
 
-- **Slots.** `build_furniture.py` names every model material after its finish slot: `upholstery`, `wood`, `metal`, `stone`, `rug`, `glass` or `other`. Slots come from explicit `slots` maps in `scripts/assets/sources.json`, name keywords, or splitting a shared texture atlas by UV island. `split` divides islands by saturation, and `classify` applies HSV rules plus an island-height rule. Each build writes `assets-src/previews/<id>-slots.png`, coloured by slot, so the splits can be checked. Procedural pieces map their part materials the same way: `fabric`/`seam` are upholstery, `wood` is wood, `chrome` is metal, `worktop` is stone, and `rug` is rug.
+- **Slots.** `build_furniture.py` names every model material after its finish slot: `upholstery`, `wood`, `metal`, `stone`, `rug`, `glass` or `other`. Slots come from explicit `slots` maps in `scripts/assets/sources.json`, name keywords, or splitting a shared texture atlas by UV island. `split` divides islands by saturation. `classify` matches each island's mean colour and height against `hue`, `sat`, `val`, `top` and `bottom` ranges; the heights are fractions of the piece's height. Each build writes `assets-src/previews/<id>-slots.png`, coloured by slot, so the splits can be checked. Procedural pieces map their part materials the same way: `fabric`/`seam` are upholstery, `wood` is wood, `chrome` is metal, `worktop` is stone, and `rug` is rug.
 - **Real-world scale.** TEXCOORD_1 stores each face's box-projection axis. The renderer rebuilds meter-scale UVs from the fitted geometry, so finishes keep their true scale on stretched zones as well. Library grain always runs along the texture's v axis: `rotate90` turns sources whose grain runs the other way, and the normal map is rotated correctly to match.
 - **Library.** 23 CC0 sets, loaded only when a piece uses them:
   - Fabrics: linen, velvet, bouclé, corduroy, herringbone wool, jute, plaid wool.
@@ -19,7 +19,7 @@ npx tsx scripts/assets/build-assets.ts    # Blender + ImageMagick → public/ass
   - Woods: oak, walnut, pale oak, teak, ebonised oak.
   - Metals from ambientCG: brushed steel, satin brass, blackened steel, copper.
   - Stones: white and black marble, travertine, polished concrete.
-- **Data.** `furniture.finishes` sets a slot for one piece, and `room.furnitureFinishes` sets the room default. The precedence is piece, then room, then the model's own material. Unknown IDs, or IDs that don't fit the slot, fall back silently. The commands are `update_furniture` (patch `finishes`) and `update_room` (patch `furnitureFinishes`).
+- **Data.** `furniture.finishes` sets a slot for one piece, and `room.furnitureFinishes` sets the room default. A catalog model can also carry a default finish per slot (`finishes` in `sources.json`). The precedence is piece, then room, then the model's default finish, then the model's own material. The piece panel's "inherit" option shows the room or model default. Unknown IDs, or IDs that don't fit the slot, fall back silently. The commands are `update_furniture` (patch `finishes`) and `update_room` (patch `furnitureFinishes`).
 - **Tint.** Grayscale (`tinted`) finishes take the palette fabric or rug colour divided by the photo's mean, which is the same rule building surfaces use. Upholstery finishes keep the model's own normal and AO maps, so tufting and seams survive the swap.
 - **UI.** The furniture panel shows a "Piece finishes" select per slot when a piece is selected, and "Room furniture finishes" otherwise. Changes apply immediately.
 - **Building surfaces.** Each palette has its own exterior cladding: cedar boards, charred boards, limestone ashlar or lime stucco. Interior walls, floors, ceilings and trim keep their sets. Concrete and the box-profile metal roof are now photo sets. Roof edges use a plain flashing material. Every set has colour, normal and ARM (AO/roughness/metal) maps at physical scale.
@@ -55,15 +55,19 @@ There are 27 Poly Haven models (CC0), each recorded with its source, authors and
 
 - **Picker.** When a piece is selected, the panel shows its kind's models plus a "Built-in" parametric option. The choice is stored in `furniture.model`, and `'builtin'` forces the procedural piece.
 - **Size.** Models with stretch zones (sofas, rectangular tables, beds) keep the saved size. Other models adopt their native size, and "Use model size" restores it.
-- **Defaults.** Only the three pilot models are defaults, so existing houses render unchanged until a model is chosen.
+- **Defaults.** A kind's default model renders wherever a piece has no `model`. The defaults are the oak lounge armchair, the concrete and oak coffee table and the tufted sofa (from the pilot), plus the plank dining table (with a natural-oak default finish) and the potted ficus. Chairs, nightstands, beds and wardrobes keep the built-in pieces: the catalog options are classic or rustic, and the one contemporary chair is a tufted Chesterfield that distorts at the saved chair size. Saved houses changed appearance where these kinds had no model.
+- **Agent prompt.** The design agent's system prompt carries a generated FURNITURE MODELS AND FINISHES section (`furnitureLibraryPrompt()` in `shared/finishes.ts`). It lists model IDs per kind with style, DEFAULT, stretch or native size, slots and default finishes, and finish IDs per slot. `tests/agent-furniture-library.test.ts` checks it against `public/assets/manifest.json`.
 
 ## Evidence
 
-`npx tsx scripts/capture-great-room.ts --out <dir> [--demo-finishes] [--demo-catalog]` adds exterior, entry-door, bedroom and kitchen cameras. The demo flags change only the isolated fixture copy. Before/after pairs are in `.data/verification/assets-pass/pairs-step{1,1b,2,2b,3,3b}/`.
+`npx tsx scripts/capture-great-room.ts --out <dir> [--demo-finishes] [--demo-catalog] [--demo-slots]` adds exterior, entry-door, bedroom and kitchen cameras. The demo flags change only the isolated fixture copy; `--demo-slots` shows the settle and the mid-century chair with swapped finishes. Before/after pairs are in `.data/verification/assets-pass/pairs-step{1,1b,2,2b,3,3b}/`. The defaults and slot fixes are in `.data/verification/lighting-pass/pairs-step1/` and `pairs-step2/`, the latter with 8-angle slot renders.
+
+`build-assets.ts --only <id>` rebuilds one model and refreshes the catalog metadata (name, style, default, finishes) of the others from `sources.json`.
 
 ## Known gaps
 
 - Poly Haven has no modern beds, wardrobes, kitchen or bathroom fixtures. Those kinds have no catalog model, or only classic and rustic ones, and the built-in parametric pieces remain the modern option.
-- Atlas splits are heuristic. The mid-century chair's wooden shell shares the upholstery slot, and the settle's front rail is classed as upholstery.
-- Glossy tops show blotchy reflections of the low-resolution room environment. That belongs to the lighting pass.
-- The design agent can set `finishes` and `model` through the existing commands, but its prompt does not list the library IDs.
+- Atlas splits are heuristic and checked by eye. The mid-century chair and settle splits were fixed with hue and height rules.
+- Non-stretch default models are fitted to the saved envelope, so a piece saved at another size is distorted. The armchair default is 16 % wider and 12 % lower than native at the default armchair size.
+- `update_furniture` replaces a piece's whole finish map, and `model` can be switched back to a kind's default only by naming the default's ID.
+- The cognac leather has tufting baked into its texture, which looks wrong on smooth cushions.

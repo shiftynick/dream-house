@@ -200,6 +200,8 @@ try {
     ],
   });
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+  // tsx names nested callbacks with __name when serializing page functions.
+  await context.addInitScript('globalThis.__name = (target) => target');
   await context.route('**/*', (route) =>
     new URL(route.request().url()).origin === base ? route.continue() : route.abort(),
   );
@@ -259,6 +261,129 @@ try {
       elapsedMs: Date.now() - started,
     });
     console.log(path.join(output, filename));
+  }
+  // --gpu-bench times synchronous draws of the interactive canvas from fixed
+  // cameras (no vsync involved): average milliseconds per frame, scene pass only.
+  if (args.includes('--gpu-bench')) {
+    const cameras = shots
+      .filter((shot) => !only || only.split(',').includes(shot.id))
+      .map((shot) => ({ id: shot.id, ...renderCamera(scene, shot.request) }));
+    evidence.gpuBench = await page.evaluate(async (list) => {
+      const resource = performance
+        .getEntriesByType('resource')
+        .find((entry) => entry.name.includes('/@react-three_fiber.js'));
+      const fiber = await import(resource?.name || '/node_modules/.vite/deps/@react-three_fiber.js');
+      const state = fiber._roots.get(document.querySelector('canvas'))?.store.getState();
+      const { gl, scene, camera } = state;
+      const context = gl.getContext();
+      const pixel = new Uint8Array(4);
+      const results = [];
+      for (const view of list) {
+        camera.position.set(...view.position);
+        camera.fov = view.fov;
+        camera.updateProjectionMatrix();
+        camera.lookAt(...view.target);
+        camera.updateMatrixWorld();
+        const draw = () => {
+          gl.render(scene, camera);
+          context.readPixels(0, 0, 1, 1, context.RGBA, context.UNSIGNED_BYTE, pixel);
+        };
+        for (let i = 0; i < 10; i++) draw();
+        // Five rounds; the lowest round median resists clock and scheduler noise.
+        const all: number[] = [],
+          medians: number[] = [];
+        for (let round = 0; round < 5; round++) {
+          const times: number[] = [];
+          for (let i = 0; i < 30; i++) {
+            const start = performance.now();
+            draw();
+            times.push(performance.now() - start);
+          }
+          times.sort((a, b) => a - b);
+          medians.push(times[15]);
+          all.push(...times);
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        all.sort((a, b) => a - b);
+        results.push({
+          id: view.id,
+          best: Math.min(...medians),
+          p50: all[Math.floor(all.length / 2)],
+          p95: all[Math.floor(all.length * 0.95)],
+          size: [context.drawingBufferWidth, context.drawingBufferHeight],
+        });
+      }
+      return results;
+    }, cameras);
+    console.log(JSON.stringify(evidence.gpuBench));
+  }
+  // --restore-check screenshots the interactive canvas from an interior camera,
+  // forces a WebGL context loss and restore, and screenshots it again.
+  if (args.includes('--restore-check')) {
+    const view = renderCamera(scene, interior('northwest'));
+    const shoot = async (name: string) => {
+      await page.evaluate(async (camera) => {
+        const resource = performance
+          .getEntriesByType('resource')
+          .find((entry) => entry.name.includes('/@react-three_fiber.js'));
+        const fiber = await import(resource?.name || '/node_modules/.vite/deps/@react-three_fiber.js');
+        const state = fiber._roots.get(document.querySelector('canvas'))?.store.getState();
+        state.camera.position.set(...camera.position);
+        state.camera.fov = camera.fov;
+        state.camera.updateProjectionMatrix();
+        state.camera.lookAt(...camera.target);
+        state.invalidate();
+      }, view);
+      await page.waitForTimeout(3000);
+      await page.locator('canvas').first().screenshot({ path: path.join(output, name) });
+    };
+    await shoot('restore-before.png');
+    await page.locator('canvas').first().evaluate((element) => {
+      const gl = (element as HTMLCanvasElement).getContext('webgl2')!;
+      const extension = gl.getExtension('WEBGL_lose_context')!;
+      extension.loseContext();
+      setTimeout(() => extension.restoreContext(), 1000);
+    });
+    await page.waitForTimeout(2500);
+    await shoot('restore-after.png');
+  }
+  // --probe-report records the interactive canvas's per-room probe state.
+  if (args.includes('--probe-report')) {
+    evidence.probes = await page.evaluate(async () => {
+      const resource = performance
+        .getEntriesByType('resource')
+        .find((entry) => entry.name.includes('/@react-three_fiber.js'));
+      const fiber = await import(resource?.name || '/node_modules/.vite/deps/@react-three_fiber.js');
+      const state = fiber._roots.get(document.querySelector('canvas'))?.store.getState();
+      const system = state?.scene.userData.roomProbes;
+      if (!system) return null;
+      // A warm rerun separates capture cost from first-use shader compilation.
+      const first = { ...system.timings, milliseconds: system.milliseconds };
+      system.timings = { bounceDraw: 0, readback: 0, reflection: 0 };
+      const before = system.milliseconds;
+      system.reset();
+      system.update(state.gl, state.scene);
+      const warm = { ...system.timings, milliseconds: system.milliseconds - before };
+      return {
+        first,
+        warm,
+        captures: system.captures,
+        milliseconds: system.milliseconds,
+        converged: system.converged,
+        timings: system.timings,
+        drawCalls: state.gl.info.render.calls,
+        rooms: system.lightings.map((lighting: any) => ({
+          id: lighting.room.id,
+          apertures: lighting.apertures.length,
+          luminance: lighting.luminance,
+          bounceL0: lighting.uniforms.roomBounce.value[0].toArray(),
+          probe: lighting.bounds.probe.toArray(),
+          grid: lighting.uniforms.roomGrid.value.toArray(),
+          reflection: lighting.reflection.width,
+        })),
+      };
+    });
+    console.log(JSON.stringify(evidence.probes, null, 1));
   }
 } finally {
   await writeFile(path.join(output, 'metadata.json'), JSON.stringify(evidence, null, 2));

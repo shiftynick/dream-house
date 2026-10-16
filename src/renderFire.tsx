@@ -109,12 +109,20 @@ export function Hearth() {
           />
         )),
       )}
+      {/* Shadowed so the glow stays indoors (static maps redraw only on edits);
+          just in front of the opening so the jambs do not cut it into a wedge. */}
       <pointLight
-        position={[0, 1.0, 0.45]}
-        intensity={10}
+        position={[0, 0.9, 0.85]}
+        intensity={13}
         color="#ff9a45"
         distance={9}
         decay={1.6}
+        castShadow
+        shadow-mapSize={[512, 512]}
+        shadow-bias={-0.004}
+        shadow-radius={8}
+        shadow-camera-near={0.1}
+        shadow-camera-far={9}
       />
     </group>
   );

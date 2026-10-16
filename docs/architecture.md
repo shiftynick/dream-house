@@ -156,7 +156,7 @@ One agent run or alternative-generation request is active per server. Duplicate 
 
 ## Optional render assets
 
-`src/renderAssets.ts` loads `public/assets/manifest.json`: CC0 furniture GLBs (Draco), photo PBR surface sets and a daylight backdrop. A furniture kind with a model renders as that model, fitted to the saved envelope through optional stretch zones. Upholstery is tinted by the palette fabric color. Photo surfaces keep each palette's mean color. Missing or failed assets fall back to the procedural meshes and maps. Plan, selection and spatial checks always use the saved dimensions. Broker captures wait, bounded, for loading. See [the Great Hall pilot](great-room-pilot.md) for the build pipeline (`scripts/assets/`) and evidence.
+`src/renderAssets.ts` loads `public/assets/manifest.json`: CC0 furniture GLBs (Draco), photo PBR surface sets and a daylight backdrop. A furniture kind with a model renders as that model, fitted to the saved envelope through optional stretch zones. Upholstery is tinted by the palette fabric color. Photo surfaces keep each palette's mean color. Missing or failed assets fall back to the procedural meshes and maps. Plan, selection and spatial checks always use the saved dimensions. Broker captures wait, bounded, for loading. See [the Great Hall pilot](great-room-pilot.md) for the build pipeline (`scripts/assets/`) and evidence. Interior lighting is runtime-only: per-room window-light volumes, bounce and reflection captures, and exposure from measured probe luminance ([lighting](lighting.md)). The design agent's prompt lists catalog model and finish IDs generated from the bundled catalog ([asset library](asset-library.md)).
 
 ## Local render provider and broker
 

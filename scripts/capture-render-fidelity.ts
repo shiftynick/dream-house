@@ -61,7 +61,7 @@ async function rendererSourceHashes() {
     'src/renderFurniture.tsx',
     'src/renderMaterials.ts',
     'src/renderLighting.ts',
-    'src/roomDaylight.ts',
+    'src/roomProbes.ts',
     'src/architecturalFinish.ts',
     'src/rasterRenderer.ts',
     'src/renderPerformance.ts',
@@ -271,6 +271,10 @@ try {
       ...(gpu === 'swiftshader'
         ? ['--use-angle=swiftshader', '--enable-unsafe-swiftshader']
         : ['--enable-gpu', '--ignore-gpu-blocklist']),
+      // --unthrottled lifts the 60 Hz cap so frame intervals show real headroom.
+      ...(args.includes('--unthrottled')
+        ? ['--disable-gpu-vsync', '--disable-frame-rate-limit']
+        : []),
     ],
   });
   browser = await browserLaunching;

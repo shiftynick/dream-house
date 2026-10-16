@@ -32,7 +32,12 @@ import { surfacePalette, type DesignSelection, type DesignSurface } from '../sha
 import { roomFurniture } from '../shared/furniture';
 import type { DesignCommand } from '../shared/design';
 import { PlanFurniture } from './PlanFurniture';
-import { daylightSkyPixels, interiorExposure } from './renderLighting';
+import {
+  daylightSkyPixels,
+  exposureAt,
+  EXTERIOR_ENVIRONMENT_INTENSITY,
+  TONE_MAPPING,
+} from './renderLighting';
 import { RasterRenderer } from './rasterRenderer';
 import { FurnitureMesh, type FinishMaterial } from './renderFurniture';
 import { createFinishMaterial, disposeFinishMaterial } from './renderFinishes';
@@ -49,14 +54,12 @@ import {
   type MaterialSurface,
 } from './renderAssets';
 import {
-  ROOM_MAP_LIMIT,
-  roomDaylightField,
-  roomDaylightFallback,
-  cachedRoomDaylightPixels,
-  roomIrradiance,
-  applyRoomIrradiance,
-  roomEnvironmentTexture,
-} from './roomDaylight';
+  enclosedRoom,
+  ROOM_REFLECTION_SIZE,
+  RoomLighting,
+  RoomProbeSystem,
+  roomProbeSystem,
+} from './roomProbes';
 
 export type Quality = 'live' | 'refined' | 'clay' | 'wireframe';
 export type View = 'orbit' | 'walk' | 'plan';
@@ -167,13 +170,12 @@ function RoomMesh({
   selected,
   onSelect,
   quality,
-  roomEnvironment,
-  roomEnvironmentIntensity = 1,
+  lighting,
 }: {
   house: Scene;
   room: Room;
-  roomEnvironment?: THREE.Texture;
-  roomEnvironmentIntensity?: number;
+  /** Runtime window, bounce and reflection probes for this room's interior. */
+  lighting?: RoomLighting;
   materials: Record<string, THREE.Material>;
   materialSets: Record<string, Record<string, THREE.Material>>;
   selection?: DesignSelection | null;
@@ -188,21 +190,11 @@ function RoomMesh({
   const roomLit = useCallback(
     (source: THREE.Material) => {
       const material = source.clone() as THREE.MeshStandardMaterial;
-      material.envMap = roomEnvironment ?? null;
-      if (roomEnvironment)
-        applyRoomIrradiance(
-          material,
-          roomIrradiance(roomEnvironment.image.data as Float32Array),
-          roomEnvironmentIntensity,
-        );
-      material.envMapIntensity = roomEnvironment
-        ? roomEnvironmentIntensity
-        : source instanceof THREE.MeshStandardMaterial
-          ? source.envMapIntensity
-          : 1;
+      if (lighting) lighting.apply(material);
+      else material.envMap = null;
       return material;
     },
-    [roomEnvironment, roomEnvironmentIntensity],
+    [lighting],
   );
   const interiorSets = useMemo(
     () =>
@@ -247,15 +239,7 @@ function RoomMesh({
           const cached = finishMaterials.get(key);
           if (cached) return cached;
           const material = createFinishMaterial(set, slot, channel, palette, source);
-          if (!outdoor && roomEnvironment) {
-            material.envMap = roomEnvironment;
-            applyRoomIrradiance(
-              material,
-              roomIrradiance(roomEnvironment.image.data as Float32Array),
-              roomEnvironmentIntensity,
-            );
-            material.envMapIntensity = roomEnvironmentIntensity;
-          }
+          if (!outdoor && lighting) lighting.apply(material as THREE.MeshStandardMaterial);
           finishMaterials.set(key, material);
           return material;
         };
@@ -701,7 +685,7 @@ export function Environment({ light, house }: { light: Light; house?: Scene }) {
     scene.backgroundRotation.set(0, BACKDROP_ROTATION, 0);
     // Daylit exteriors should read brighter than the interior through glass.
     scene.backgroundIntensity = 2.2;
-    scene.environmentIntensity = 0.8;
+    scene.environmentIntensity = EXTERIOR_ENVIRONMENT_INTENSITY;
     const previousExposure = gl.toneMappingExposure;
     gl.toneMappingExposure = 1.05;
     gl.shadowMap.needsUpdate = true;
@@ -788,7 +772,8 @@ export function Site({
     [-5, -33, 1.2],
   ];
   return (
-    <group>
+    // Hidden in bounce captures: window light already integrates the outdoors.
+    <group userData={{ probeHidden: true }}>
       <mesh geometry={geometry} receiveShadow onClick={(e) => e.stopPropagation()}>
         <meshStandardMaterial
           color={quality === 'clay' ? '#c6c4b9' : ground.photo ? '#ffffff' : '#858b68'}
@@ -847,7 +832,7 @@ export function Architecture({
   | 'cutawaySides'
 > & { light?: Light }) {
   const surfaceQuality = quality === 'clay' || quality === 'wireframe' ? quality : 'live';
-  const { gl, invalidate } = useThree();
+  const { gl, scene, invalidate } = useThree();
   const daylightKey = JSON.stringify({
     palette: house.palette,
     roof: house.roof,
@@ -857,49 +842,47 @@ export function Architecture({
     rooms: house.rooms.map(({ name, furniture, ...room }) => room),
     design: { connections: house.design?.connections, stairLinks: house.design?.stairLinks },
   });
-  const environments = useMemo(() => {
-    const start = performance.now();
-    const field = roomDaylightField(house, light);
-    const fallback = roomEnvironmentTexture(new Float32Array(128 * 64 * 4).fill(1));
-    const maps = new Map<string, THREE.Texture>();
-    const intensities = new Map<string, number>();
-    for (const room of house.rooms) {
-      if (['terrace', 'courtyard'].includes(room.kind)) continue;
-      intensities.set(
-        room.id,
-        maps.size < ROOM_MAP_LIMIT ? 1 : roomDaylightFallback(house, room, field),
-      );
-      maps.set(
-        room.id,
-        maps.size < ROOM_MAP_LIMIT
-          ? roomEnvironmentTexture(cachedRoomDaylightPixels(house, room, light, field, daylightKey))
-          : fallback,
-      );
-    }
-    return { maps, intensities, fallback, milliseconds: performance.now() - start };
-  }, [daylightKey, light]);
-  useEffect(() => {
-    gl.domElement.dataset.roomEnvironmentCount = String(
-      Math.min(environments.maps.size, ROOM_MAP_LIMIT),
-    );
-    gl.domElement.dataset.roomEnvironmentBuildMs = environments.milliseconds.toFixed(1);
-    invalidate();
-    const release = () =>
-      new Set([...environments.maps.values(), environments.fallback]).forEach((texture) =>
-        texture.dispose(),
-      );
-    gl.domElement.addEventListener('webglcontextlost', release);
-    return () => {
-      gl.domElement.removeEventListener('webglcontextlost', release);
-      release();
+  // Room lighting objects follow geometry and light; captures rerun on any edit.
+  const probes = useMemo(() => {
+    if (surfaceQuality !== 'live') return undefined;
+    // One reflection size keeps a single shader variant for every room.
+    const lightings = house.rooms
+      .filter(enclosedRoom)
+      .map((room) => new RoomLighting(house, room, light, ROOM_REFLECTION_SIZE));
+    return {
+      system: new RoomProbeSystem(lightings),
+      lightings: new Map(lightings.map((lighting) => [lighting.room.id, lighting])),
     };
-  }, [environments, gl, invalidate]);
+  }, [daylightKey, light, surfaceQuality]);
+  useEffect(() => {
+    if (!probes) return;
+    scene.userData.roomProbes = probes.system;
+    const lost = () => probes.system.release();
+    const restored = () => {
+      probes.system.reset();
+      invalidate();
+    };
+    gl.domElement.addEventListener('webglcontextlost', lost);
+    gl.domElement.addEventListener('webglcontextrestored', restored);
+    return () => {
+      gl.domElement.removeEventListener('webglcontextlost', lost);
+      gl.domElement.removeEventListener('webglcontextrestored', restored);
+      if (scene.userData.roomProbes === probes.system) delete scene.userData.roomProbes;
+      probes.system.dispose();
+    };
+  }, [probes, scene, gl, invalidate]);
 
   const assetsVersion = useRenderAssets();
   useEffect(() => {
     gl.shadowMap.needsUpdate = true;
     invalidate();
   }, [assetsVersion, gl, invalidate]);
+  useEffect(() => {
+    probes?.system.reset(
+      `${visualSceneKey(house, cutaway, cutawaySides)}|${light}|${assetsVersion}`,
+    );
+    invalidate();
+  }, [probes, house, cutaway, cutawaySides, light, assetsVersion, invalidate]);
   const textures = useMemo(
     () =>
       Object.fromEntries(
@@ -1115,8 +1098,7 @@ export function Architecture({
           selected={selected === r.id}
           onSelect={() => onSelect(r.id)}
           quality={quality}
-          roomEnvironment={surfaceQuality === 'live' ? environments.maps.get(r.id) : undefined}
-          roomEnvironmentIntensity={environments.intensities.get(r.id)}
+          lighting={surfaceQuality === 'live' ? probes?.lightings.get(r.id) : undefined}
         />
       ))}
       {house.stairs.map((s) => (
@@ -1383,8 +1365,18 @@ function InteractiveRenderer({
     }
     const moving = activity.current.moving(now);
     const contact = quality !== 'wireframe' && !moving;
-    gl.toneMappingExposure = interiorExposure(house, camera.position);
+    // Captures may refresh the cached shadow map; count it for this frame.
     const refreshShadow = gl.shadowMap.needsUpdate;
+    // Probe captures spend a small per-frame budget, so loads and edits relight
+    // over a few frames without a stall; window light shows from the first one.
+    const probes = roomProbeSystem(scene);
+    if (probes?.pending) {
+      probes.update(gl, scene, 6);
+      if (probes.pending) invalidate();
+    }
+    const exposure = exposureAt(house, camera.position, probes?.luminances());
+    gl.toneMappingExposure = exposure.exposure;
+    probes?.setCameraExposure(exposure.interior, exposure.inside);
     const autoReset = gl.info.autoReset;
     gl.info.autoReset = false;
     gl.info.reset();
@@ -1408,6 +1400,8 @@ function InteractiveRenderer({
       renderAo: moving ? 'moving' : shaded ? 'on' : contact ? 'unavailable' : 'off',
       renderDpr: String(gl.getPixelRatio()),
       renderTextures: String(gl.info.memory.textures),
+      roomProbeCaptures: String(probes?.captures ?? 0),
+      roomProbeMs: (probes?.milliseconds ?? 0).toFixed(1),
       renderGeometries: String(gl.info.memory.geometries),
     });
     report(
@@ -1908,7 +1902,7 @@ export default function SceneView(props: Props) {
           antialias: true,
           preserveDrawingBuffer: true,
           powerPreference: 'high-performance',
-          toneMapping: THREE.ACESFilmicToneMapping,
+          toneMapping: TONE_MAPPING,
         }}
         onPointerMissed={() => props.onSelect(null)}
       >

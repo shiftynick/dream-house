@@ -2,8 +2,9 @@ import { Component, Suspense, useEffect, useRef, useState, type ReactNode } from
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createRoot, extend, useThree } from '@react-three/fiber';
 import { RasterRenderer } from './rasterRenderer';
-import { interiorExposure } from './renderLighting';
+import { exposureAt, TONE_MAPPING } from './renderLighting';
 import { captureAfterRender } from './captureSchedule';
+import { roomProbeSystem } from './roomProbes';
 import { loadRenderAssets } from './renderAssets';
 import * as THREE from 'three';
 import { Architecture, Environment, FloorPlanSvg, Site } from './SceneView';
@@ -71,7 +72,11 @@ function CaptureFrames({
           throw new Error('The local render context is unavailable.');
         scene.updateMatrixWorld(true);
         camera.updateMatrixWorld(true);
-        gl.toneMappingExposure = interiorExposure(job.scene, camera.position);
+        const probes = roomProbeSystem(scene);
+        probes?.update(gl, scene);
+        const exposure = exposureAt(job.scene, camera.position, probes?.luminances());
+        gl.toneMappingExposure = exposure.exposure;
+        probes?.setCameraExposure(exposure.interior, exposure.inside);
         raster.render(job.request.quality !== 'wireframe');
       },
       capture: () => {
@@ -173,7 +178,7 @@ function OffscreenScene({
           antialias: true,
           preserveDrawingBuffer: true,
           powerPreference: 'high-performance',
-          toneMapping: THREE.ACESFilmicToneMapping,
+          toneMapping: TONE_MAPPING,
         },
         onCreated: ({ camera }) => {
           camera.lookAt(...framing.target);

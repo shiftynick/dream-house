@@ -4,6 +4,25 @@ Paused October 10, 2026 at the user's request. Project servers and verification 
 
 **The Agent Dashboard is retired. Do not call its API, read its inbox or use its key. Keep updates, questions and approvals here in T3.** Historical dashboard records below are evidence only.
 
+## Branch `great-room-assets` (October 16, 2026)
+
+This branch carries the realism work on top of `main`, and it is unpushed. It adds:
+- GLB furniture and a 27-model CC0 catalog with a picker.
+- 23 swappable finishes, with per-model default finishes.
+- Scalable window and door kits, photo PBR surfaces and a backdrop.
+- Runtime interior lighting.
+
+Defaults are the plank dining table (natural oak) and the ficus, plus the pilot's armchair, coffee table and sofa; chairs, beds, wardrobes and nightstands stay built-in. The design agent's prompt lists the library IDs from a generated section, which a test keeps in sync with the manifest. Lighting is runtime-only: window-light volumes, bounce and reflection probes, room exposure, and Neutral tone mapping.
+
+Read [asset library](docs/asset-library.md) and [lighting](docs/lighting.md); the pilot is in [great-room-pilot](docs/great-room-pilot.md). 491 tests, the typecheck and the build pass. Evidence is in `.data/verification/{great-room,assets-pass,lighting-pass}/`. The dev server for this branch runs on port 5173.
+
+User decisions in force:
+- Interior doors open, exterior doors closed.
+- Non-stretch models adopt their native size when picked.
+- Keep the `plant` kind.
+- Free CC0 assets only.
+- No Blender or per-design baking for end users.
+
 ## Current application
 
 - Local Terrain house designer with separate saved houses, undo/history, design briefs, editable geometry/furniture, render review, proposals/alternatives and project/report exports.
