@@ -1092,6 +1092,132 @@
       }
     }
   ],
+  "openings": [
+    {
+      "id": "window-casement",
+      "url": "/assets/openings/window-casement.glb",
+      "opening": [
+        1.2,
+        1.4
+      ],
+      "edges": [
+        0.12,
+        0.12,
+        0.12,
+        0.12
+      ],
+      "triangles": 968,
+      "bytes": 30840,
+      "source": {
+        "library": "Terrain",
+        "name": "window-casement",
+        "authors": [
+          "Terrain asset pipeline"
+        ],
+        "license": "CC0-1.0"
+      }
+    },
+    {
+      "id": "window-fixed",
+      "url": "/assets/openings/window-fixed.glb",
+      "opening": [
+        1.6,
+        2.4
+      ],
+      "edges": [
+        0.07,
+        0.07,
+        0.07,
+        0.07
+      ],
+      "triangles": 540,
+      "bytes": 17064,
+      "source": {
+        "library": "Terrain",
+        "name": "window-fixed",
+        "authors": [
+          "Terrain asset pipeline"
+        ],
+        "license": "CC0-1.0"
+      }
+    },
+    {
+      "id": "door-frame",
+      "url": "/assets/openings/door-frame.glb",
+      "opening": [
+        0.9,
+        2.1
+      ],
+      "edges": [
+        0.05,
+        0.05,
+        0.05,
+        0.05
+      ],
+      "triangles": 572,
+      "bytes": 17812,
+      "source": {
+        "library": "Terrain",
+        "name": "door-frame",
+        "authors": [
+          "Terrain asset pipeline"
+        ],
+        "license": "CC0-1.0"
+      }
+    },
+    {
+      "id": "door-leaf-panel",
+      "url": "/assets/openings/door-leaf-panel.glb",
+      "opening": [
+        0.9,
+        2.08
+      ],
+      "edges": [
+        0.13,
+        0.13,
+        1.2,
+        0.13
+      ],
+      "hinge": "left",
+      "thickness": 0.04,
+      "triangles": 904,
+      "bytes": 27872,
+      "source": {
+        "library": "Terrain",
+        "name": "door-leaf-panel",
+        "authors": [
+          "Terrain asset pipeline"
+        ],
+        "license": "CC0-1.0"
+      }
+    },
+    {
+      "id": "door-leaf-glazed",
+      "url": "/assets/openings/door-leaf-glazed.glb",
+      "opening": [
+        0.9,
+        2.08
+      ],
+      "edges": [
+        0.13,
+        0.13,
+        1.2,
+        0.13
+      ],
+      "hinge": "left",
+      "thickness": 0.04,
+      "triangles": 1048,
+      "bytes": 31756,
+      "source": {
+        "library": "Terrain",
+        "name": "door-leaf-glazed",
+        "authors": [
+          "Terrain asset pipeline"
+        ],
+        "license": "CC0-1.0"
+      }
+    }
+  ],
   "environment": [
     {
       "id": "alps-field",

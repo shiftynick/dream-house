@@ -10,8 +10,9 @@ export type FinishPart = {
   size: [number, number, number];
   material: 'trim' | 'chrome';
 };
-/** Thin finishes follow physical wall cells, stopping at passages and low glass. */
-export function wallFinishParts(house: Scene, room: Room, side: Side): FinishPart[] {
+/** Thin finishes follow physical wall cells, stopping at passages and low glass.
+ * With opening kits, doors bring their own casings and windows their own handles. */
+export function wallFinishParts(house: Scene, room: Room, side: Side, kits = false): FinishPart[] {
   const openings = roomOpenings(house, room.id, side);
   const roofClipped = roomSlabs(house, room).roofClipped;
   if ((room[side] === 'glass' || room[side] === 'open') && !openings.length) return [];
@@ -54,6 +55,7 @@ export function wallFinishParts(house: Scene, room: Room, side: Side): FinishPar
   for (const panel of wallPanels(house, room, side, false))
     if (panel.bottom < 0.001 && panel.height >= 0.11) box(panel.offset, 0.052, panel.width, 0.104);
   for (const opening of openings) {
+    if (kits && opening.kind === 'door') continue;
     const width = 0.045,
       base = opening.sill,
       top = base + opening.height;
@@ -65,7 +67,7 @@ export function wallFinishParts(house: Scene, room: Room, side: Side): FinishPar
         opening.height,
       );
     box(opening.offset, top + width / 2, opening.width + 2 * width, width);
-    if (opening.kind === 'window') {
+    if (opening.kind === 'window' && !kits) {
       // A restrained window latch: visual hardware stays within the frame.
       box(
         opening.offset - opening.width / 2 + 0.04,
@@ -80,9 +82,9 @@ export function wallFinishParts(house: Scene, room: Room, side: Side): FinishPar
   }
   return parts;
 }
-export function wallFinishGeometry(house: Scene, room: Room, side: Side) {
+export function wallFinishGeometry(house: Scene, room: Room, side: Side, kits = false) {
   const groups = new Map<string, THREE.BufferGeometry[]>();
-  for (const part of wallFinishParts(house, room, side)) {
+  for (const part of wallFinishParts(house, room, side, kits)) {
     const geometry = physicalUvs(new THREE.BoxGeometry(...part.size));
     if (part.material === 'trim' && part.size[0] > part.size[1]) {
       const uv = geometry.getAttribute('uv');
@@ -101,8 +103,10 @@ export function wallFinishGeometry(house: Scene, room: Room, side: Side) {
 }
 
 /** Batch repeated wall cells and frame bars by finish. Each material retains
- * exactly one outward and one inward draw group, with the original UVs. */
-export function wallSurfaceGeometry(house: Scene, room: Room, side: Side) {
+ * exactly one outward and one inward draw group, with the original UVs. With
+ * `kits`, glazing and door frames come from src/renderOpenings.ts instead;
+ * this procedural geometry remains the fallback while kits load or if they fail. */
+export function wallSurfaceGeometry(house: Scene, room: Room, side: Side, kits = false) {
   const groups = new Map<string, THREE.BufferGeometry[]>();
   const textureOrigin: [number, number, number] = [wallAxis(room, side).center, room.elevation, 0];
   const box = (
@@ -132,9 +136,9 @@ export function wallSurfaceGeometry(house: Scene, room: Room, side: Side) {
   };
   const openings = roomOpenings(house, room.id, side);
   for (const panel of wallPanels(house, room, side, false)) {
-    if (room[side] === 'glass' && !openings.length)
-      glazing(panel.offset, panel.bottom, panel.width, panel.height);
-    else
+    if (room[side] === 'glass' && !openings.length) {
+      if (!kits) glazing(panel.offset, panel.bottom, panel.width, panel.height);
+    } else
       box(
         'wall',
         [panel.offset, panel.bottom + panel.height / 2, 0],
@@ -142,7 +146,7 @@ export function wallSurfaceGeometry(house: Scene, room: Room, side: Side) {
         true,
       );
   }
-  for (const opening of openings) {
+  for (const opening of kits ? [] : openings) {
     if (opening.kind === 'window') {
       glazing(opening.offset, opening.sill, opening.width, opening.height);
       box('wood', [opening.offset, opening.sill - 0.035, 0], [opening.width + 0.12, 0.06, 0.24]);
@@ -164,6 +168,7 @@ export function wallSurfaceGeometry(house: Scene, room: Room, side: Side) {
       );
     }
   }
+  if (!groups.size) return [];
   return [...groups].map(([material, parts]) => {
     const geometry = interiorFaceGroups(
       mergeGeometries(parts)!,

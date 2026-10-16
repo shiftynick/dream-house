@@ -36,6 +36,7 @@ import { daylightSkyPixels, interiorExposure } from './renderLighting';
 import { RasterRenderer } from './rasterRenderer';
 import { FurnitureMesh, type FinishMaterial } from './renderFurniture';
 import { createFinishMaterial, disposeFinishMaterial } from './renderFinishes';
+import { openingKitGeometry } from './renderOpenings';
 import { Hearth } from './renderFire';
 import { wallFinishGeometry, wallSurfaceGeometry } from './architecturalFinish';
 import {
@@ -43,6 +44,7 @@ import {
   hasBackground,
   surfaceTextures,
   finishSet,
+  openingKits,
   useRenderAssets,
   type MaterialSurface,
 } from './renderAssets';
@@ -278,15 +280,37 @@ function RoomMesh({
   const isSelected = (surface: DesignSurface) =>
     selection?.roomId === r.id && selection.surface === surface;
   const slabs = useMemo(() => roomSlabs(house, r), [house, r]);
+  const assetsVersion = useRenderAssets();
+  // Prebuilt window/door kits per wall; null keeps the procedural openings.
+  const openingParts = useMemo(() => {
+    const kits = openingKits();
+    const parts = Object.fromEntries(
+      (['north', 'south', 'east', 'west'] as const).map((side) => [
+        side,
+        openingKitGeometry(house, r, side, kits),
+      ]),
+    );
+    return Object.values(parts).every(Boolean)
+      ? (parts as Record<Side, { material: string; geometry: THREE.BufferGeometry }[]>)
+      : null;
+  }, [house, r, assetsVersion]);
+  useEffect(
+    () => () =>
+      Object.values(openingParts ?? {})
+        .flat()
+        .forEach((part) => part.geometry.dispose()),
+    [openingParts],
+  );
+  const kits = !!openingParts;
   const finishes = useMemo(
     () =>
       Object.fromEntries(
         (['north', 'south', 'east', 'west'] as const).map((side) => [
           side,
-          wallFinishGeometry(house, r, side),
+          wallFinishGeometry(house, r, side, kits),
         ]),
       ),
-    [house, r],
+    [house, r, kits],
   );
   useEffect(
     () => () =>
@@ -301,10 +325,10 @@ function RoomMesh({
       Object.fromEntries(
         (['north', 'south', 'east', 'west'] as const).map((side) => [
           side,
-          wallSurfaceGeometry(house, r, side),
+          wallSurfaceGeometry(house, r, side, kits),
         ]),
       ),
-    [house, r],
+    [house, r, kits],
   );
   useEffect(
     () => () =>
@@ -464,6 +488,15 @@ function RoomMesh({
               </mesh>
             )}
           </mesh>
+        ))}
+        {openingParts?.[side].map((part) => (
+          <mesh
+            key={`opening-${part.material}`}
+            geometry={part.geometry}
+            material={wallMaterials(side, part.material)}
+            castShadow={part.material !== 'glass'}
+            receiveShadow
+          />
         ))}
         {generated.caps[side] &&
           generatedMesh(

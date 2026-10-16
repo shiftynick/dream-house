@@ -386,6 +386,37 @@ for (const item of sources.environment ?? []) {
   console.log(`${item.id}: ${(bytes / 1e6).toFixed(2)} MB background`);
 }
 
+// Window and door kits are authored procedurally in Blender (no downloaded
+// source): true-size frames, sashes and hardware around a native opening.
+const openingsMeta = path.join(previewRoot, 'openings.json');
+await run(
+  blender,
+  [
+    '-b',
+    '--factory-startup',
+    '-noaudio',
+    '--python',
+    path.resolve('scripts/assets/build_openings.py'),
+    '--',
+    '--output-dir',
+    path.join(publicRoot, 'openings'),
+    '--meta',
+    openingsMeta,
+    '--preview-dir',
+    previewRoot,
+  ],
+  { maxBuffer: 64 * 1024 * 1024 },
+);
+const openings = Object.entries(
+  JSON.parse(await readFile(openingsMeta, 'utf8')) as Record<string, Record<string, unknown>>,
+).map(([id, info]) => ({
+  id,
+  url: `/assets/openings/${id}.glb`,
+  ...info,
+  source: { library: 'Terrain', name: id, authors: ['Terrain asset pipeline'], license: 'CC0-1.0' },
+}));
+console.log(`openings: ${openings.map((item) => item.id).join(', ')}`);
+
 const draco = path.join(publicRoot, 'draco');
 await mkdir(draco, { recursive: true });
 for (const file of ['draco_decoder.wasm', 'draco_wasm_wrapper.js'])
@@ -396,7 +427,8 @@ for (const file of ['draco_decoder.wasm', 'draco_wasm_wrapper.js'])
 
 await writeFile(
   path.join(publicRoot, 'manifest.json'),
-  JSON.stringify({ version: 1, furniture, textures, materials, environment }, null, 2) + '\n',
+  JSON.stringify({ version: 1, furniture, textures, materials, openings, environment }, null, 2) +
+    '\n',
 );
 const attribution = (source: { library: string; name: string; authors: string[]; url: string }) =>
   `${source.name} by ${source.authors.join(', ')} (${source.library}, CC0)`;

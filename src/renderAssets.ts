@@ -4,6 +4,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import type { Furniture, FurnitureKind } from '../shared/model';
 import { makeSurfaceTextures, surfaceScale, type SurfaceKind } from './renderMaterials';
+import type { OpeningAsset, OpeningKit, OpeningKits } from './renderOpenings';
 
 /** Optional photographic assets built by scripts/assets/build-assets.ts.
  * Everything here is additive: a missing manifest, model or texture leaves the
@@ -53,6 +54,7 @@ export type AssetManifest = {
   furniture: FurnitureAsset[];
   textures: TextureAsset[];
   materials?: MaterialAsset[];
+  openings?: OpeningAsset[];
   environment?: EnvironmentAsset[];
 };
 
@@ -89,6 +91,7 @@ const state = {
   defaults: new Map<FurnitureKind, string>(),
   photos: new Map<MaterialSurface, PhotoSet>(),
   library: new Map<string, MaterialAsset>(),
+  openings: {} as OpeningKits,
   finishes: new Map<string, FinishSet | 'loading' | 'failed'>(),
   backgrounds: new Map<string, HTMLImageElement>(),
   failures: [] as string[],
@@ -163,6 +166,22 @@ export function loadRenderAssets(): Promise<void> {
             ['color', 'normal', 'arm'].map((map) => loadImage(`${asset.url}/${map}.jpg`)),
           );
           state.photos.set(asset.surface, { asset, color, normal, arm });
+        } catch (error) {
+          state.failures.push(`${asset.id}: ${error instanceof Error ? error.message : error}`);
+        }
+      }),
+      ...(manifest.openings ?? []).map(async (asset) => {
+        try {
+          const model = await loadModel(loader, asset as unknown as FurnitureAsset);
+          const kit: OpeningKit = {
+            asset,
+            parts: model.parts.map(({ geometry, material }) => ({
+              geometry,
+              role: material.name.split('.')[0],
+              rigid: material.name.startsWith('hardware'),
+            })),
+          };
+          state.openings[asset.id as keyof OpeningKits] = kit;
         } catch (error) {
           state.failures.push(`${asset.id}: ${error instanceof Error ? error.message : error}`);
         }
@@ -264,6 +283,11 @@ export function renderAssetFailures() {
   return [...state.failures];
 }
 
+/** Loaded window/door kits; an empty record keeps procedural openings. */
+export function openingKits(): OpeningKits {
+  return state.openings;
+}
+
 export function hasBackground(light: string) {
   return state.backgrounds.has(light);
 }
@@ -339,22 +363,27 @@ function axisMap(native: number, target: number, zone: Range | undefined, low: n
 /** Replace the pipeline's per-face projection axis (`uv1`.x: 0 = x, 1 = y,
  * 2 = z) with box-projected UVs in meters, measured on the fitted piece so a
  * library finish keeps its real-world scale on stretched zones too. */
-export function projectedUvs(geometry: THREE.BufferGeometry) {
+export function projectedUvs(geometry: THREE.BufferGeometry, target: 'uv' | 'uv1' = 'uv1') {
   const axes = geometry.getAttribute('uv1') as THREE.BufferAttribute | undefined;
   if (!axes) return;
   const position = geometry.getAttribute('position') as THREE.BufferAttribute;
   const uv = new Float32Array(position.count * 2);
   for (let i = 0; i < position.count; i++) {
-    const axis = Math.round(axes.getX(i));
+    const code = Math.round(axes.getX(i));
+    // Codes 3-5 mark long horizontal members whose grain turns to run along them.
+    const axis = code % 3,
+      swap = code >= 3;
     const x = position.getX(i),
       y = position.getY(i),
       z = position.getZ(i);
     // Library grain runs along v: up the piece on vertical faces (legs, panels)
     // and along the width on horizontal ones (tops, seats).
-    uv[i * 2] = axis === 0 || axis === 1 ? z : x;
-    uv[i * 2 + 1] = axis === 1 ? x : y;
+    const u = axis === 0 || axis === 1 ? z : x,
+      v = axis === 1 ? x : y;
+    uv[i * 2] = swap ? v : u;
+    uv[i * 2 + 1] = swap ? u : v;
   }
-  geometry.setAttribute('uv1', new THREE.BufferAttribute(uv, 2));
+  geometry.setAttribute(target, new THREE.BufferAttribute(uv, 2));
 }
 
 /** Fit a model to a saved piece's exact envelope. Geometry is owned by the caller. */
