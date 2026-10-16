@@ -51,7 +51,7 @@ def parse_args():
     parser.add_argument("--split", action="append", default=[],
                         help="MATERIAL:SATURATED_SLOT:REST_SLOT island split of a shared atlas")
     parser.add_argument("--classify", action="append", default=[],
-                        help='JSON {"material", "default", "rules": [{"slot", "sat": [lo, hi], "val": [lo, hi]}]}: '
+                        help='JSON {"material", "default", "rules": [{"slot", "hue"|"sat"|"val"|"top"|"bottom": [lo, hi]}]}: '
                              "assign each UV island of a shared atlas by its mean texel color and top height")
     parser.add_argument("--slot-preview", help="workbench render colored by finish slot")
     parser.add_argument("--thumbnail", help="Cycles studio thumbnail (PNG) for the catalog picker")
@@ -354,8 +354,8 @@ def island_colors(piece, index, rgb):
                 y = min(height - 1, max(0, int((sample.y % 1.0) * height)))
                 samples.append(rgb[y, x])
         if faces:
-            top = max((piece.matrix_world @ mesh.vertices[v].co).z for f in faces for v in f.vertices)
-            yield faces, np.mean(samples, axis=0), top
+            heights = [(piece.matrix_world @ mesh.vertices[v].co).z for f in faces for v in f.vertices]
+            yield faces, np.mean(samples, axis=0), max(heights), min(heights)
 
 
 def classify_material(piece, rule_set):
@@ -369,14 +369,15 @@ def classify_material(piece, rule_set):
     import colorsys
     low, high = world_bounds(piece)
     span = max(high.z - low.z, 1e-6)
-    for faces, color, top in list(island_colors(piece, index, rgb)):
-        _, sat, val = colorsys.rgb_to_hsv(*[float(c) for c in color[:3]])
-        # `top`: the island's highest point as a fraction of the piece height (legs sit low).
-        height = (top - low.z) / span
+    for faces, color, top, bottom in list(island_colors(piece, index, rgb)):
+        hue, sat, val = colorsys.rgb_to_hsv(*[float(c) for c in color[:3]])
+        # `top`/`bottom`: the island's highest/lowest point as a fraction of the
+        # piece height (legs sit low; a seat cushion sits in one height band).
+        measured = {"hue": hue, "sat": sat, "val": val,
+                    "top": (top - low.z) / span, "bottom": (bottom - low.z) / span}
         slot = next((rule["slot"] for rule in rule_set.get("rules", [])
-                     if rule.get("sat", [0, 1])[0] <= sat <= rule.get("sat", [0, 1])[1]
-                     and rule.get("val", [0, 1])[0] <= val <= rule.get("val", [0, 1])[1]
-                     and rule.get("top", [0, 1])[0] <= height <= rule.get("top", [0, 1])[1]),
+                     if all(rule.get(key, [0, 1])[0] <= value <= rule.get(key, [0, 1])[1]
+                            for key, value in measured.items())),
                     rule_set.get("default", "other"))
         if slot not in copies:
             copy = material.copy()

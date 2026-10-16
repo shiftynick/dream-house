@@ -188,7 +188,7 @@
       },
       "triangles": 5826,
       "textureSize": 1024,
-      "bytes": 563856,
+      "bytes": 562912,
       "source": {
         "library": "Poly Haven",
         "id": "painted_wooden_sofa",
@@ -216,11 +216,12 @@
       ],
       "slots": [
         "metal",
-        "upholstery"
+        "upholstery",
+        "wood"
       ],
       "triangles": 6148,
       "textureSize": 1024,
-      "bytes": 516524,
+      "bytes": 517816,
       "source": {
         "library": "Poly Haven",
         "id": "mid_century_lounge_chair",
@@ -234,7 +235,7 @@
     },
     {
       "id": "armchair-bergere",
-      "name": "Upholstered berg\u00e8re",
+      "name": "Upholstered bergère",
       "style": "classic",
       "thumbnail": "/assets/thumbnails/armchair-bergere.jpg",
       "kinds": [
@@ -1353,7 +1354,7 @@
     },
     {
       "id": "boucle",
-      "name": "Boucl\u00e9",
+      "name": "Bouclé",
       "category": "fabric",
       "albedo": "luminance",
       "url": "/assets/materials/boucle",

@@ -298,7 +298,8 @@
       ],
       "slots": [
         "metal",
-        "upholstery"
+        "upholstery",
+        "wood"
       ],
       "size": [
         1.0086,

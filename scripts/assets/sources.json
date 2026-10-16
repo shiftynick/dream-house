@@ -121,9 +121,21 @@
           "rules": [
             {
               "slot": "upholstery",
+              "hue": [
+                0.06,
+                0.2
+              ],
               "sat": [
                 0,
-                0.2
+                0.25
+              ],
+              "top": [
+                0.43,
+                0.5
+              ],
+              "bottom": [
+                0.43,
+                0.5
               ],
               "val": [
                 0.4,
@@ -153,13 +165,20 @@
       "classify": [
         {
           "material": "mid_century_lounge_chair",
-          "default": "upholstery",
+          "default": "wood",
           "rules": [
             {
               "slot": "metal",
               "sat": [
                 0,
                 0.2
+              ]
+            },
+            {
+              "slot": "upholstery",
+              "sat": [
+                0.2,
+                0.52
               ]
             }
           ]

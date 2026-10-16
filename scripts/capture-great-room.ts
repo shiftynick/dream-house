@@ -65,6 +65,21 @@ if (args.includes('--demo-catalog')) {
   plant('entry', 'demo-plant-entry', 'plant-leafy', -1.6, 2.9, 1.0);
   plant('primary-suite', 'demo-plant-suite', 'plant-aloe', -4.3, -2.4, 0.7);
 }
+// --demo-slots shows the two atlas-split models with swapped finishes (isolated copy only).
+if (args.includes('--demo-slots')) {
+  const hall = scene.rooms.find((item) => item.id === 'great-hall');
+  const pieces = (kind: string) => (hall?.furniture ?? []).filter((item) => item.kind === kind);
+  const sofa = pieces('sofa')[1],
+    armchair = pieces('armchair')[1];
+  if (sofa)
+    Object.assign(sofa, chooseModelPatch(sofa, 'sofa-painted-settle'), {
+      finishes: { upholstery: 'boucle', wood: 'pale-oak' },
+    });
+  if (armchair)
+    Object.assign(armchair, chooseModelPatch(armchair, 'armchair-mid-century'), {
+      finishes: { upholstery: 'leather-cognac', wood: 'pale-oak' },
+    });
+}
 // --demo-finishes applies library finishes to this isolated copy only.
 if (args.includes('--demo-finishes')) {
   const byId = (id: string) => scene.rooms.find((item) => item.id === id);
