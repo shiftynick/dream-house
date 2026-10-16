@@ -1,6 +1,7 @@
 import catalog from './asset-catalog.json';
 import {
   finishSlotSchema,
+  furnitureKindSchema,
   type FinishSlot,
   type Finishes,
   type Furniture,
@@ -154,3 +155,64 @@ export function chooseModelPatch(item: Pick<Furniture, 'kind'>, id: string): Par
   return { model: id, width: round(width), depth: round(depth), height: round(height) };
 }
 
+/** The library as the design agent sees it: model IDs by furniture kind and
+ * finish IDs by slot, generated from the bundled catalog so it cannot drift
+ * from public/assets/manifest.json. */
+export function furnitureLibrary() {
+  const kinds = furnitureKindSchema.options.map((kind) => ({
+    kind,
+    models: modelsForKind(kind).map((model) => ({
+      id: model.id,
+      name: model.name ?? model.id,
+      style: model.style,
+      default: Boolean(model.default),
+      stretches: Boolean(model.stretches),
+      slots: finishSlots.filter((slot) => model.slots.includes(slot)),
+      finishes: model.finishes ?? {},
+      size: modelDimensions(model),
+    })),
+    builtinSlots: proceduralKindSlots[kind],
+  }));
+  const finishes = finishSlots.map((slot) => ({
+    slot,
+    ids: finishOptions(slot).map((item) => item.id),
+    tinted: finishOptions(slot)
+      .filter((item) => item.tinted)
+      .map((item) => item.id),
+  }));
+  return { kinds, finishes };
+}
+
+const size = (value: number) => Math.round(value * 100) / 100;
+/** System-prompt section listing every catalog model and finish ID. */
+export function furnitureLibraryPrompt() {
+  const { kinds, finishes } = furnitureLibrary();
+  const models = kinds.map(({ kind, models, builtinSlots }) => {
+    const listed = models.map((model) => {
+      const traits = [
+        model.style,
+        model.default ? 'DEFAULT' : '',
+        model.stretches
+          ? 'fits any size'
+          : `native ${size(model.size.width)}x${size(model.size.depth)}x${size(model.size.height)}`,
+        `slots ${model.slots.join('/') || 'none'}`,
+        ...Object.entries(model.finishes).map(([slot, id]) => `default ${slot} ${id}`),
+      ].filter(Boolean);
+      return `${model.id} (${model.name}; ${traits.join('; ')})`;
+    });
+    const builtin = `builtin (parametric${models.some((model) => model.default) ? '' : '; DEFAULT'}; slots ${builtinSlots.join('/') || 'none'})`;
+    return `- ${kind}: ${[...listed, builtin].join(', ')}`;
+  });
+  return [
+    'FURNITURE MODELS AND FINISHES',
+    "A piece renders a catalog model or the built-in parametric piece. Set `model` in add_furniture/update_furniture to an ID listed for that piece's kind, or 'builtin' for the parametric piece. A new piece without `model` uses the kind's DEFAULT; an update without it keeps the current model, so name the DEFAULT's ID to switch back. Models that fit any size keep the saved width/depth/height. For other models also set width/depth/height (meters, WxDxH) to the native size listed, so they are not distorted. Choose models and finishes that suit the requested style; do not change them unprompted.",
+    "Finishes: `finishes` {slot: id} on a piece, or update_room furnitureFinishes for every piece in a room (a piece's own finish wins). Both replace the whole map, so include the slots you keep. Only the slots its model lists take effect, and an ID must belong to that slot. Without one, a model's listed default finish applies, else its own material. Fabrics marked * take the palette colour.",
+    'Models by kind (WxDxH in meters):',
+    ...models,
+    'Finish IDs by slot:',
+    ...finishes.map(
+      ({ slot, ids, tinted }) =>
+        `- ${slot}: ${ids.map((id) => (tinted.includes(id) ? `${id}*` : id)).join(', ')}`,
+    ),
+  ].join('\n');
+}
